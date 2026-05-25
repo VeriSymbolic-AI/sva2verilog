@@ -18,8 +18,13 @@ def _make_loc(file: str = "test.sv", line: int = 3, col: int = 5) -> SourceLoc:
 
 
 def _labeled_checker() -> CheckerNode:
-    """Return the CheckerNode that should match tests/golden/bool_labeled.sv."""
-    loc = _make_loc()
+    """Return the CheckerNode that should match tests/golden/bool_labeled.sv.
+
+    The source location matches the ConcurrentAssertion position in
+    tests/fixtures/bool_labeled.json so that the integration golden comparison
+    and the emitter unit test both use the same reference.
+    """
+    loc = _make_loc(file="test_labeled.sv", line=2, col=14)
     return CheckerNode(
         template_name="bool_expr",
         module_name="sva_my_check",
@@ -129,10 +134,10 @@ def test_emit_contains_version_comment() -> None:
 
 
 def test_emit_contains_source_loc_comment() -> None:
-    """Header comment includes the source location."""
+    """Header comment includes the source location (matches bool_labeled.json fixture)."""
     checker = _labeled_checker()
     result = emit(checker)
-    assert "test.sv:3:5" in result
+    assert "test_labeled.sv:2:14" in result
 
 
 def test_emit_golden_match() -> None:

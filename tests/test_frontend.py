@@ -138,4 +138,5 @@ def unittest_mock_open(read_data: str = "") -> MagicMock:
     """Thin wrapper around unittest.mock.mock_open that works with 'with open'."""
     from unittest.mock import mock_open
 
-    return mock_open(read_data=read_data)  # type: ignore[return-value]
+    result: MagicMock = mock_open(read_data=read_data)
+    return result
