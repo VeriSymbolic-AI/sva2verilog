@@ -15,7 +15,7 @@ Each phase is a **vertical MVP slice** — it produces something that works end-
 
 ---
 
-## Phase 1 — Foundation: IR + Slang Frontend + Boolean Assert → SV Monitor
+## Phase 1: Foundation — IR + Slang Frontend + Boolean Assert → SV Monitor
 
 **Mode:** mvp
 **Delivers:** `sva2rtl bool_assert.sv` works end-to-end — the entire compiler pipeline exists, handles boolean assertions, and produces a valid, compilable SV monitor with the standard interface.
@@ -49,7 +49,7 @@ PARSE-01, PARSE-02, PARSE-04, PARSE-05, OUT-01, OUT-02, OUT-03, OUT-07, OUT-08, 
 
 ---
 
-## Phase 2 — Core Sequential Operators: `##N`, `##[M:N]`, `|->`, `|=>`
+## Phase 2: Core Sequential Operators — `##N`, `##[M:N]`, `|->`, `|=>`
 
 **Mode:** mvp
 **Delivers:** The backbone of >90% of real SVA assertions compiles end-to-end. Concurrent overlapping threads are tracked correctly via bit-vector method. Debug outputs make correctness verifiable.
@@ -82,7 +82,7 @@ OP-01, OP-02, OP-03, OP-04, OUT-06, TEST-02, TEST-05, TEST-06
 
 ---
 
-## Phase 3 — Remaining Tier 1 Operators + Named Sequences + Simulation Validation
+## Phase 3: Remaining Tier 1 Operators + Named Sequences + Simulation Validation
 
 **Mode:** mvp
 **Delivers:** Full Tier 1 SVA coverage: consecutive repetition, all `$`-functions, `disable iff`, named sequences/properties, `bind` generation, and behavioral simulation oracle validation. Every generated monitor is cross-checked against Icarus Verilog.
@@ -115,7 +115,7 @@ OP-05, OP-06, OP-07, OP-08, OP-09, OP-10, PARSE-03, OUT-04, TEST-03, TEST-04
 
 ---
 
-## Phase 4 — Normalization + Composition Engine
+## Phase 4: Normalization + Composition Engine
 
 **Mode:** mvp
 **Delivers:** A proper token-passing composition engine (TIMA Lab architecture) with a normalization preprocessing pass. Complex multi-operator chains that were handled ad-hoc in Phase 2–3 now route through the canonical architecture. `--dump-tree` becomes the debugging window into composition.
@@ -146,7 +146,7 @@ PIPE-01, PIPE-02
 
 ---
 
-## Phase 5 — Optimization Passes
+## Phase 5: Optimization Passes
 
 **Mode:** mvp
 **Delivers:** Area-efficient output. Identical subexpressions share hardware (CSE). Repeated counters with the same parameters share a single module instance. Unreachable FSM states are pruned. Optimization is provably semantics-preserving via before/after oracle parity.
@@ -177,7 +177,7 @@ PIPE-03, PIPE-04, PIPE-05
 
 ---
 
-## Phase 6 — CLI Polish + Verilog-2001 + Integration Testing
+## Phase 6: CLI Polish + Verilog-2001 + Integration Testing
 
 **Mode:** mvp
 **Delivers:** Production-ready CLI with full debug modes, Verilog-2001 output for Icarus/broad-compatibility targets, and a locked integration test suite covering all 40 v1 requirements. The tool is releasable.
