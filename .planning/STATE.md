@@ -2,21 +2,21 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-current_phase: Pre-development (roadmap created, no code written)
+current_phase: 01
 status: unknown
-last_updated: "2026-05-25T10:15:35.525Z"
+last_updated: "2026-05-25T12:00:00.000Z"
 progress:
   total_phases: 6
   completed_phases: 0
   total_plans: 5
-  completed_plans: 0
-  percent: 0
+  completed_plans: 1
+  percent: 20
 ---
 
 # Project State: sva2rtl
 
 **Last updated:** 2026-05-25
-**Current phase:** Pre-development (roadmap created, no code written)
+**Current phase:** 01
 **Mode:** mvp
 
 ---
@@ -29,8 +29,8 @@ progress:
 | Requirements | ✅ Defined (40 v1 requirements, traceability updated) |
 | Research | ✅ Complete (HIGH confidence across all areas) |
 | Architecture | ✅ Documented (token-passing, 9-stage pipeline) |
-| Code | ❌ None yet — Phase 1 not started |
-| Tests | ❌ None yet |
+| Code | ✅ Plan 1.1 complete — ir.py, errors.py, tests |
+| Tests | ✅ 31 unit tests passing (ir.py + errors.py) |
 | CI | ❌ Not configured |
 
 ---
@@ -39,7 +39,7 @@ progress:
 
 | Phase | Name | Status | Requirements |
 |-------|------|--------|-------------|
-| 1 | Foundation: IR + Slang + Boolean → SV Monitor | 🔲 Not started | PARSE-01/02/04/05, OUT-01/02/03/07/08, CLI-05/06, TEST-01 |
+| 1 | Foundation: IR + Slang + Boolean → SV Monitor | 🔄 In Progress (1/5 plans) | PARSE-01/02/04/05, OUT-01/02/03/07/08, CLI-05/06, TEST-01 |
 | 2 | Core Sequential Operators (##N, |->)  | 🔲 Not started | OP-01/02/03/04, OUT-06, TEST-02/05/06 |
 | 3 | Remaining Tier 1 + Sim Validation | 🔲 Not started | OP-05–10, PARSE-03, OUT-04, TEST-03/04 |
 | 4 | Normalization + Composition Engine | 🔲 Not started | PIPE-01/02 |
@@ -50,11 +50,11 @@ progress:
 
 ## Active Phase
 
-**None** — project is in pre-development. Phase 1 is next.
+**Phase 1** — Foundation: IR + Slang + Boolean → SV Monitor
 
 ### Phase 1 Plan Checklist
 
-- [ ] **1.1** Project skeleton + SVA IR (`ir.py`, `errors.py`, `checker_node.py`)
+- [x] **1.1** Project skeleton + SVA IR (`ir.py`, `errors.py`, package setup)
 - [ ] **1.2** Slang frontend + AST importer (`frontend.py`, `ast_importer.py`)
 - [ ] **1.3** Template emitter + bool_expr template (`emitter.py`, `templates/bool_expr.sv.j2`)
 - [ ] **1.4** CLI entry point + error handling (`cli.py`)
@@ -112,6 +112,7 @@ progress:
 | Date | Event |
 |------|-------|
 | 2026-05-25 | Project initialized; research complete; roadmap created |
+| 2026-05-25 | Plan 1.1 complete — project skeleton, ir.py, errors.py, 31 unit tests |
 
 ---
 

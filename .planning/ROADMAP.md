@@ -20,6 +20,7 @@ Each phase is a **vertical MVP slice** — it produces something that works end-
 **Mode:** mvp
 **Delivers:** `sva2rtl bool_assert.sv` works end-to-end — the entire compiler pipeline exists, handles boolean assertions, and produces a valid, compilable SV monitor with the standard interface.
 **Unlocks:** every subsequent phase (all downstream work depends on stable IR, token-passing interface contract, and slang ingestion)
+**Progress:** 1/5 plans complete (Plan 1.1 ✅)
 
 ### Why This Slice
 
@@ -29,7 +30,7 @@ The most dangerous pitfalls (vacuous satisfaction, missing source location, sile
 
 | # | Plan | Key Deliverables |
 |---|------|-----------------|
-| 1.1 | Project skeleton + SVA IR | `ir.py` (frozen dataclasses: `BoolExpr`, `SeqConcat`, `PropImplication`, `SourceLoc`), `errors.py` (error types + named codes), `checker_node.py` (CheckerNode with `start`/`active`/`pass`/`fail`/`attempt_fired` port contract) |
+| 1.1 | Project skeleton + SVA IR | `ir.py` (frozen dataclasses: `BoolExpr`, `SeqConcat`, `PropImplication`, `SourceLoc`), `errors.py` (error types + named codes), `checker_node.py` (CheckerNode with `start`/`active`/`pass`/`fail`/`attempt_fired` port contract) | ✅ 2026-05-25 |
 | 1.2 | Slang frontend + AST importer | `frontend.py` (slang subprocess invocation, `--ast-json` capture), `ast_importer.py` (JSON → IR dispatch for boolean expressions + clock event extraction + source location threading) |
 | 1.3 | Template emitter + bool_expr template | `emitter.py` skeleton, `templates/bool_expr.sv.j2` (1-FF registered output, synchronous reset, standard port interface), `templates/checker_top.sv.j2` stub, Jinja2 pipeline wired end-to-end |
 | 1.4 | CLI entry point + error handling | `cli.py` (click), `--output` flag, exit codes (0/1/2/3), unsupported-construct error with source location, slang-not-found detection with install hint |
