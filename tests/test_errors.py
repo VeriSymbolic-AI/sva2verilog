@@ -56,7 +56,7 @@ def test_unsupported_construct_format() -> None:
 
 def test_unsupported_construct_no_loc() -> None:
     """UnsupportedConstruct omits location prefix when source_loc is None."""
-    err = UnsupportedConstruct(message="use future version", construct_name="|->" )
+    err = UnsupportedConstruct(message="use future version", construct_name="|->")
     result = str(err)
     assert "SVA-E002" in result
     assert "|->" in result

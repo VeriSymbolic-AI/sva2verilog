@@ -52,7 +52,8 @@ def invoke_slang(sv_file: Path, slang_path: str = "slang") -> dict[str, object]:
 
         cmd = [
             slang_path,
-            "--ast-json", tmp_path,
+            "--ast-json",
+            tmp_path,
             "--ast-json-source-info",
             str(sv_file),
         ]
