@@ -1,0 +1,114 @@
+{
+  "design": {
+    "members": [
+      {
+        "kind": "Instance",
+        "name": "test_delay",
+        "source_file_start": "test_delay.sv",
+        "source_line_start": 1,
+        "source_column_start": 1,
+        "body": {
+          "kind": "InstanceBody",
+          "members": [
+            {
+              "kind": "Port",
+              "name": "clk",
+              "source_file_start": "test_delay.sv",
+              "source_line_start": 1,
+              "source_column_start": 28
+            },
+            {
+              "kind": "Port",
+              "name": "a",
+              "source_file_start": "test_delay.sv",
+              "source_line_start": 1,
+              "source_column_start": 33
+            },
+            {
+              "kind": "Port",
+              "name": "b",
+              "source_file_start": "test_delay.sv",
+              "source_line_start": 1,
+              "source_column_start": 36
+            },
+            {
+              "kind": "ConcurrentAssertion",
+              "assertionKind": "assert",
+              "source_file_start": "test_delay.sv",
+              "source_line_start": 2,
+              "source_column_start": 3,
+              "body": {
+                "kind": "PropertySpec",
+                "source_file_start": "test_delay.sv",
+                "source_line_start": 2,
+                "source_column_start": 19,
+                "clocking": {
+                  "kind": "TimingControl",
+                  "source_file_start": "test_delay.sv",
+                  "source_line_start": 2,
+                  "source_column_start": 19,
+                  "event": {
+                    "kind": "SignalEvent",
+                    "edge": "posedge",
+                    "source_file_start": "test_delay.sv",
+                    "source_line_start": 2,
+                    "source_column_start": 20,
+                    "expr": {
+                      "kind": "NamedValue",
+                      "symbol": "6338700060480 clk",
+                      "source_file_start": "test_delay.sv",
+                      "source_line_start": 2,
+                      "source_column_start": 28
+                    }
+                  }
+                },
+                "expr": {
+                  "kind": "SequenceConcat",
+                  "source_file_start": "test_delay.sv",
+                  "source_line_start": 2,
+                  "source_column_start": 32,
+                  "elements": [
+                    {
+                      "sequence": {
+                        "kind": "SequenceExpr",
+                        "source_file_start": "test_delay.sv",
+                        "source_line_start": 2,
+                        "source_column_start": 32,
+                        "expr": {
+                          "kind": "NamedValue",
+                          "symbol": "6338700060481 a",
+                          "source_file_start": "test_delay.sv",
+                          "source_line_start": 2,
+                          "source_column_start": 32
+                        }
+                      },
+                      "min": "1",
+                      "max": "1"
+                    },
+                    {
+                      "sequence": {
+                        "kind": "SequenceExpr",
+                        "source_file_start": "test_delay.sv",
+                        "source_line_start": 2,
+                        "source_column_start": 37,
+                        "expr": {
+                          "kind": "NamedValue",
+                          "symbol": "6338700060482 b",
+                          "source_file_start": "test_delay.sv",
+                          "source_line_start": 2,
+                          "source_column_start": 37
+                        }
+                      },
+                      "min": "0",
+                      "max": "0"
+                    }
+                  ]
+                }
+              }
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,139 @@
+{
+  "design": {
+    "members": [
+      {
+        "kind": "Instance",
+        "name": "test_complex",
+        "source_file_start": "test_complex.sv",
+        "source_line_start": 1,
+        "source_column_start": 1,
+        "body": {
+          "kind": "InstanceBody",
+          "members": [
+            {
+              "kind": "Port",
+              "name": "clk",
+              "source_file_start": "test_complex.sv",
+              "source_line_start": 1,
+              "source_column_start": 30
+            },
+            {
+              "kind": "Port",
+              "name": "a",
+              "source_file_start": "test_complex.sv",
+              "source_line_start": 1,
+              "source_column_start": 35
+            },
+            {
+              "kind": "Port",
+              "name": "b",
+              "source_file_start": "test_complex.sv",
+              "source_line_start": 1,
+              "source_column_start": 38
+            },
+            {
+              "kind": "Port",
+              "name": "c",
+              "source_file_start": "test_complex.sv",
+              "source_line_start": 1,
+              "source_column_start": 41
+            },
+            {
+              "kind": "ConcurrentAssertion",
+              "assertionKind": "assert",
+              "source_file_start": "test_complex.sv",
+              "source_line_start": 2,
+              "source_column_start": 3,
+              "body": {
+                "kind": "PropertySpec",
+                "source_file_start": "test_complex.sv",
+                "source_line_start": 2,
+                "source_column_start": 19,
+                "clocking": {
+                  "kind": "TimingControl",
+                  "source_file_start": "test_complex.sv",
+                  "source_line_start": 2,
+                  "source_column_start": 19,
+                  "event": {
+                    "kind": "SignalEvent",
+                    "edge": "posedge",
+                    "source_file_start": "test_complex.sv",
+                    "source_line_start": 2,
+                    "source_column_start": 20,
+                    "expr": {
+                      "kind": "NamedValue",
+                      "symbol": "6338700060480 clk",
+                      "source_file_start": "test_complex.sv",
+                      "source_line_start": 2,
+                      "source_column_start": 28
+                    }
+                  }
+                },
+                "expr": {
+                  "kind": "BinaryPropertyExpr",
+                  "op": "Or",
+                  "source_file_start": "test_complex.sv",
+                  "source_line_start": 2,
+                  "source_column_start": 32,
+                  "left": {
+                    "kind": "BinaryPropertyExpr",
+                    "op": "And",
+                    "source_file_start": "test_complex.sv",
+                    "source_line_start": 2,
+                    "source_column_start": 33,
+                    "left": {
+                      "kind": "SequenceExpr",
+                      "source_file_start": "test_complex.sv",
+                      "source_line_start": 2,
+                      "source_column_start": 33,
+                      "expr": {
+                        "kind": "NamedValue",
+                        "symbol": "6338700060481 a",
+                        "source_file_start": "test_complex.sv",
+                        "source_line_start": 2,
+                        "source_column_start": 33
+                      }
+                    },
+                    "right": {
+                      "kind": "SequenceExpr",
+                      "source_file_start": "test_complex.sv",
+                      "source_line_start": 2,
+                      "source_column_start": 38,
+                      "expr": {
+                        "kind": "NamedValue",
+                        "symbol": "6338700060482 b",
+                        "source_file_start": "test_complex.sv",
+                        "source_line_start": 2,
+                        "source_column_start": 38
+                      }
+                    }
+                  },
+                  "right": {
+                    "kind": "UnaryPropertyExpr",
+                    "op": "Not",
+                    "source_file_start": "test_complex.sv",
+                    "source_line_start": 2,
+                    "source_column_start": 44,
+                    "expr": {
+                      "kind": "SequenceExpr",
+                      "source_file_start": "test_complex.sv",
+                      "source_line_start": 2,
+                      "source_column_start": 45,
+                      "expr": {
+                        "kind": "NamedValue",
+                        "symbol": "6338700060483 c",
+                        "source_file_start": "test_complex.sv",
+                        "source_line_start": 2,
+                        "source_column_start": 45
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    ]
+  }
+}
