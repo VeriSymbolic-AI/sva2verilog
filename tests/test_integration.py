@@ -1,0 +1,223 @@
+"""Integration tests — full pipeline from JSON fixture to emitted SV.
+
+These tests bypass the slang subprocess and exercise:
+    ast_importer.import_assertion → composer.compose → emitter.emit
+
+No slang binary is required; all tests use pre-captured JSON fixtures in
+``tests/fixtures/``.
+
+Coverage:
+- PARSE-05: source location threading from JSON through to emitted comment
+- OUT-02: registered (not combinational) outputs
+- OUT-03: synchronous reset on all flip-flops
+"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from typing import cast
+
+import pytest
+
+from sva2rtl.ast_importer import import_assertion
+from sva2rtl.composer import compose
+from sva2rtl.emitter import emit
+from sva2rtl.errors import UnsupportedConstruct
+from sva2rtl.ir import BoolExpr
+from tests.conftest import assert_golden
+
+# ── Fixture paths ─────────────────────────────────────────────────────────
+
+_FIXTURES = Path(__file__).parent / "fixtures"
+_GOLDEN = Path(__file__).parent / "golden"
+
+
+def _load(name: str) -> dict[str, object]:
+    """Load a JSON fixture file from ``tests/fixtures/``."""
+    return cast(dict[str, object], json.loads((_FIXTURES / name).read_text(encoding="utf-8")))
+
+
+def _run(name: str) -> str:
+    """Run the full pipeline on a JSON fixture and return emitted SV text."""
+    ast = _load(name)
+    node, clock, text, label = import_assertion(ast)
+    checker = compose(node, clock, label, text)
+    return emit(checker)
+
+
+# ── Test 1: bool_simple unlabeled pipeline ────────────────────────────────
+
+
+def test_pipeline_bool_simple() -> None:
+    """bool_simple.json produces a hash-named SV module with all required elements."""
+    sv = _run("bool_simple.json")
+
+    # Unlabeled → hash-based module name
+    assert "module sva_prop_" in sv, "Expected hash-based module name for unlabeled assertion"
+    assert "always_ff" in sv, "Missing always_ff block"
+    assert "attempt_fired" in sv, "Missing attempt_fired port"
+    assert "endmodule" in sv
+
+
+def test_pipeline_bool_simple_golden(golden_dir: Path) -> None:
+    """bool_simple.json pipeline output matches tests/golden/bool_simple.sv."""
+    sv = _run("bool_simple.json")
+    assert_golden(sv, golden_dir / "bool_simple.sv")
+
+
+# ── Test 2: bool_labeled pipeline ────────────────────────────────────────
+
+
+def test_pipeline_bool_labeled() -> None:
+    """bool_labeled.json produces a label-based SV module name."""
+    sv = _run("bool_labeled.json")
+    assert "module sva_my_check" in sv, "Expected 'module sva_my_check' for labeled assertion"
+    assert "attempt_fired" in sv
+    assert "always_ff" in sv
+
+
+def test_pipeline_bool_labeled_golden(golden_dir: Path) -> None:
+    """bool_labeled.json pipeline output matches tests/golden/bool_labeled.sv."""
+    sv = _run("bool_labeled.json")
+    assert_golden(sv, golden_dir / "bool_labeled.sv")
+
+
+# ── Test 3: source location threading (PARSE-05) ─────────────────────────
+
+
+def test_pipeline_source_loc_preserved() -> None:
+    """Source location is threaded from JSON through to the emitted header comment.
+
+    Validates PARSE-05: every IR node carries source_loc so error messages
+    and generated comments point to the original SVA source.
+    """
+    ast = _load("bool_simple.json")
+    node, _clock, _text, _label = import_assertion(ast)
+
+    # The IR node must carry a meaningful source location
+    assert isinstance(node, BoolExpr)
+    assert node.source_loc.line > 0, "source_loc.line must be > 0"
+    assert node.source_loc.file != "<unknown>", "source_loc.file must not be '<unknown>'"
+
+    # The emitted SV must include the source location in a comment
+    checker = compose(node, _clock, _label, _text)
+    sv = emit(checker)
+    assert "// Source: " in sv, "Missing '// Source: ' comment in emitted SV"
+    # The exact file:line:col string from the IR must appear in the emitted SV
+    expected_loc = str(node.source_loc)  # e.g. "test_bool.sv:2:3"
+    assert expected_loc in sv, f"Source location '{expected_loc}' not found in emitted SV"
+
+
+# ── Test 4: registered outputs (OUT-02) ───────────────────────────────────
+
+
+def test_pipeline_registered_outputs() -> None:
+    """All outputs are registered — no combinational glitches (OUT-02).
+
+    Verifies that active, pass, fail, and attempt_fired are all driven by
+    flip-flops (``*_q`` registers) and not by combinational assigns.
+    """
+    sv = _run("bool_simple.json")
+
+    # All four _q register names must be declared
+    for reg in ("active_q", "pass_q", "fail_q", "attempt_fired_q"):
+        assert reg in sv, f"Missing registered signal: {reg}"
+
+    # Outputs are driven from _q registers via assign, not from combinational logic
+    assert "assign active        = active_q" in sv
+    assert "assign pass          = pass_q" in sv
+    assert "assign fail          = fail_q" in sv
+    assert "assign attempt_fired = attempt_fired_q" in sv
+
+    # Must NOT have direct combinational assign of outputs from inputs
+    assert "assign active = start" not in sv, "active must not be combinationally driven"
+
+
+# ── Test 5: synchronous reset on all FFs (OUT-03) ─────────────────────────
+
+
+def test_pipeline_sync_reset() -> None:
+    """All flip-flops have synchronous active-low reset (OUT-03).
+
+    Verifies that every registered output is cleared to 0 in the
+    ``if (!rst_n)`` branch of the always_ff block.
+    """
+    sv = _run("bool_simple.json")
+
+    # Synchronous reset condition present
+    assert "if (!rst_n)" in sv, "Missing 'if (!rst_n)' synchronous reset"
+
+    # All four FFs must be explicitly reset to 0
+    resets = sv.count("<= 1'b0")
+    assert resets >= 4, (
+        f"Expected at least 4 synchronous reset assignments (<= 1'b0), found {resets}"
+    )
+
+
+# ── Test 6: unsupported construct raises UnsupportedConstruct ─────────────
+
+
+def test_pipeline_unsupported_raises() -> None:
+    """unsupported_delay.json raises UnsupportedConstruct with SVA-E002.
+
+    Validates that SequenceConcat (##N) is correctly rejected with a
+    precise error code and a non-None source location.
+    """
+    ast = _load("unsupported_delay.json")
+    with pytest.raises(UnsupportedConstruct) as exc_info:
+        import_assertion(ast)
+
+    exc = exc_info.value
+    assert exc.source_loc is not None, "UnsupportedConstruct must have a source_loc"
+    assert "SVA-E002" in str(exc), f"Expected 'SVA-E002' in exception string, got: {exc!s}"
+
+
+# ── Test 7: complex expression pipeline ──────────────────────────────────
+
+
+def test_pipeline_bool_complex() -> None:
+    """bool_complex.json ((a && b) || (!c)) produces valid SV with all signals."""
+    sv = _run("bool_complex.json")
+    assert "module sva_prop_" in sv
+    # The complex expression contains logical AND, OR, and NOT
+    assert "&&" in sv or "||" in sv
+    assert "always_ff" in sv
+    assert "attempt_fired" in sv
+
+
+# ── Test 8: pipeline produces valid module header ─────────────────────────
+
+
+def test_pipeline_header_comments() -> None:
+    """Emitted SV header contains version, source, and original property comments."""
+    sv = _run("bool_labeled.json")
+
+    assert "// Generated by sva2rtl" in sv
+    assert "// Source:" in sv
+    assert "// Original property:" in sv
+    assert "@(posedge clk)" in sv
+
+
+# ── Test 9: standard port contract ───────────────────────────────────────
+
+
+def test_pipeline_standard_port_contract() -> None:
+    """Generated monitor exposes all standard interface ports."""
+    sv = _run("bool_simple.json")
+
+    required_ports = ("clk", "rst_n", "start", "active", "pass", "fail", "attempt_fired")
+    for port in required_ports:
+        assert port in sv, f"Missing required port: {port}"
+
+
+# ── Test 10: observed signals become input ports ──────────────────────────
+
+
+def test_pipeline_observed_signals_as_ports() -> None:
+    """Signals extracted from the boolean expression appear as input logic ports."""
+    sv = _run("bool_simple.json")
+
+    # bool_simple has 'a' and 'b' in the expression
+    assert "input  logic a" in sv, "Signal 'a' must appear as 'input  logic a'"
+    assert "input  logic b" in sv, "Signal 'b' must appear as 'input  logic b'"
