@@ -106,54 +106,62 @@ Deferred to future release. Tracked but not in current roadmap.
 
 ## Traceability
 
-| Requirement | Phase | Status |
-|-------------|-------|--------|
-| PARSE-01 | Phase 1 | Pending |
-| PARSE-02 | Phase 1 | Pending |
-| PARSE-03 | Phase 1 | Pending |
-| PARSE-04 | Phase 1 | Pending |
-| PARSE-05 | Phase 1 | Pending |
-| OP-01 | Phase 2 | Pending |
-| OP-02 | Phase 2 | Pending |
-| OP-03 | Phase 2 | Pending |
-| OP-04 | Phase 2 | Pending |
-| OP-05 | Phase 2 | Pending |
-| OP-06 | Phase 2 | Pending |
-| OP-07 | Phase 2 | Pending |
-| OP-08 | Phase 2 | Pending |
-| OP-09 | Phase 2 | Pending |
-| OP-10 | Phase 2 | Pending |
-| OUT-01 | Phase 3 | Pending |
-| OUT-02 | Phase 3 | Pending |
-| OUT-03 | Phase 3 | Pending |
-| OUT-04 | Phase 3 | Pending |
-| OUT-05 | Phase 3 | Pending |
-| OUT-06 | Phase 3 | Pending |
-| OUT-07 | Phase 3 | Pending |
-| OUT-08 | Phase 3 | Pending |
-| PIPE-01 | Phase 4 | Pending |
-| PIPE-02 | Phase 4 | Pending |
-| PIPE-03 | Phase 5 | Pending |
-| PIPE-04 | Phase 5 | Pending |
-| PIPE-05 | Phase 5 | Pending |
-| CLI-01 | Phase 6 | Pending |
-| CLI-02 | Phase 6 | Pending |
-| CLI-03 | Phase 6 | Pending |
-| CLI-04 | Phase 6 | Pending |
-| CLI-05 | Phase 6 | Pending |
-| CLI-06 | Phase 6 | Pending |
-| TEST-01 | Phase 1-6 | Pending |
-| TEST-02 | Phase 2-6 | Pending |
-| TEST-03 | Phase 3 | Pending |
-| TEST-04 | Phase 3 | Pending |
-| TEST-05 | Phase 3 | Pending |
-| TEST-06 | Phase 3 | Pending |
+| Requirement | Phase | Phase Name | Status |
+|-------------|-------|------------|--------|
+| PARSE-01 | Phase 1 | Foundation | Pending |
+| PARSE-02 | Phase 1 | Foundation | Pending |
+| PARSE-03 | Phase 3 | Remaining Tier 1 + Sim Validation | Pending |
+| PARSE-04 | Phase 1 | Foundation | Pending |
+| PARSE-05 | Phase 1 | Foundation | Pending |
+| OP-01 | Phase 2 | Core Sequential Operators | Pending |
+| OP-02 | Phase 2 | Core Sequential Operators | Pending |
+| OP-03 | Phase 2 | Core Sequential Operators | Pending |
+| OP-04 | Phase 2 | Core Sequential Operators | Pending |
+| OP-05 | Phase 3 | Remaining Tier 1 + Sim Validation | Pending |
+| OP-06 | Phase 3 | Remaining Tier 1 + Sim Validation | Pending |
+| OP-07 | Phase 3 | Remaining Tier 1 + Sim Validation | Pending |
+| OP-08 | Phase 3 | Remaining Tier 1 + Sim Validation | Pending |
+| OP-09 | Phase 3 | Remaining Tier 1 + Sim Validation | Pending |
+| OP-10 | Phase 3 | Remaining Tier 1 + Sim Validation | Pending |
+| OUT-01 | Phase 1 | Foundation | Pending |
+| OUT-02 | Phase 1 | Foundation | Pending |
+| OUT-03 | Phase 1 | Foundation | Pending |
+| OUT-04 | Phase 3 | Remaining Tier 1 + Sim Validation | Pending |
+| OUT-05 | Phase 6 | CLI Polish + Verilog-2001 | Pending |
+| OUT-06 | Phase 2 | Core Sequential Operators | Pending |
+| OUT-07 | Phase 1 | Foundation | Pending |
+| OUT-08 | Phase 1 | Foundation | Pending |
+| PIPE-01 | Phase 4 | Normalization + Composition Engine | Pending |
+| PIPE-02 | Phase 4 | Normalization + Composition Engine | Pending |
+| PIPE-03 | Phase 5 | Optimization Passes | Pending |
+| PIPE-04 | Phase 5 | Optimization Passes | Pending |
+| PIPE-05 | Phase 5 | Optimization Passes | Pending |
+| CLI-01 | Phase 6 | CLI Polish + Verilog-2001 | Pending |
+| CLI-02 | Phase 6 | CLI Polish + Verilog-2001 | Pending |
+| CLI-03 | Phase 6 | CLI Polish + Verilog-2001 | Pending |
+| CLI-04 | Phase 6 | CLI Polish + Verilog-2001 | Pending |
+| CLI-05 | Phase 1 | Foundation | Pending |
+| CLI-06 | Phase 1 | Foundation | Pending |
+| TEST-01 | Phase 1 | Foundation | Pending |
+| TEST-02 | Phase 2 | Core Sequential Operators | Pending |
+| TEST-03 | Phase 3 | Remaining Tier 1 + Sim Validation | Pending |
+| TEST-04 | Phase 3 | Remaining Tier 1 + Sim Validation | Pending |
+| TEST-05 | Phase 2 | Core Sequential Operators | Pending |
+| TEST-06 | Phase 2 | Core Sequential Operators | Pending |
 
 **Coverage:**
-- v1 requirements: 36 total
-- Mapped to phases: 36
+- v1 requirements: 40 total
+- Mapped to phases: 40
 - Unmapped: 0 ✓
+
+**Requirements per phase:**
+- Phase 1 (Foundation): 12 — PARSE-01/02/04/05, OUT-01/02/03/07/08, CLI-05/06, TEST-01
+- Phase 2 (Core Sequential Operators): 8 — OP-01/02/03/04, OUT-06, TEST-02/05/06
+- Phase 3 (Remaining Tier 1 + Sim Validation): 10 — OP-05–10, PARSE-03, OUT-04, TEST-03/04
+- Phase 4 (Normalization + Composition Engine): 2 — PIPE-01/02
+- Phase 5 (Optimization Passes): 3 — PIPE-03/04/05
+- Phase 6 (CLI Polish + Verilog-2001): 5 — CLI-01/02/03/04, OUT-05
 
 ---
 *Requirements defined: 2026-05-25*
-*Last updated: 2026-05-25 after initial definition*
+*Last updated: 2026-05-25 — traceability updated after roadmap creation (phase assignments revised: PARSE-03→Ph3, OP-05–10→Ph3, OUT-01–03/07/08→Ph1, OUT-06→Ph2, OUT-05→Ph6, CLI-05/06→Ph1, TEST-02/05/06→Ph2; count corrected to 40)*
