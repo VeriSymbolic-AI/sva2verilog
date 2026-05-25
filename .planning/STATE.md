@@ -9,8 +9,8 @@ progress:
   total_phases: 6
   completed_phases: 0
   total_plans: 5
-  completed_plans: 2
-  percent: 40
+  completed_plans: 3
+  percent: 60
 ---
 
 # Project State: sva2rtl
@@ -29,8 +29,8 @@ progress:
 | Requirements | ✅ Defined (40 v1 requirements, traceability updated) |
 | Research | ✅ Complete (HIGH confidence across all areas) |
 | Architecture | ✅ Documented (token-passing, 9-stage pipeline) |
-| Code | ✅ Plan 1.2 complete — frontend.py, ast_importer.py, 4 fixtures |
-| Tests | ✅ 60 unit tests passing (ir.py + errors.py + frontend.py + ast_importer.py) |
+| Code | ✅ Plan 1.3 complete — composer.py, emitter.py, templates/bool_expr.sv.j2, golden files |
+| Tests | ✅ 104 unit tests passing (ir.py + errors.py + frontend.py + ast_importer.py + composer.py + emitter.py) |
 | CI | ❌ Not configured |
 
 ---
@@ -39,7 +39,7 @@ progress:
 
 | Phase | Name | Status | Requirements |
 |-------|------|--------|-------------|
-| 1 | Foundation: IR + Slang + Boolean → SV Monitor | 🔄 In Progress (2/5 plans) | PARSE-01/02/04/05, OUT-01/02/03/07/08, CLI-05/06, TEST-01 |
+| 1 | Foundation: IR + Slang + Boolean → SV Monitor | 🔄 In Progress (3/5 plans) | PARSE-01/02/04/05, OUT-01/02/03/07/08, CLI-05/06, TEST-01 |
 | 2 | Core Sequential Operators (##N, |->)  | 🔲 Not started | OP-01/02/03/04, OUT-06, TEST-02/05/06 |
 | 3 | Remaining Tier 1 + Sim Validation | 🔲 Not started | OP-05–10, PARSE-03, OUT-04, TEST-03/04 |
 | 4 | Normalization + Composition Engine | 🔲 Not started | PIPE-01/02 |
@@ -56,7 +56,7 @@ progress:
 
 - [x] **1.1** Project skeleton + SVA IR (`ir.py`, `errors.py`, package setup)
 - [x] **1.2** Slang frontend + AST importer (`frontend.py`, `ast_importer.py`)
-- [ ] **1.3** Template emitter + bool_expr template (`emitter.py`, `templates/bool_expr.sv.j2`)
+- [x] **1.3** Template emitter + bool_expr template (`emitter.py`, `templates/bool_expr.sv.j2`)
 - [ ] **1.4** CLI entry point + error handling (`cli.py`)
 - [ ] **1.5** Unit test framework + Phase 1 tests
 
@@ -113,6 +113,7 @@ progress:
 |------|-------|
 | 2026-05-25 | Project initialized; research complete; roadmap created |
 | 2026-05-25 | Plan 1.2 complete — frontend.py, ast_importer.py, 4 fixtures, 29 tests; PARSE-01/02/04 + CLI-06 satisfied |
+| 2026-05-25 | Plan 1.3 complete — composer.py, emitter.py, templates/bool_expr.sv.j2, golden files (bool_labeled.sv, bool_simple.sv), 44 new tests (104 total); OUT-01/02/03/07/08 satisfied |
 
 ---
 
