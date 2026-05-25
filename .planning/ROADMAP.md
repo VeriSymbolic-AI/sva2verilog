@@ -20,7 +20,7 @@ Each phase is a **vertical MVP slice** — it produces something that works end-
 **Mode:** mvp
 **Delivers:** `sva2rtl bool_assert.sv` works end-to-end — the entire compiler pipeline exists, handles boolean assertions, and produces a valid, compilable SV monitor with the standard interface.
 **Unlocks:** every subsequent phase (all downstream work depends on stable IR, token-passing interface contract, and slang ingestion)
-**Progress:** 4/5 plans complete (Plans 1.1, 1.2, 1.3, 1.4 ✅)
+**Progress:** 5/5 plans complete ✅ — Phase 1 COMPLETE
 
 ### Why This Slice
 
@@ -34,7 +34,7 @@ The most dangerous pitfalls (vacuous satisfaction, missing source location, sile
 | 1.2 | Slang frontend + AST importer | `frontend.py` (slang subprocess invocation, `--ast-json` capture), `ast_importer.py` (JSON → IR dispatch for boolean expressions + clock event extraction + source location threading) | ✅ 2026-05-25 |
 | 1.3 | Template emitter + bool_expr template | `emitter.py` skeleton, `templates/bool_expr.sv.j2` (1-FF registered output, synchronous reset, standard port interface), `templates/checker_top.sv.j2` stub, Jinja2 pipeline wired end-to-end | ✅ 2026-05-25 |
 | 1.4 | CLI entry point + error handling | `cli.py` (click), `--output` flag, exit codes (0/1/2/3), unsupported-construct error with source location, slang-not-found detection with install hint | ✅ 2026-05-25 |
-| 1.5 | Unit test framework + Phase 1 tests | pytest + ruff + mypy (strict) configured; tests for `ir.py`, `ast_importer.py` (JSON fixture-based), `emitter.py` (bool_expr golden output); slang node-kind inventory script |
+| 1.5 | Unit test framework + Phase 1 tests | pytest + ruff + mypy (strict) configured; tests for `ir.py`, `ast_importer.py` (JSON fixture-based), `emitter.py` (bool_expr golden output); slang node-kind inventory script | ✅ 2026-05-25 |
 
 ### Requirements
 
@@ -289,4 +289,4 @@ The following are tracked in REQUIREMENTS.md as v2 and are **not** in this roadm
 ---
 
 *Roadmap created: 2026-05-25*
-*Last updated: 2026-05-25 after Plan 1.4 completion (cli.py + CLI tests + SV fixtures; CLI-05/CLI-06 satisfied)*
+*Last updated: 2026-05-25 after Plan 1.5 completion — Phase 1 COMPLETE (131 tests: 126 pass, 5 skip; mypy --strict + ruff clean; all 12 Phase 1 requirements satisfied)*
