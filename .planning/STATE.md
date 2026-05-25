@@ -9,8 +9,8 @@ progress:
   total_phases: 6
   completed_phases: 0
   total_plans: 5
-  completed_plans: 3
-  percent: 60
+  completed_plans: 4
+  percent: 80
 ---
 
 # Project State: sva2rtl
@@ -29,8 +29,8 @@ progress:
 | Requirements | ✅ Defined (40 v1 requirements, traceability updated) |
 | Research | ✅ Complete (HIGH confidence across all areas) |
 | Architecture | ✅ Documented (token-passing, 9-stage pipeline) |
-| Code | ✅ Plan 1.3 complete — composer.py, emitter.py, templates/bool_expr.sv.j2, golden files |
-| Tests | ✅ 104 unit tests passing (ir.py + errors.py + frontend.py + ast_importer.py + composer.py + emitter.py) |
+| Code | ✅ Plan 1.4 complete — cli.py, test fixtures, 9 CLI tests (113 total tests passing) |
+| Tests | ✅ 113 unit tests passing (ir.py + errors.py + frontend.py + ast_importer.py + composer.py + emitter.py + cli.py) |
 | CI | ❌ Not configured |
 
 ---
@@ -57,15 +57,16 @@ progress:
 - [x] **1.1** Project skeleton + SVA IR (`ir.py`, `errors.py`, package setup)
 - [x] **1.2** Slang frontend + AST importer (`frontend.py`, `ast_importer.py`)
 - [x] **1.3** Template emitter + bool_expr template (`emitter.py`, `templates/bool_expr.sv.j2`)
-- [ ] **1.4** CLI entry point + error handling (`cli.py`)
+- [x] **1.4** CLI entry point + error handling (`cli.py`)
 - [ ] **1.5** Unit test framework + Phase 1 tests
 
 ### Phase 1 Success Criteria
 
 - [ ] `sva2rtl bool.sv` produces a `.sv` file that compiles clean under `iverilog`
 - [ ] Generated monitor exposes standard ports; `attempt_fired` goes high correctly in simulation
-- [ ] Unsupported operator → exit code 2 with source location, no silent miscompile
-- [ ] Slang not found → exit code 3 with install message
+- [ ] Unsupported operator → exit code 2 with source location, no silent miscompile ✅ (CLI-05/CLI-06 satisfied)
+
+- [ ] Slang not found → exit code 3 with install message ✅ (CLI-05 satisfied)
 - [ ] All unit tests pass; mypy --strict reports zero errors
 
 ---
@@ -112,8 +113,8 @@ progress:
 | Date | Event |
 |------|-------|
 | 2026-05-25 | Project initialized; research complete; roadmap created |
-| 2026-05-25 | Plan 1.2 complete — frontend.py, ast_importer.py, 4 fixtures, 29 tests; PARSE-01/02/04 + CLI-06 satisfied |
 | 2026-05-25 | Plan 1.3 complete — composer.py, emitter.py, templates/bool_expr.sv.j2, golden files (bool_labeled.sv, bool_simple.sv), 44 new tests (104 total); OUT-01/02/03/07/08 satisfied |
+| 2026-05-25 | Plan 1.4 complete — cli.py click entry point, SV fixture files, 9 CLI tests; CLI-05/CLI-06 satisfied |
 
 ---
 
