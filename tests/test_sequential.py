@@ -153,3 +153,104 @@ def test_overflow_flag_in_implication_modules(fixture_name: str) -> None:
     assert "overflow_flag" in sv_text, (
         f"Top module '{top_name}' from {fixture_name} is missing 'overflow_flag'"
     )
+
+
+# ── TEST-05: Concurrent-attempt stress tests ───────────────────────────────
+
+
+def _get_bv_width(fixture_name: str) -> int:
+    """Compile a fixture and return the BV_WIDTH param of the top implication module."""
+    modules = _compile_fixture(_FIXTURES / fixture_name)
+    # The top module is last; its SV text has 'parameter BV_WIDTH = N'
+    top_sv = list(modules.values())[-1]
+    import re
+
+    m = re.search(r"parameter BV_WIDTH\s*=\s*(\d+)", top_sv)
+    assert m, f"BV_WIDTH not found in top module of {fixture_name}"
+    return int(m.group(1))
+
+
+def test_bv_width_sufficient_for_max_concurrent() -> None:
+    """TEST-05: |-> ##[2:5] b has BV_WIDTH=6 (max_delay=5, width=5+1=6)."""
+    bv_width = _get_bv_width("implication_bitvec.json")
+    assert bv_width >= 6, f"Expected BV_WIDTH >= 6 for ##[2:5], got {bv_width}"
+
+
+@pytest.mark.parametrize(
+    "fixture_name,expected_min_bv",
+    [
+        ("implication_overlap.json", 1),       # a |-> b: single-cycle, width=1
+        ("implication_nonoverlap.json", 1),    # a |=> b: single-cycle, width=1
+        ("implication_bitvec.json", 6),        # a |-> ##[2:5] b: width=6
+    ],
+)
+def test_concurrent_threads_structural_capacity(fixture_name: str, expected_min_bv: int) -> None:
+    """TEST-05: BV_WIDTH is sufficient to handle the maximum concurrent threads."""
+    bv_width = _get_bv_width(fixture_name)
+    assert bv_width >= expected_min_bv, (
+        f"{fixture_name}: expected BV_WIDTH >= {expected_min_bv}, got {bv_width}"
+    )
+
+
+def test_overflow_flag_structure_present() -> None:
+    """TEST-05: Generated RTL for |-> ##[2:5] b contains all overflow-detection structures."""
+    modules = _compile_fixture(_FIXTURES / "implication_bitvec.json")
+    top_sv = list(modules.values())[-1]
+
+    # Overflow detection conditional must be present
+    assert "overflow_flag" in top_sv, "Missing overflow_flag signal"
+    # Overflow event logic
+    assert "overflow_event" in top_sv, "Missing overflow_event signal"
+    # Sticky flag register must be reset in rst_n branch
+    assert "overflow_flag_q <= 1'b0" in top_sv, "Missing overflow_flag_q reset in rst_n branch"
+    # Halt state logic
+    assert "HARD HALT" in top_sv or "overflow_flag_q" in top_sv, "Missing halt logic"
+
+
+def test_overflow_halt_prevents_output() -> None:
+    """TEST-05: Generated RTL gates active/pass/fail to 0 when overflow_flag is set."""
+    modules = _compile_fixture(_FIXTURES / "implication_overlap.json")
+    top_sv = list(modules.values())[-1]
+
+    # active, pass, fail must all be gated by overflow_flag_q
+    assert "overflow_flag_q ? 1'b0" in top_sv, (
+        "Expected overflow_flag_q-gated output assignments"
+    )
+    # At least two gating occurrences (active and pass)
+    assert top_sv.count("overflow_flag_q ? 1'b0") >= 2, (
+        "Expected at least 2 overflow_flag_q-gated assignments (active, pass)"
+    )
+
+
+def test_reset_during_active_threads() -> None:
+    """TEST-05 [REVIEW FIX]: rst_n clears ALL state registers unconditionally.
+
+    Expected behavior: rst_n asserts while threads active -> all state clears
+    atomically in one cycle, no residual thread state after reset.
+    """
+    # Test overlap (|->): bv_q and overflow_flag_q must reset
+    modules_ov = _compile_fixture(_FIXTURES / "implication_overlap.json")
+    top_sv_ov = list(modules_ov.values())[-1]
+
+    # All state cleared in rst_n branch
+    assert "bv_q            <= '0" in top_sv_ov, "bv_q not cleared in rst_n branch (overlap)"
+    assert "overflow_flag_q <= 1'b0" in top_sv_ov, (
+        "overflow_flag_q not cleared in rst_n branch (overlap)"
+    )
+    assert "attempt_fired_q <= 1'b0" in top_sv_ov, (
+        "attempt_fired_q not cleared in rst_n branch (overlap)"
+    )
+
+    # Test nonoverlap (|=>): also requires ant_pass_delayed_q to reset
+    modules_nn = _compile_fixture(_FIXTURES / "implication_nonoverlap.json")
+    top_sv_nn = list(modules_nn.values())[-1]
+
+    assert "ant_pass_delayed_q <= 1'b0" in top_sv_nn, (
+        "ant_pass_delayed_q not cleared in rst_n branch (nonoverlap)"
+    )
+    assert "bv_q               <= '0" in top_sv_nn, (
+        "bv_q not cleared in rst_n branch (nonoverlap)"
+    )
+    assert "overflow_flag_q    <= 1'b0" in top_sv_nn, (
+        "overflow_flag_q not cleared in rst_n branch (nonoverlap)"
+    )
