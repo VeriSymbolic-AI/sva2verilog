@@ -19,7 +19,7 @@ import click
 
 from sva2rtl.ast_importer import import_assertion
 from sva2rtl.composer import compose
-from sva2rtl.emitter import emit, write_output
+from sva2rtl.emitter import emit, emit_all, write_output, write_output_dir
 from sva2rtl.errors import SlangNotFound, SvaError, UnsupportedConstruct
 from sva2rtl.frontend import invoke_slang
 
@@ -50,8 +50,14 @@ def main(input_file: str, output: str | None, slang_path: str) -> None:
         ast = invoke_slang(Path(input_file), slang_path)
         node, clock, original_text, label = import_assertion(ast)
         checker_node = compose(node, clock, label, original_text)
-        sv_text = emit(checker_node)
-        write_output(sv_text, Path(output) if output else None)
+        if checker_node.children:
+            # Hierarchical output: write one .sv file per module to a directory
+            modules = emit_all(checker_node)
+            out_dir = Path(output) if output else Path(".")
+            write_output_dir(modules, out_dir)
+        else:
+            sv_text = emit(checker_node)
+            write_output(sv_text, Path(output) if output else None)
         sys.exit(0)
 
     except SlangNotFound as exc:

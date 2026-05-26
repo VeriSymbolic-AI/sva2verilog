@@ -122,6 +122,7 @@ def test_cli_success_stdout(runner: CliRunner, bool_assert_path: Path) -> None:
     mock_node = MagicMock()
     mock_clock = MagicMock()
     mock_checker = MagicMock()
+    mock_checker.children = ()  # No children → single-file (emit/write_output) path
 
     with patch("sva2rtl.cli.invoke_slang", return_value=_MOCK_AST):
         with patch(
@@ -146,6 +147,7 @@ def test_cli_success_output_file(runner: CliRunner, bool_assert_path: Path) -> N
     mock_node = MagicMock()
     mock_clock = MagicMock()
     mock_checker = MagicMock()
+    mock_checker.children = ()  # No children → single-file (emit/write_output) path
 
     with tempfile.NamedTemporaryFile(suffix=".sv", delete=False) as tmp:
         out_path = tmp.name
@@ -199,7 +201,9 @@ def test_cli_pipeline_call_order(runner: CliRunner, bool_assert_path: Path) -> N
 
     def mock_compose(*_args: object, **_kwargs: object) -> MagicMock:
         call_order.append("compose")
-        return MagicMock()
+        checker = MagicMock()
+        checker.children = ()  # No children → single-file path
+        return checker
 
     def mock_emit(*_args: object, **_kwargs: object) -> str:
         call_order.append("emit")
