@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
 
 from sva2rtl import __version__
-from sva2rtl.emitter import emit, write_output
+from sva2rtl.ast_importer import import_assertion
+from sva2rtl.composer import compose
+from sva2rtl.emitter import emit, emit_all, write_output, write_output_dir
 from sva2rtl.ir import CheckerNode, SourceLoc
 
 # ── Helpers ───────────────────────────────────────────────────────────────
@@ -207,3 +210,196 @@ def test_write_output_to_stdout(capsys: pytest.CaptureFixture[str]) -> None:
     write_output(sv, None)
     captured = capsys.readouterr()
     assert captured.out == sv
+
+
+# ── Helpers for SeqConcat / delay tests ──────────────────────────────────────
+
+FIXTURES_DIR = Path(__file__).parent / "fixtures"
+GOLDEN_DIR = Path(__file__).parent / "golden"
+
+
+def _load_fixture_checker(fixture_name: str) -> CheckerNode:
+    """Load a fixture JSON, run import_assertion + compose, return CheckerNode."""
+    ast = json.loads((FIXTURES_DIR / f"{fixture_name}.json").read_text(encoding="utf-8"))
+    ir_node, clock, original_text, label = import_assertion(ast)
+    return compose(ir_node, clock, label, original_text)
+
+
+# ── emit_all ─────────────────────────────────────────────────────────────────
+
+
+def test_emit_all_delay_fixed_returns_dict() -> None:
+    """emit_all() returns a dict for a ##3 fixture."""
+    checker = _load_fixture_checker("delay_fixed")
+    result = emit_all(checker)
+    assert isinstance(result, dict)
+    assert len(result) > 0
+
+
+def test_emit_all_delay_fixed_module_names() -> None:
+    """emit_all() for a ##3 property yields exactly the 4 expected module names."""
+    checker = _load_fixture_checker("delay_fixed")
+    result = emit_all(checker)
+    assert set(result.keys()) == {
+        "sva_prop_81cf66e0_e0",
+        "sva_delay_3_3",
+        "sva_prop_81cf66e0_e1",
+        "sva_prop_81cf66e0",
+    }
+
+
+def test_emit_all_delay_fixed_order_children_before_parent() -> None:
+    """emit_all() for ##3 emits child modules before the parent wrapper."""
+    checker = _load_fixture_checker("delay_fixed")
+    result = emit_all(checker)
+    keys = list(result.keys())
+    assert keys.index("sva_prop_81cf66e0") > keys.index("sva_delay_3_3")
+    assert keys.index("sva_prop_81cf66e0") > keys.index("sva_prop_81cf66e0_e0")
+
+
+def test_emit_all_delay_range_module_names() -> None:
+    """emit_all() for a ##[2:5] property yields exactly the 4 expected module names."""
+    checker = _load_fixture_checker("delay_range")
+    result = emit_all(checker)
+    assert set(result.keys()) == {
+        "sva_prop_e9edaa37_e0",
+        "sva_delay_2_5",
+        "sva_prop_e9edaa37_e1",
+        "sva_prop_e9edaa37",
+    }
+
+
+def test_emit_all_delay_zero_has_combinational_pass() -> None:
+    """emit_all() for a ##0 property generates a module with combinational pass-through."""
+    checker = _load_fixture_checker("delay_zero")
+    result = emit_all(checker)
+    delay_mod = result.get("sva_delay_0_0", "")
+    assert "assign pass   = start" in delay_mod
+
+
+def test_emit_all_delay_three_element_six_modules() -> None:
+    """emit_all() for a ##1 b ##2 c yields 6 modules (3 bool + 2 delay + 1 top)."""
+    checker = _load_fixture_checker("delay_three_element")
+    result = emit_all(checker)
+    assert len(result) == 6
+
+
+def test_emit_all_delay_three_element_module_names() -> None:
+    """emit_all() for a ##1 b ##2 c yields the 6 expected module names."""
+    checker = _load_fixture_checker("delay_three_element")
+    result = emit_all(checker)
+    assert set(result.keys()) == {
+        "sva_prop_5c9caf75_e0",
+        "sva_delay_1_1",
+        "sva_prop_5c9caf75_e1",
+        "sva_delay_2_2",
+        "sva_prop_5c9caf75_e2",
+        "sva_prop_5c9caf75",
+    }
+
+
+def test_emit_all_delay_fixed_cnt_width_in_delay_module() -> None:
+    """Delay module for ##3 uses CNT_WIDTH=2 (ceil(log2(4))=2)."""
+    checker = _load_fixture_checker("delay_fixed")
+    result = emit_all(checker)
+    delay_sv = result["sva_delay_3_3"]
+    assert "CNT_WIDTH = 2" in delay_sv
+
+
+def test_emit_all_delay_range_cnt_width_in_delay_module() -> None:
+    """Delay module for ##[2:5] uses CNT_WIDTH=3 (ceil(log2(6))=3)."""
+    checker = _load_fixture_checker("delay_range")
+    result = emit_all(checker)
+    delay_sv = result["sva_delay_2_5"]
+    assert "CNT_WIDTH = 3" in delay_sv
+
+
+def test_emit_all_top_instantiates_delay_child() -> None:
+    """Top wrapper for ##3 instantiates sva_delay_3_3 by name."""
+    checker = _load_fixture_checker("delay_fixed")
+    result = emit_all(checker)
+    top_sv = result["sva_prop_81cf66e0"]
+    assert "sva_delay_3_3 u_sva_delay_3_3" in top_sv
+
+
+def test_emit_all_top_token_passing_chain() -> None:
+    """Top wrapper passes w_pass_0 as start to the second child."""
+    checker = _load_fixture_checker("delay_fixed")
+    result = emit_all(checker)
+    top_sv = result["sva_prop_81cf66e0"]
+    assert ".start    (w_pass_0)" in top_sv
+
+
+def test_emit_all_top_final_pass_is_last_child() -> None:
+    """Top wrapper assigns pass from the last child's wire (w_pass_2)."""
+    checker = _load_fixture_checker("delay_fixed")
+    result = emit_all(checker)
+    top_sv = result["sva_prop_81cf66e0"]
+    assert "assign pass   = w_pass_2" in top_sv
+
+
+# ── Golden comparisons for delay modules ─────────────────────────────────────
+
+
+def _norm(text: str) -> list[str]:
+    """Strip trailing whitespace per line for whitespace-insensitive comparison."""
+    return [line.rstrip() for line in text.splitlines()]
+
+
+@pytest.mark.parametrize(
+    "fixture_name,golden_module",
+    [
+        ("delay_fixed", "sva_delay_3_3"),
+        ("delay_fixed", "sva_prop_81cf66e0"),
+        ("delay_range", "sva_delay_2_5"),
+        ("delay_range", "sva_prop_e9edaa37"),
+        ("delay_zero", "sva_delay_0_0"),
+        ("delay_zero", "sva_prop_75080d6b"),
+        ("delay_three_element", "sva_delay_1_1"),
+        ("delay_three_element", "sva_delay_2_2"),
+        ("delay_three_element", "sva_prop_5c9caf75"),
+    ],
+)
+def test_emit_all_golden_match(fixture_name: str, golden_module: str) -> None:
+    """emit_all() output matches the corresponding golden SV file."""
+    checker = _load_fixture_checker(fixture_name)
+    result = emit_all(checker)
+    actual = result[golden_module]
+    golden_path = GOLDEN_DIR / f"{golden_module}.sv"
+    expected = golden_path.read_text(encoding="utf-8")
+    assert _norm(actual) == _norm(expected), (
+        f"Golden mismatch for {golden_module}:\n"
+        f"First differing lines detected — regenerate golden with emit_all()."
+    )
+
+
+# ── write_output_dir ─────────────────────────────────────────────────────────
+
+
+def test_write_output_dir_creates_files(tmp_path: Path) -> None:
+    """write_output_dir() creates one .sv file per module in the output dir."""
+    checker = _load_fixture_checker("delay_fixed")
+    modules = emit_all(checker)
+    write_output_dir(modules, tmp_path)
+    for mod_name in modules:
+        assert (tmp_path / f"{mod_name}.sv").exists()
+
+
+def test_write_output_dir_file_contents(tmp_path: Path) -> None:
+    """write_output_dir() writes the correct SV text to each file."""
+    checker = _load_fixture_checker("delay_fixed")
+    modules = emit_all(checker)
+    write_output_dir(modules, tmp_path)
+    for mod_name, sv_text in modules.items():
+        actual = (tmp_path / f"{mod_name}.sv").read_text(encoding="utf-8")
+        assert actual == sv_text
+
+
+def test_write_output_dir_creates_dir_if_missing(tmp_path: Path) -> None:
+    """write_output_dir() creates the output directory if it does not exist."""
+    checker = _load_fixture_checker("delay_range")
+    modules = emit_all(checker)
+    new_dir = tmp_path / "out" / "nested"
+    write_output_dir(modules, new_dir)
+    assert new_dir.is_dir()
+    assert len(list(new_dir.iterdir())) == len(modules)
