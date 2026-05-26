@@ -7,13 +7,18 @@ files_modified:
   - src/sva2rtl/emitter.py
   - src/sva2rtl/cli.py
   - templates/concat_delay.sv.j2
+  - templates/seq_concat_top.sv.j2
   - tests/fixtures/delay_fixed.json
   - tests/fixtures/delay_range.json
+  - tests/fixtures/delay_three_element.json
+  - tests/fixtures/delay_zero.json
   - tests/test_ast_importer.py
   - tests/test_composer.py
   - tests/test_emitter.py
   - tests/golden/delay_fixed_3.sv
   - tests/golden/delay_range_2_5.sv
+  - tests/golden/sva_delay_3_3.sv
+  - tests/golden/sva_delay_2_5.sv
 requirements:
   - OP-01
   - OP-02
@@ -26,6 +31,13 @@ autonomous: true
 
 Deliver end-to-end compilation of `##N` (fixed delay) and `##[M:N]` (range delay) SVA sequences into counter-encoded synthesizable RTL monitors. A single unified template handles both cases via window comparator, per decision D-01/D-02. The pipeline ingests a slang JSON AST containing `SequenceConcat`, builds hierarchical `CheckerNode` trees with delay children, emits multiple `.sv` files (one per module), and produces correct, compilable SystemVerilog.
 
+## Key Design Decisions
+
+- **[REVIEW FIX] `##0` zero-delay semantics (HIGH concern #3):** `##0` is a combinational pass-through — `pass` goes HIGH immediately on the same cycle as `start` with no counter increment. The template uses a special-case path: when `delay_min == 0 && delay_max == 0`, bypass the counter entirely and wire `pass = start` combinationally. This is valid SVA (`a ##0 b` = same-cycle conjunction). No register, no clock edge — purely combinational.
+- **[REVIEW FIX] `pass` signal semantics resolved (HIGH concern #4):** The `pass` signal is ALWAYS the window-level signal (HIGH for the entire M..N window per D-03). This is correct for BOTH standalone use and BV-composition. The bit-vector template in Plan 2.2 consumes `pass` to know which cycles the consequent CAN satisfy. On the specific cycle when a thread's bit reaches evaluation position, the BV module samples `con_pass`. No dual-mode ambiguity exists — the window signal IS the correct semantic for all consumers.
+- **[REVIEW FIX] Invalid input rejection (MEDIUM concern #10):** `##[M:N]` where M > N (e.g., `##[5:2]`) is rejected at import time with `SVA-E003: Invalid delay range [5:2] — minimum exceeds maximum`. Negative values are also rejected with SVA-E003.
+- **[REVIEW FIX] Counter width formal specification:** `CNT_WIDTH = max(1, ceil(log2(delay_max + 1)))`. This is always sufficient to hold the max count value without overflow. For `##0`, CNT_WIDTH=1 but the counter is unused (combinational path). For `##256`, CNT_WIDTH=9 (holds 0..256). For `##1`, CNT_WIDTH=1 (holds 0..1).
+
 ## Vertical Slice
 
 Input: `assert property (@(posedge clk) a ##3 b)` or `a ##[2:5] b`
@@ -37,7 +49,7 @@ Proof: Golden file match + `iverilog output/*.sv` compiles clean
 ## Tasks
 
 <task id="2.1.1">
-<title>Create unified delay counter Jinja2 template</title>
+<title>[REVIEW FIX] Create unified delay counter Jinja2 template with ##0 combinational path</title>
 <read_first>
 - templates/bool_expr.sv.j2
 - .planning/phases/02-core-sequential-operators-n-m-n/02-CONTEXT.md (decisions D-01 through D-04)
@@ -57,7 +69,15 @@ Create `templates/concat_delay.sv.j2`. This template renders a standalone counte
 - `attempt_fired` sticky logic (same as bool_expr.sv.j2)
 - `fail` output always 1'b0 for delay modules (delay cannot fail, only pass or not yet)
 - Template parameters expected: module_name, clock_signal, clock_edge, delay_min, delay_max, cnt_width, source_loc, sva2rtl_version, original_text
-- Special case: when delay_min == 0, pass is HIGH immediately on the start cycle (combinational pass-through for ##0 semantics)
+
+[REVIEW FIX] `##0` zero-delay combinational path (HIGH concern #3):
+- Template uses `{% if delay_max == "0" and delay_min == "0" %}` conditional block
+- Inside the ##0 block: `assign pass = start;` (combinational, no counter, no FF)
+- `assign active = start;` (active only on the start cycle)
+- `assign fail = 1'b0;`
+- The `always_ff` block and counter register are emitted ONLY in the `{% else %}` branch
+- This ensures IEEE 1800 semantics: `a ##0 b` means `a` and `b` must both hold on the same cycle
+- `attempt_fired` is still sticky (registered) even for ##0 — it fires on first `start`
 </action>
 <acceptance_criteria>
 - File `templates/concat_delay.sv.j2` exists
@@ -67,12 +87,14 @@ Create `templates/concat_delay.sv.j2`. This template renders a standalone counte
 - Template contains standard port interface: input logic clk/rst_n/start, output logic active/pass/fail/attempt_fired
 - Template contains `if (!rst_n)` synchronous reset block setting all registers to 0
 - Template contains `endmodule` as final code line
+- [REVIEW FIX] Template contains `{% if delay_max == "0" and delay_min == "0" %}` (or equivalent) with `assign pass = start` combinational path
+- [REVIEW FIX] Template renders cleanly for ##0 case: delay_min="0", delay_max="0", cnt_width="1" produces `assign pass = start`
 - Template renders without Jinja2 errors when given params: module_name="sva_delay_2_5", clock_signal="clk", clock_edge="posedge", delay_min="2", delay_max="5", cnt_width="3", source_loc="test.sv:1:1", sva2rtl_version="0.1.0", original_text="##[2:5]"
 </acceptance_criteria>
 </task>
 
 <task id="2.1.2">
-<title>Extend ast_importer to handle SequenceConcat nodes</title>
+<title>[REVIEW FIX] Extend ast_importer to handle SequenceConcat with invalid range rejection</title>
 <read_first>
 - src/sva2rtl/ast_importer.py
 - tests/fixtures/unsupported_delay.json
@@ -88,8 +110,10 @@ Modify `src/sva2rtl/ast_importer.py`:
    - default case: existing BoolExpr path
 4. Add helper `_build_seq_concat(node: dict[str, Any], source_loc: SourceLoc) -> SeqConcat`:
    - Iterates `node["elements"]` list
-   - For each element: extracts `element["sequence"]` → recursively builds `SVANode` via new `_dispatch_expr_to_ir(seq_node)` helper
+   - For each element: extracts `element["sequence"]` -> recursively builds `SVANode` via new `_dispatch_expr_to_ir(seq_node)` helper
    - Extracts `int(element.get("min", "0"))` and `int(element.get("max", "0"))` as delay tuple
+   - [REVIEW FIX] Validates delay range: if min > max, raise `CompileError` with code SVA-E003 and message: "Invalid delay range [M:N] -- minimum exceeds maximum" with source location
+   - [REVIEW FIX] Validates no negative values: if min < 0 or max < 0, raise `CompileError` with SVA-E003 and message: "Invalid delay range -- negative delay value" with source location
    - Returns `SeqConcat(elements=tuple(elements), delays=tuple(delays), source_loc=source_loc)`
 5. Add helper `_dispatch_expr_to_ir(node: dict[str, Any]) -> SVANode`:
    - For `"SequenceExpr"` kind: unwrap to inner expr and recurse
@@ -106,6 +130,8 @@ Modify `src/sva2rtl/ast_importer.py`:
 - `SeqConcat.elements[0]` is a `BoolExpr` with text containing "a"
 - `SeqConcat.elements[1]` is a `BoolExpr` with text containing "b"
 - `SeqConcat.source_loc.file` equals "test_delay.sv"
+- [REVIEW FIX] A fixture with `"min": "5", "max": "2"` raises CompileError with "SVA-E003" in message
+- [REVIEW FIX] A fixture with negative delay values raises CompileError with "SVA-E003" in message
 - `mypy --strict src/sva2rtl/ast_importer.py` exits 0
 </acceptance_criteria>
 </task>
@@ -133,7 +159,7 @@ Modify `src/sva2rtl/composer.py`:
    - Collect all observed_signals from children via `_collect_signals(children)`
    - Build top-level CheckerNode with template_name="seq_concat_top", module_name from label, children tuple, collected signals
 5. Add `_make_delay_node(delay_min: int, delay_max: int, clock: ClockSpec, source_loc: SourceLoc) -> CheckerNode`:
-   - Compute cnt_width = `max(1, math.ceil(math.log2(delay_max + 1)))` if delay_max > 0 else 1
+   - Compute cnt_width formally: `cnt_width = max(1, math.ceil(math.log2(delay_max + 1)))` if delay_max > 0 else 1
    - Module name = `f"sva_delay_{delay_min}_{delay_max}"`
    - params dict with keys: module_name, delay_min (str), delay_max (str), cnt_width (str), clock_signal, clock_edge, source_loc, sva2rtl_version, original_text
    - template_name = "concat_delay"
@@ -152,6 +178,7 @@ Modify `src/sva2rtl/composer.py`:
 - `children[0].template_name == "bool_expr"` (antecedent element)
 - `children[2].template_name == "bool_expr"` (consequent element)
 - For `##[2:5]`: delay node has `params["cnt_width"] == "3"` (ceil(log2(6))=3)
+- [REVIEW FIX] For `##0`: delay node has `params["cnt_width"] == "1"` and `params["delay_min"] == "0"`, `params["delay_max"] == "0"`
 - `compose(BoolExpr(...), clock, label, text)` still works unchanged (backward compatibility)
 - `mypy --strict src/sva2rtl/composer.py` exits 0
 </acceptance_criteria>
@@ -183,7 +210,7 @@ Modify `src/sva2rtl/emitter.py`:
 5. Create `templates/seq_concat_top.sv.j2`:
    - Top-level wrapper module that instantiates children with token-passing wiring
    - Standard port interface (clk, rst_n, start, observed signals, active, pass, fail, attempt_fired)
-   - Internal wires: wire children's pass→next child's start in sequence
+   - Internal wires: wire children's pass->next child's start in sequence
    - First child gets parent's `start`; last child's `pass` drives parent's `pass`
    - `active` = OR of all children's active signals
    - `fail` = 1'b0 (sequence chains cannot fail, only pass or timeout)
@@ -230,7 +257,7 @@ Modify `src/sva2rtl/cli.py`:
 </task>
 
 <task id="2.1.6">
-<title>Create test fixtures and golden files for delay operators</title>
+<title>[REVIEW FIX] Create test fixtures and golden files including 3-element and ##0 cases</title>
 <read_first>
 - tests/fixtures/unsupported_delay.json (existing fixture to adapt)
 - tests/golden/bool_labeled.sv (golden file format reference)
@@ -244,20 +271,27 @@ Create test fixtures and golden reference files:
    - SequenceConcat with 2 elements (NamedValue "a", NamedValue "b"), delay (3,3)
 2. `tests/fixtures/delay_range.json`: slang AST JSON for `assert property (@(posedge clk) a ##[2:5] b)`:
    - SequenceConcat with 2 elements, delay (2,5)
-3. `tests/golden/delay_fixed_3.sv`: Expected generated output for the top-level wrapper module of `a ##3 b`
+3. [REVIEW FIX] `tests/fixtures/delay_three_element.json`: slang AST JSON for `assert property (@(posedge clk) a ##2 b ##3 c)` (MEDIUM concern #9):
+   - SequenceConcat with 3 elements (NamedValue "a", "b", "c"), delays ((2,2), (3,3))
+   - Tests multi-element SeqConcat chaining (3-element fixture)
+4. [REVIEW FIX] `tests/fixtures/delay_zero.json`: slang AST JSON for `assert property (@(posedge clk) a ##0 b)` (HIGH concern #3):
+   - SequenceConcat with 2 elements, delay (0,0)
+   - Tests ##0 zero-delay handling
+5. `tests/golden/delay_fixed_3.sv`: Expected generated output for the top-level wrapper module of `a ##3 b`
    - Render the seq_concat_top.sv.j2 template manually with correct parameters
-   - Module name: `sva_prop_<hash8>` (compute from "a ##3 b" text)
    - Contains instantiation of child delay module `sva_delay_3_3` and two bool_expr children
-4. `tests/golden/delay_range_2_5.sv`: Expected generated output for `a ##[2:5] b` top wrapper
+6. `tests/golden/delay_range_2_5.sv`: Expected generated output for `a ##[2:5] b` top wrapper
    - Contains instantiation of `sva_delay_2_5` child
-5. `tests/golden/sva_delay_3_3.sv`: Expected generated output for the delay counter sub-module (##3)
+7. `tests/golden/sva_delay_3_3.sv`: Expected generated output for the delay counter sub-module (##3)
    - Rendered from concat_delay.sv.j2 with delay_min=3, delay_max=3, cnt_width=2
-6. `tests/golden/sva_delay_2_5.sv`: Expected generated output for the delay counter sub-module (##[2:5])
+8. `tests/golden/sva_delay_2_5.sv`: Expected generated output for the delay counter sub-module (##[2:5])
    - Rendered from concat_delay.sv.j2 with delay_min=2, delay_max=5, cnt_width=3
 </action>
 <acceptance_criteria>
 - File `tests/fixtures/delay_fixed.json` exists and is valid JSON with `"kind": "SequenceConcat"` and delays of (3,3)
 - File `tests/fixtures/delay_range.json` exists and is valid JSON with delays of (2,5)
+- [REVIEW FIX] File `tests/fixtures/delay_three_element.json` exists with 3 elements and delays ((2,2),(3,3))
+- [REVIEW FIX] File `tests/fixtures/delay_zero.json` exists with delays of (0,0)
 - File `tests/golden/delay_fixed_3.sv` exists and contains `module sva_` and `endmodule`
 - File `tests/golden/delay_range_2_5.sv` exists and contains `module sva_` and `endmodule`
 - File `tests/golden/sva_delay_3_3.sv` exists and contains `parameter CNT_WIDTH` and `endmodule`
@@ -267,13 +301,15 @@ Create test fixtures and golden reference files:
 </task>
 
 <task id="2.1.7">
-<title>Unit tests for delay operator pipeline</title>
+<title>[REVIEW FIX] Unit tests including ##0, 3-element, and invalid range cases</title>
 <read_first>
 - tests/test_ast_importer.py (existing test patterns)
 - tests/test_composer.py (existing test patterns)
 - tests/test_emitter.py (existing golden match test pattern)
 - tests/fixtures/delay_fixed.json (after task 2.1.6)
 - tests/fixtures/delay_range.json (after task 2.1.6)
+- tests/fixtures/delay_three_element.json (after task 2.1.6)
+- tests/fixtures/delay_zero.json (after task 2.1.6)
 </read_first>
 <action>
 Update existing test files and create new integration test:
@@ -284,6 +320,10 @@ Update existing test files and create new integration test:
    - ADD `test_import_delay_fixed_elements_count()`: asserts len(node.elements) == 2
    - ADD `test_import_delay_fixed_delays()`: asserts node.delays == ((3, 3),)
    - ADD `test_import_delay_range_delays()`: loads delay_range.json, asserts node.delays == ((2, 5),)
+   - [REVIEW FIX] ADD `test_import_delay_three_element()`: loads delay_three_element.json, asserts len(node.elements) == 3 and node.delays == ((2, 2), (3, 3))
+   - [REVIEW FIX] ADD `test_import_delay_zero()`: loads delay_zero.json, asserts node.delays == ((0, 0),)
+   - [REVIEW FIX] ADD `test_import_delay_invalid_range_rejected()`: constructs fixture with min=5, max=2; asserts CompileError raised with "SVA-E003" in message
+   - [REVIEW FIX] ADD `test_import_delay_negative_rejected()`: constructs fixture with min=-1, max=3; asserts CompileError raised with "SVA-E003" in message
    - CHANGE `test_unsupported_kinds_table_has_sequence_concat()`: remove this test (SequenceConcat is no longer unsupported)
 
 2. Modify `tests/test_composer.py`:
@@ -293,12 +333,15 @@ Update existing test files and create new integration test:
    - ADD `test_compose_seq_concat_delay_child_template()`: children[1].template_name == "concat_delay"
    - ADD `test_compose_seq_concat_delay_params()`: children[1].params["delay_min"] == "3", params["delay_max"] == "3"
    - ADD `test_compose_seq_concat_cnt_width()`: for delay (2,5): params["cnt_width"] == "3"
+   - [REVIEW FIX] ADD `test_compose_seq_concat_three_elements()`: compose 3-element SeqConcat, assert len(children) == 5 (elem, delay, elem, delay, elem)
+   - [REVIEW FIX] ADD `test_compose_seq_concat_zero_delay()`: compose SeqConcat with delay (0,0), assert params["delay_min"] == "0", params["delay_max"] == "0", params["cnt_width"] == "1"
 
 3. Modify `tests/test_emitter.py`:
    - ADD `test_emit_all_returns_dict()`: emit_all(checker_with_children) returns dict
    - ADD `test_emit_all_contains_all_module_names()`: dict keys contain delay sub-module name
    - ADD `test_emit_delay_golden_match()`: emit_all output for sva_delay_3_3 matches golden/sva_delay_3_3.sv
-   - ADD `test_emit_backward_compatible()`: emit(bool_expr_checker) still works (existing tests already cover this — just ensure they still pass)
+   - ADD `test_emit_backward_compatible()`: emit(bool_expr_checker) still works (existing tests already cover this -- just ensure they still pass)
+   - [REVIEW FIX] ADD `test_emit_delay_zero_combinational()`: emit concat_delay with delay_min=0, delay_max=0, verify output contains `assign pass = start` (combinational path, no counter)
 </action>
 <acceptance_criteria>
 - `pytest tests/test_ast_importer.py` exits 0 with all tests passing
@@ -307,6 +350,10 @@ Update existing test files and create new integration test:
 - No test references `"SequenceConcat" in UNSUPPORTED_KINDS_PHASE1` expecting True
 - Tests exist that assert `isinstance(node, SeqConcat)` for delay_fixed.json import
 - Tests exist that assert `children[1].template_name == "concat_delay"` for composed SeqConcat
+- [REVIEW FIX] Test exists for 3-element SeqConcat composition with 5 children
+- [REVIEW FIX] Test exists for ##0 zero-delay combinational pass-through
+- [REVIEW FIX] Test exists for invalid range [5:2] rejection with SVA-E003
+- [REVIEW FIX] Test exists for negative delay rejection with SVA-E003
 - `mypy --strict tests/` exits 0
 </acceptance_criteria>
 </task>
@@ -318,10 +365,12 @@ Update existing test files and create new integration test:
 <threat_model>
 | Threat | Severity | Mitigation |
 |--------|----------|------------|
-| Counter overflow in delay module (count_q wraps around for large N) | Medium | cnt_width is ceil(log2(N+1)) — always sufficient bits to hold max value. Acceptance test verifies cnt_width=7 for ##100. |
-| Template injection via module_name (user-controlled label in SV output) | Low | module_name_from_label() already sanitizes with regex `[^a-zA-Z0-9_]` → `_`. No new attack surface. |
+| Counter overflow in delay module (count_q wraps around for large N) | Medium | cnt_width is ceil(log2(N+1)) -- always sufficient bits to hold max value. Acceptance test verifies cnt_width=7 for ##100. |
+| Template injection via module_name (user-controlled label in SV output) | Low | module_name_from_label() already sanitizes with regex `[^a-zA-Z0-9_]` -> `_`. No new attack surface. |
 | Path traversal via --output flag (write files outside intended directory) | Low | CLI validates path is under working directory or uses Path resolution. Standard click path handling. |
-| Denial of service via enormous delay value (##[0:2147483647]) | Medium | cnt_width computation uses math.log2 — produces a reasonable counter width (31 bits). No state expansion. Counter encoding by design prevents this. |
+| Denial of service via enormous delay value (##[0:2147483647]) | Medium | cnt_width computation uses math.log2 -- produces a reasonable counter width (31 bits). No state expansion. Counter encoding by design prevents this. |
+| [REVIEW FIX] Silent miscompile on ##0 (zero-delay treated as 1-cycle delay) | High | Explicit ##0 special case with combinational pass-through. Unit test verifies `assign pass = start` output. |
+| [REVIEW FIX] Invalid range ##[5:2] silently compiles to wrong hardware | High | Validation at import time with SVA-E003 error. Unit test verifies rejection. |
 </threat_model>
 
 ---
@@ -365,3 +414,8 @@ assert 'sva_delay_3_3' in modules
 - [ ] Pipeline runs end-to-end: slang JSON AST -> SeqConcat IR -> CheckerNode tree -> .sv files
 - [ ] Backward compatibility: boolean-only properties still compile identically
 - [ ] All Phase 1 tests continue to pass
+- [ ] [REVIEW FIX] `##0` zero-delay compiles to combinational pass-through (no counter)
+- [ ] [REVIEW FIX] `##[5:2]` M>N rejected with SVA-E003 error at import time
+- [ ] [REVIEW FIX] Negative delays rejected with SVA-E003 error at import time
+- [ ] [REVIEW FIX] 3-element SeqConcat (`a ##2 b ##3 c`) compiles with 5 children nodes
+- [ ] [REVIEW FIX] `pass` signal is window-level (HIGH for M..N) -- no dual-mode ambiguity
