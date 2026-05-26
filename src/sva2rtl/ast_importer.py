@@ -20,7 +20,7 @@ from __future__ import annotations
 from typing import Any
 
 from sva2rtl.errors import SvaCompileError, UnsupportedConstruct
-from sva2rtl.ir import BoolExpr, ClockSpec, SeqConcat, SourceLoc, SVANode
+from sva2rtl.ir import BoolExpr, ClockSpec, PropImplication, SeqConcat, SourceLoc, SVANode
 
 # ── Operator tables ────────────────────────────────────────────────────────
 
@@ -50,11 +50,8 @@ UNSUPPORTED_KINDS_PHASE1: dict[str, str] = {
     "SequenceRepetition": "[*N] consecutive repetition (Phase 2)",
 }
 
-# Implication detected via kind + op combination
-_UNSUPPORTED_BINARY_OPS: dict[str, str] = {
-    "OverlappedImplication": "|-> overlapping implication (Phase 2)",
-    "NonOverlappedImplication": "|=> non-overlapping implication (Phase 2)",
-}
+# Implication operators are now handled natively (Phase 2).
+_UNSUPPORTED_BINARY_OPS: dict[str, str] = {}
 
 
 # ── Public API ─────────────────────────────────────────────────────────────
@@ -293,6 +290,13 @@ def _import_concurrent_assertion(
             seq_ir = _build_seq_concat(expr_node, source_loc)
             ir_node: SVANode = seq_ir
             text = _reconstruct_seq_text(seq_ir)
+        case "BinaryPropertyExpr" if expr_node.get("op") in (
+            "OverlappedImplication",
+            "NonOverlappedImplication",
+        ):
+            prop_ir = _build_prop_implication(expr_node, source_loc)
+            ir_node = prop_ir
+            text = _reconstruct_impl_text(prop_ir)
         case _:
             _check_unsupported(expr_node, extract_source_loc(expr_node))
             text = expr_to_sv(expr_node)
@@ -378,6 +382,40 @@ def _reconstruct_seq_text(node: SeqConcat) -> str:
             else:
                 parts.append(f"##[{d_min}:{d_max}]")
     return " ".join(parts)
+
+
+def _build_prop_implication(
+    node: dict[str, Any],
+    source_loc: SourceLoc,
+) -> PropImplication:
+    """Build a PropImplication IR node from a slang BinaryPropertyExpr JSON node."""
+    ant = _dispatch_expr_to_ir(node["left"])
+    con = _dispatch_expr_to_ir(node["right"])
+    overlapping = node.get("op") == "OverlappedImplication"
+    return PropImplication(
+        antecedent=ant,
+        consequent=con,
+        overlapping=overlapping,
+        source_loc=source_loc,
+    )
+
+
+def _reconstruct_impl_text(node: PropImplication) -> str:
+    """Reconstruct SVA text for a PropImplication IR node."""
+    op = "|->" if node.overlapping else "|=>"
+    if isinstance(node.antecedent, BoolExpr):
+        ant_text = node.antecedent.text
+    elif isinstance(node.antecedent, SeqConcat):
+        ant_text = _reconstruct_seq_text(node.antecedent)
+    else:
+        ant_text = "<ant>"
+    if isinstance(node.consequent, BoolExpr):
+        con_text = node.consequent.text
+    elif isinstance(node.consequent, SeqConcat):
+        con_text = _reconstruct_seq_text(node.consequent)
+    else:
+        con_text = "<con>"
+    return f"{ant_text} {op} {con_text}"
 
 
 def _extract_clock(prop_spec: dict[str, Any]) -> ClockSpec:
