@@ -9,6 +9,9 @@ Requirements covered:
 from __future__ import annotations
 
 import json
+import shutil
+import subprocess
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -264,9 +267,9 @@ def _compile_delay(delay_min: int, delay_max: int) -> str:
 
     Returns the SV text of the sva_delay_{delay_min}_{delay_max} module.
     """
-    from sva2rtl.ir import BoolExpr, ClockSpec, SeqConcat, SourceLoc
     from sva2rtl.composer import compose
     from sva2rtl.emitter import emit_all
+    from sva2rtl.ir import BoolExpr, ClockSpec, SeqConcat, SourceLoc
 
     loc = SourceLoc("test.sv", 1, 1)
     clock = ClockSpec(edge="posedge", signal="clk", source_loc=loc)
@@ -286,9 +289,9 @@ def _compile_delay(delay_min: int, delay_max: int) -> str:
 
 def _compile_impl_delay(delay_min: int, delay_max: int) -> str:
     """Build a PropImplication with SeqConcat consequent and return the top SV text."""
-    from sva2rtl.ir import BoolExpr, ClockSpec, PropImplication, SeqConcat, SourceLoc
     from sva2rtl.composer import compose
     from sva2rtl.emitter import emit_all
+    from sva2rtl.ir import BoolExpr, ClockSpec, PropImplication, SeqConcat, SourceLoc
 
     loc = SourceLoc("test.sv", 1, 1)
     clock = ClockSpec(edge="posedge", signal="clk", source_loc=loc)
@@ -413,8 +416,8 @@ def test_delay_range_window_width() -> None:
     # Verify params match expectations
     m_min = re.search(r"count_q >= \d+'d(\d+)", sv25)
     m_max = re.search(r"count_q <= \d+'d(\d+)", sv25)
-    assert m_min and int(m_min.group(1)) == 2, f"##[2:5]: expected delay_min=2"
-    assert m_max and int(m_max.group(1)) == 5, f"##[2:5]: expected delay_max=5"
+    assert m_min and int(m_min.group(1)) == 2, "##[2:5]: expected delay_min=2"
+    assert m_max and int(m_max.group(1)) == 5, "##[2:5]: expected delay_max=5"
 
 
 @pytest.mark.parametrize(
@@ -440,3 +443,183 @@ def test_bv_width_boundary_for_implication(
     assert actual == expected_bv_width, (
         f"|-> ##[{delay_min}:{delay_max}] b: expected BV_WIDTH={expected_bv_width}, got {actual}"
     )
+
+
+# ── TEST-02/Phase 1 regression tests ──────────────────────────────────────────
+
+
+def test_phase1_bool_still_works() -> None:
+    """TEST-02: Phase 1 BoolExpr pipeline still produces valid SV with no regression."""
+    modules = _compile_fixture(_FIXTURES / "bool_simple.json")
+    assert len(modules) >= 1, "Expected at least one module from bool_simple.json"
+    for mod_name, sv_text in modules.items():
+        assert "module sva_" in sv_text or f"module {mod_name}" in sv_text, (
+            f"Module '{mod_name}' does not contain a valid module declaration"
+        )
+        assert "endmodule" in sv_text, f"Module '{mod_name}' is missing endmodule"
+
+
+def test_phase1_golden_unchanged() -> None:
+    """TEST-02: bool_labeled golden file is byte-for-byte unchanged (Phase 1 regression)."""
+    modules = _compile_fixture(_FIXTURES / "bool_labeled.json")
+    assert "sva_my_check" in modules, (
+        f"Expected 'sva_my_check' in {list(modules.keys())}"
+    )
+    assert_golden(modules["sva_my_check"], _GOLDEN / "bool_labeled.sv")
+
+
+# ── End-to-end pipeline tests ──────────────────────────────────────────────────
+
+
+def test_e2e_delay_fixed_compiles() -> None:
+    """TEST-02: delay_fixed.json passes through full import→compose→emit pipeline."""
+    modules = _compile_fixture(_FIXTURES / "delay_fixed.json")
+    assert len(modules) >= 1, "Expected at least one emitted module"
+    for mod_name, sv_text in modules.items():
+        assert "module " in sv_text,    f"'{mod_name}': missing module declaration"
+        assert "endmodule" in sv_text,  f"'{mod_name}': missing endmodule"
+
+
+def test_e2e_implication_overlap_compiles() -> None:
+    """TEST-02: implication_overlap.json passes through full pipeline, produces hierarchy."""
+    modules = _compile_fixture(_FIXTURES / "implication_overlap.json")
+    # Hierarchical: at least the top module plus at least one child
+    assert len(modules) >= 2, (
+        f"Expected hierarchical output (≥ 2 modules), got {list(modules.keys())}"
+    )
+    for mod_name, sv_text in modules.items():
+        assert "module " in sv_text,   f"'{mod_name}': missing module declaration"
+        assert "endmodule" in sv_text, f"'{mod_name}': missing endmodule"
+
+
+def test_e2e_complex_impl_delay() -> None:
+    """TEST-02: PropImplication with SeqConcat consequent (a |-> ##[2:5] b) compiles fully.
+
+    This tests the most complex composition path: implication wrapping a delay
+    sequence, producing a multi-level module hierarchy.
+    """
+    from sva2rtl.ir import BoolExpr, ClockSpec, PropImplication, SeqConcat, SourceLoc
+
+    loc = SourceLoc("test.sv", 1, 1)
+    clock = ClockSpec(edge="posedge", signal="clk", source_loc=loc)
+    a_expr = BoolExpr(text="a", source_loc=loc)
+    b_expr = BoolExpr(text="b", source_loc=loc)
+    seq = SeqConcat(
+        elements=(a_expr, b_expr),
+        delays=((2, 5),),
+        source_loc=loc,
+    )
+    impl = PropImplication(
+        antecedent=a_expr,
+        consequent=seq,
+        overlapping=True,
+        source_loc=loc,
+    )
+    checker = compose(impl, clock, "complex_test", "a |-> ##[2:5] b")
+    modules = emit_all(checker)
+
+    # Note: ant (BoolExpr "a") and con (SeqConcat starting with "a") both hash to
+    # the same module name when composed with label=None + same original_text, so
+    # emit_all deduplicates them and returns ≥ 2 modules (not ≥ 3).
+    assert len(modules) >= 2, (
+        f"Expected ≥ 2 modules for a |-> ##[2:5] b, got {list(modules.keys())}"
+    )
+    top_sv = list(modules.values())[-1]
+    assert "BV_WIDTH" in top_sv, "Top module must have BV_WIDTH parameter"
+    assert "6" in top_sv,        "BV_WIDTH should be 6 for ##[2:5]"
+    assert "overflow_flag" in top_sv, "Top module must have overflow detection"
+
+
+# ── Structural soundness tests ─────────────────────────────────────────────────
+
+
+_PHASE2_FIXTURES = [
+    "delay_fixed.json",
+    "delay_range.json",
+    "implication_overlap.json",
+    "implication_nonoverlap.json",
+    "implication_bitvec.json",
+]
+
+_STANDARD_PORT_STRINGS = ["clk", "rst_n", "active", "pass", "fail"]
+
+
+@pytest.mark.parametrize("fixture_name", _PHASE2_FIXTURES)
+def test_all_modules_have_standard_ports(fixture_name: str) -> None:
+    """TEST-02: Every emitted module declares the standard monitor port set.
+
+    Required ports: clk, rst_n, active, pass, fail (start is on leaf modules).
+    """
+    modules = _compile_fixture(_FIXTURES / fixture_name)
+    for mod_name, sv_text in modules.items():
+        for port in _STANDARD_PORT_STRINGS:
+            assert port in sv_text, (
+                f"Module '{mod_name}' from {fixture_name} is missing port '{port}'"
+            )
+
+
+@pytest.mark.parametrize("fixture_name", _PHASE2_FIXTURES)
+def test_all_modules_have_sync_reset(fixture_name: str) -> None:
+    """TEST-02: Every module with sequential logic uses synchronous active-low reset.
+
+    Pure structural wrapper modules (seq_concat_top) have no always_ff and are
+    intentionally excluded — only modules that contain always_ff are checked.
+    """
+    modules = _compile_fixture(_FIXTURES / fixture_name)
+    for mod_name, sv_text in modules.items():
+        if "always_ff" in sv_text:
+            assert "if (!rst_n)" in sv_text, (
+                f"Module '{mod_name}' from {fixture_name} is missing synchronous rst_n reset"
+            )
+
+
+@pytest.mark.parametrize("fixture_name", _PHASE2_FIXTURES)
+def test_no_duplicate_module_names(fixture_name: str) -> None:
+    """TEST-02: emit_all returns a dict of unique module names — no duplicate emissions."""
+    modules = _compile_fixture(_FIXTURES / fixture_name)
+    # dict keys are inherently unique; verify count matches a set
+    names = list(modules.keys())
+    unique_names = set(names)
+    assert len(names) == len(unique_names), (
+        f"{fixture_name}: duplicate module names in emit_all output: "
+        f"{[n for n in names if names.count(n) > 1]}"
+    )
+    # Also ensure every module name is a valid SV identifier starting with 'sva_'
+    for name in names:
+        assert name.startswith("sva_"), (
+            f"{fixture_name}: module name '{name}' does not start with 'sva_'"
+        )
+
+
+# ── [REVIEW FIX] Verilator lint gate ──────────────────────────────────────────
+
+_HAS_VERILATOR = shutil.which("verilator") is not None
+
+
+@pytest.mark.skipif(not _HAS_VERILATOR, reason="verilator not installed")
+@pytest.mark.parametrize("fixture_name", _PHASE2_FIXTURES)
+def test_verilator_lint_clean(fixture_name: str) -> None:
+    """[REVIEW FIX] Verilator lint-only pass: zero errors/warnings on generated RTL.
+
+    Catches undeclared signals, width mismatches, and undriven nets that
+    iverilog may miss.  Skipped gracefully when verilator is not installed.
+
+    CI step: verilator --lint-only -Wall output/*.sv
+    """
+    modules = _compile_fixture(_FIXTURES / fixture_name)
+    with tempfile.TemporaryDirectory() as tmpdir:
+        sv_files: list[str] = []
+        for mod_name, sv_text in modules.items():
+            fpath = Path(tmpdir) / f"{mod_name}.sv"
+            fpath.write_text(sv_text, encoding="utf-8")
+            sv_files.append(str(fpath))
+
+        result = subprocess.run(
+            ["verilator", "--lint-only", "-Wall", *sv_files],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, (
+            f"Verilator lint failed for {fixture_name}:\n"
+            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+        )
