@@ -220,29 +220,209 @@ def test_compose_no_children_for_bool_expr() -> None:
     assert checker.children == ()
 
 
-def test_compose_unsupported_raises_unsupported_construct() -> None:
-    """SeqConcat passed to compose() raises UnsupportedConstruct."""
+def test_compose_seq_concat_returns_checker_node() -> None:
+    """SeqConcat passed to compose() returns a CheckerNode (no longer unsupported)."""
     loc = _make_loc()
     clock = _make_clock()
     node = SeqConcat(
         source_loc=loc,
-        elements=(BoolExpr(text="a", source_loc=loc),),
+        elements=(
+            BoolExpr(text="a", source_loc=loc),
+            BoolExpr(text="b", source_loc=loc),
+        ),
         delays=((1, 1),),
     )
-    with pytest.raises(UnsupportedConstruct):
-        compose(node, clock, None, "a ##1 b")
+    checker = compose(node, clock, "my_check", "a ##1 b")
+    assert isinstance(checker, CheckerNode)
 
 
-def test_compose_unsupported_carries_source_loc() -> None:
-    """UnsupportedConstruct raised for SeqConcat carries the node's source_loc."""
-    loc = _make_loc(file="bad.sv", line=5, col=3)
+def test_compose_seq_concat_template_name() -> None:
+    """SeqConcat checker uses template_name='seq_concat_top'."""
+    loc = _make_loc()
     clock = _make_clock()
     node = SeqConcat(
         source_loc=loc,
-        elements=(BoolExpr(text="a", source_loc=loc),),
+        elements=(
+            BoolExpr(text="a", source_loc=loc),
+            BoolExpr(text="b", source_loc=loc),
+        ),
         delays=((1, 1),),
     )
-    with pytest.raises(UnsupportedConstruct) as exc_info:
-        compose(node, clock, None, "a ##1 b")
-    assert exc_info.value.source_loc is not None
-    assert exc_info.value.source_loc.file == "bad.sv"
+    checker = compose(node, clock, "my_check", "a ##1 b")
+    assert checker.template_name == "seq_concat_top"
+
+
+def test_compose_seq_concat_module_name() -> None:
+    """SeqConcat checker module_name is derived from label."""
+    loc = _make_loc()
+    clock = _make_clock()
+    node = SeqConcat(
+        source_loc=loc,
+        elements=(
+            BoolExpr(text="a", source_loc=loc),
+            BoolExpr(text="b", source_loc=loc),
+        ),
+        delays=((1, 1),),
+    )
+    checker = compose(node, clock, "delay_check", "a ##1 b")
+    assert checker.module_name == "sva_delay_check"
+
+
+def test_compose_seq_concat_children_count_two_elements() -> None:
+    """a ##1 b produces 3 children: bool_a, delay_1_1, bool_b."""
+    loc = _make_loc()
+    clock = _make_clock()
+    node = SeqConcat(
+        source_loc=loc,
+        elements=(
+            BoolExpr(text="a", source_loc=loc),
+            BoolExpr(text="b", source_loc=loc),
+        ),
+        delays=((1, 1),),
+    )
+    checker = compose(node, clock, "my_check", "a ##1 b")
+    assert len(checker.children) == 3
+
+
+def test_compose_seq_concat_delay_child_template() -> None:
+    """The delay child uses template_name='concat_delay'."""
+    loc = _make_loc()
+    clock = _make_clock()
+    node = SeqConcat(
+        source_loc=loc,
+        elements=(
+            BoolExpr(text="a", source_loc=loc),
+            BoolExpr(text="b", source_loc=loc),
+        ),
+        delays=((1, 1),),
+    )
+    checker = compose(node, clock, "my_check", "a ##1 b")
+    # children: [bool_a_checker, delay_checker, bool_b_checker]
+    delay_child = checker.children[1]
+    assert delay_child.template_name == "concat_delay"
+
+
+def test_compose_seq_concat_delay_params() -> None:
+    """Delay child has correct delay_min, delay_max, cnt_width params."""
+    loc = _make_loc()
+    clock = _make_clock()
+    node = SeqConcat(
+        source_loc=loc,
+        elements=(
+            BoolExpr(text="a", source_loc=loc),
+            BoolExpr(text="b", source_loc=loc),
+        ),
+        delays=((3, 3),),
+    )
+    checker = compose(node, clock, "my_check", "a ##3 b")
+    delay_child = checker.children[1]
+    assert delay_child.params["delay_min"] == "3"
+    assert delay_child.params["delay_max"] == "3"
+    assert delay_child.params["cnt_width"] == "2"  # ceil(log2(4)) = 2
+
+
+def test_compose_seq_concat_range_delay_params() -> None:
+    """Range delay ##[2:5] produces cnt_width=3."""
+    loc = _make_loc()
+    clock = _make_clock()
+    node = SeqConcat(
+        source_loc=loc,
+        elements=(
+            BoolExpr(text="a", source_loc=loc),
+            BoolExpr(text="b", source_loc=loc),
+        ),
+        delays=((2, 5),),
+    )
+    checker = compose(node, clock, "my_check", "a ##[2:5] b")
+    delay_child = checker.children[1]
+    assert delay_child.params["delay_min"] == "2"
+    assert delay_child.params["delay_max"] == "5"
+    assert delay_child.params["cnt_width"] == "3"  # ceil(log2(6)) = 3
+
+
+def test_compose_seq_concat_observed_signals() -> None:
+    """Observed signals include signals from all bool_expr children."""
+    loc = _make_loc()
+    clock = _make_clock()
+    node = SeqConcat(
+        source_loc=loc,
+        elements=(
+            BoolExpr(text="a", source_loc=loc),
+            BoolExpr(text="b", source_loc=loc),
+        ),
+        delays=((1, 1),),
+    )
+    checker = compose(node, clock, "my_check", "a ##1 b")
+    sig_names = {n for n, _ in checker.observed_signals}
+    assert "a" in sig_names
+    assert "b" in sig_names
+
+
+def test_compose_seq_concat_source_loc_preserved() -> None:
+    """CheckerNode.source_loc matches the SeqConcat source_loc."""
+    loc = _make_loc(file="seq.sv", line=7, col=1)
+    clock = _make_clock()
+    node = SeqConcat(
+        source_loc=loc,
+        elements=(
+            BoolExpr(text="x", source_loc=loc),
+            BoolExpr(text="y", source_loc=loc),
+        ),
+        delays=((2, 2),),
+    )
+    checker = compose(node, clock, "check", "x ##2 y")
+    assert checker.source_loc == loc
+
+
+def test_compose_seq_concat_three_elements_children_count() -> None:
+    """a ##1 b ##2 c produces 5 children: elem, delay, elem, delay, elem."""
+    loc = _make_loc()
+    clock = _make_clock()
+    node = SeqConcat(
+        source_loc=loc,
+        elements=(
+            BoolExpr(text="a", source_loc=loc),
+            BoolExpr(text="b", source_loc=loc),
+            BoolExpr(text="c", source_loc=loc),
+        ),
+        delays=((1, 1), (2, 2)),
+    )
+    checker = compose(node, clock, "my_check", "a ##1 b ##2 c")
+    assert len(checker.children) == 5
+
+
+def test_compose_seq_concat_zero_delay_params() -> None:
+    """##0 delay produces cnt_width=1, delay_min='0', delay_max='0'."""
+    loc = _make_loc()
+    clock = _make_clock()
+    node = SeqConcat(
+        source_loc=loc,
+        elements=(
+            BoolExpr(text="a", source_loc=loc),
+            BoolExpr(text="b", source_loc=loc),
+        ),
+        delays=((0, 0),),
+    )
+    checker = compose(node, clock, "zero_check", "a ##0 b")
+    delay_child = checker.children[1]
+    assert delay_child.params["delay_min"] == "0"
+    assert delay_child.params["delay_max"] == "0"
+    assert delay_child.params["cnt_width"] == "1"
+
+
+def test_compose_unsupported_type_raises() -> None:
+    """An unknown SVANode subtype raises UnsupportedConstruct."""
+    from sva2rtl.ir import PropImplication
+
+    loc = _make_loc()
+    clock = _make_clock()
+    bool_node = BoolExpr(text="a", source_loc=loc)
+    # PropImplication is unsupported in Phase 2
+    impl_node = PropImplication(
+        antecedent=bool_node,
+        consequent=bool_node,
+        overlapping=True,
+        source_loc=loc,
+    )
+    with pytest.raises(UnsupportedConstruct):
+        compose(impl_node, clock, None, "a |-> b")

@@ -15,11 +15,12 @@ Design decisions:
 from __future__ import annotations
 
 import hashlib
+import math
 import re
 
 from sva2rtl import __version__
 from sva2rtl.errors import UnsupportedConstruct
-from sva2rtl.ir import BoolExpr, CheckerNode, ClockSpec, SVANode
+from sva2rtl.ir import BoolExpr, CheckerNode, ClockSpec, SeqConcat, SourceLoc, SVANode
 
 # ── SV keyword table ──────────────────────────────────────────────────────
 
@@ -344,13 +345,13 @@ def compose(
 ) -> CheckerNode:
     """Transform a top-level SVA IR node into an emittable ``CheckerNode``.
 
-    For Phase 1, only ``BoolExpr`` nodes are supported.  All other node kinds
-    raise ``UnsupportedConstruct`` with a precise source location.
+    Supports ``BoolExpr`` (Phase 1) and ``SeqConcat`` (Phase 2).  All other
+    node kinds raise ``UnsupportedConstruct`` with a precise source location.
 
     Parameters
     ----------
     node:
-        The SVA IR node to compile.  Must be a ``BoolExpr`` in Phase 1.
+        The SVA IR node to compile.
     clock:
         Clock event extracted from the property's ``@(posedge ...)`` annotation.
     label:
@@ -367,20 +368,34 @@ def compose(
     Raises
     ------
     UnsupportedConstruct
-        When *node* is not a ``BoolExpr`` (e.g. ``SeqConcat``,
-        ``PropImplication``).
+        When *node* is an unsupported IR type (e.g. ``PropImplication``).
     """
-    if not isinstance(node, BoolExpr):
-        raise UnsupportedConstruct(
-            message=(
-                f"Phase 1 only supports boolean property nodes; "
-                f"got '{type(node).__name__}'. "
-                "Use a future version of sva2rtl for this construct."
-            ),
-            construct_name=type(node).__name__,
-            source_loc=node.source_loc,
-        )
+    match node:
+        case BoolExpr():
+            return _compose_bool_expr(node, clock, label, original_text)
+        case SeqConcat():
+            return _compose_seq_concat(node, clock, label, original_text)
+        case _:
+            raise UnsupportedConstruct(
+                message=(
+                    f"No composer for IR node '{type(node).__name__}'. "
+                    "Use a future version of sva2rtl for this construct."
+                ),
+                construct_name=type(node).__name__,
+                source_loc=node.source_loc,
+            )
 
+
+# ── Private helpers ────────────────────────────────────────────────────────
+
+
+def _compose_bool_expr(
+    node: BoolExpr,
+    clock: ClockSpec,
+    label: str | None,
+    original_text: str,
+) -> CheckerNode:
+    """Build a leaf CheckerNode for a BoolExpr."""
     module_name = module_name_from_label(label, original_text)
     observed = extract_signals(node.text)
 
@@ -402,3 +417,98 @@ def compose(
         source_loc=node.source_loc,
         children=(),
     )
+
+
+def _compose_seq_concat(
+    node: SeqConcat,
+    clock: ClockSpec,
+    label: str | None,
+    original_text: str,
+) -> CheckerNode:
+    """Build a hierarchical CheckerNode tree for a SeqConcat.
+
+    Structure: seq_concat_top wrapper → interleaved (bool_expr, delay) children
+    following token-passing wiring: A.pass → delay.start → B.start.
+    """
+    module_name = module_name_from_label(label, original_text)
+    children: list[CheckerNode] = []
+
+    for i, elem in enumerate(node.elements):
+        # Use a hash-based sub-label so each child gets a unique module name
+        child_label = f"{module_name}_e{i}"
+        elem_checker = compose(elem, clock, child_label, original_text)
+        children.append(elem_checker)
+
+        if i < len(node.delays):
+            delay_min, delay_max = node.delays[i]
+            delay_checker = _make_delay_node(delay_min, delay_max, clock, node.source_loc)
+            children.append(delay_checker)
+
+    all_signals = _collect_signals(children)
+
+    params: dict[str, str] = {
+        "module_name": module_name,
+        "clock_signal": clock.signal,
+        "clock_edge": clock.edge,
+        "source_loc": str(node.source_loc),
+        "sva2rtl_version": __version__,
+        "original_text": original_text,
+    }
+
+    return CheckerNode(
+        template_name="seq_concat_top",
+        module_name=module_name,
+        params=params,
+        observed_signals=all_signals,
+        source_loc=node.source_loc,
+        children=tuple(children),
+    )
+
+
+def _make_delay_node(
+    delay_min: int,
+    delay_max: int,
+    clock: ClockSpec,
+    source_loc: SourceLoc,
+) -> CheckerNode:
+    """Build a leaf CheckerNode for a counter-encoded delay module."""
+    cnt_width = max(1, math.ceil(math.log2(delay_max + 1))) if delay_max > 0 else 1
+    mod_name = f"sva_delay_{delay_min}_{delay_max}"
+
+    if delay_min == delay_max:
+        orig = f"##{delay_min}"
+    else:
+        orig = f"##[{delay_min}:{delay_max}]"
+
+    params: dict[str, str] = {
+        "module_name": mod_name,
+        "delay_min": str(delay_min),
+        "delay_max": str(delay_max),
+        "cnt_width": str(cnt_width),
+        "clock_signal": clock.signal,
+        "clock_edge": clock.edge,
+        "source_loc": str(source_loc),
+        "sva2rtl_version": __version__,
+        "original_text": orig,
+    }
+
+    return CheckerNode(
+        template_name="concat_delay",
+        module_name=mod_name,
+        params=params,
+        observed_signals=(),
+        source_loc=source_loc,
+        children=(),
+    )
+
+
+def _collect_signals(
+    children: list[CheckerNode],
+) -> tuple[tuple[str, str], ...]:
+    """Collect all unique observed signals from a list of child CheckerNodes."""
+    seen: dict[str, None] = {}
+    for child in children:
+        for port_name, sig_name in child.observed_signals:
+            if port_name not in seen:
+                seen[port_name] = None
+    return tuple((name, name) for name in seen)
