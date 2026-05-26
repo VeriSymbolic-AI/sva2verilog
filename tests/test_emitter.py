@@ -403,3 +403,117 @@ def test_write_output_dir_creates_dir_if_missing(tmp_path: Path) -> None:
     write_output_dir(modules, new_dir)
     assert new_dir.is_dir()
     assert len(list(new_dir.iterdir())) == len(modules)
+
+
+# ── Implication (|-> and |=>) emitter tests ───────────────────────────────
+
+
+def _load_impl_checker(fixture_name: str) -> "CheckerNode":
+    """Load an implication fixture and return its top CheckerNode."""
+    return _load_fixture_checker(fixture_name)
+
+
+def test_emit_overlap_bitvec_contains_overflow_flag() -> None:
+    """Emitted overlap_bitvec module contains 'overflow_flag' output port."""
+    checker = _load_impl_checker("implication_overlap")
+    modules = emit_all(checker)
+    top_sv = modules[checker.module_name]
+    assert "overflow_flag" in top_sv
+
+
+def test_emit_overlap_bitvec_contains_bv_register() -> None:
+    """Emitted overlap_bitvec module contains 'bv_q' shift register."""
+    checker = _load_impl_checker("implication_overlap")
+    modules = emit_all(checker)
+    top_sv = modules[checker.module_name]
+    assert "bv_q" in top_sv
+
+
+def test_emit_overlap_bitvec_contains_halt_gating() -> None:
+    """Emitted overlap_bitvec module gates active/pass/fail to 0 when halted."""
+    checker = _load_impl_checker("implication_overlap")
+    modules = emit_all(checker)
+    top_sv = modules[checker.module_name]
+    # The halt gating pattern: overflow_flag_q ? 1'b0 : ...
+    assert "overflow_flag_q ? 1'b0" in top_sv
+
+
+def test_emit_overlap_bitvec_contains_endmodule() -> None:
+    """Emitted overlap_bitvec module ends with 'endmodule'."""
+    checker = _load_impl_checker("implication_overlap")
+    modules = emit_all(checker)
+    top_sv = modules[checker.module_name]
+    assert "endmodule" in top_sv
+
+
+def test_emit_overlap_bitvec_bv_width_param() -> None:
+    """Emitted overlap_bitvec module for 'a |-> b' has BV_WIDTH = 1."""
+    checker = _load_impl_checker("implication_overlap")
+    modules = emit_all(checker)
+    top_sv = modules[checker.module_name]
+    assert "BV_WIDTH = 1" in top_sv
+
+
+def test_emit_nonoverlap_contains_delay_register() -> None:
+    """Emitted nonoverlap module contains 'ant_pass_delayed_q' 1-cycle register."""
+    checker = _load_impl_checker("implication_nonoverlap")
+    modules = emit_all(checker)
+    top_sv = modules[checker.module_name]
+    assert "ant_pass_delayed" in top_sv
+
+
+def test_emit_nonoverlap_contains_overflow_flag() -> None:
+    """Emitted nonoverlap module contains 'overflow_flag' output."""
+    checker = _load_impl_checker("implication_nonoverlap")
+    modules = emit_all(checker)
+    top_sv = modules[checker.module_name]
+    assert "overflow_flag" in top_sv
+
+
+def test_emit_bitvec_impl_bv_width_six() -> None:
+    """Emitted bitvec implication module for 'a |-> a ##[2:5] b' has BV_WIDTH = 6."""
+    checker = _load_impl_checker("implication_bitvec")
+    modules = emit_all(checker)
+    top_sv = modules[checker.module_name]
+    assert "BV_WIDTH = 6" in top_sv
+
+
+def test_emit_all_implication_overlap_module_count() -> None:
+    """emit_all for 'a |-> b' returns at least 2 modules (top + children)."""
+    checker = _load_impl_checker("implication_overlap")
+    modules = emit_all(checker)
+    assert len(modules) >= 2
+
+
+def test_emit_all_implication_bitvec_module_count() -> None:
+    """emit_all for 'a |-> a ##[2:5] b' returns at least 2 modules (top + child)."""
+    checker = _load_impl_checker("implication_bitvec")
+    modules = emit_all(checker)
+    assert len(modules) >= 2
+
+
+# ── Golden comparisons for implication modules ───────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "fixture_name,golden_file,module_key_attr",
+    [
+        ("implication_overlap", "overlap_impl", "module_name"),
+        ("implication_nonoverlap", "nonoverlap_impl", "module_name"),
+        ("implication_bitvec", "sva_bitvec_impl", "module_name"),
+    ],
+)
+def test_emit_implication_golden_match(
+    fixture_name: str, golden_file: str, module_key_attr: str
+) -> None:
+    """emit_all() for implication fixtures matches corresponding golden SV files."""
+    checker = _load_fixture_checker(fixture_name)
+    modules = emit_all(checker)
+    module_key = getattr(checker, module_key_attr)
+    actual = modules[module_key]
+    golden_path = GOLDEN_DIR / f"{golden_file}.sv"
+    expected = golden_path.read_text(encoding="utf-8")
+    assert _norm(actual) == _norm(expected), (
+        f"Golden mismatch for {golden_file}:\n"
+        f"Regenerate golden with emit_all() and save to tests/golden/{golden_file}.sv"
+    )

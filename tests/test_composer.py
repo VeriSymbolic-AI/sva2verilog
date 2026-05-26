@@ -8,7 +8,7 @@ import pytest
 
 from sva2rtl.composer import compose, extract_signals, module_name_from_label
 from sva2rtl.errors import UnsupportedConstruct
-from sva2rtl.ir import BoolExpr, CheckerNode, ClockSpec, SeqConcat, SourceLoc
+from sva2rtl.ir import BoolExpr, CheckerNode, ClockSpec, PropImplication, SeqConcat, SourceLoc, SVANode
 
 # ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -412,17 +412,143 @@ def test_compose_seq_concat_zero_delay_params() -> None:
 
 def test_compose_unsupported_type_raises() -> None:
     """An unknown SVANode subtype raises UnsupportedConstruct."""
-    from sva2rtl.ir import PropImplication
+    from dataclasses import dataclass
+
+    from sva2rtl.ir import SVANode
+
+    @dataclass(frozen=True)
+    class _UnknownNode(SVANode):
+        """Stub node not handled by compose()."""
 
     loc = _make_loc()
     clock = _make_clock()
-    bool_node = BoolExpr(text="a", source_loc=loc)
-    # PropImplication is unsupported in Phase 2
-    impl_node = PropImplication(
-        antecedent=bool_node,
-        consequent=bool_node,
+    unknown = _UnknownNode(source_loc=loc)
+    with pytest.raises(UnsupportedConstruct):
+        compose(unknown, clock, None, "unknown")
+
+
+# ── PropImplication composition ───────────────────────────────────────────
+
+
+def _make_impl_node(
+    overlapping: bool = True,
+    consequent_delays: tuple[tuple[int, int], ...] | None = None,
+) -> PropImplication:
+    """Build a PropImplication IR node for testing."""
+    loc = _make_loc()
+    ant = BoolExpr(text="a", source_loc=loc)
+    if consequent_delays is not None:
+        con: SVANode = SeqConcat(
+            source_loc=loc,
+            elements=tuple(
+                BoolExpr(text=chr(ord("a") + i + 1), source_loc=loc)
+                for i in range(len(consequent_delays) + 1)
+            ),
+            delays=consequent_delays,
+        )
+    else:
+        con = BoolExpr(text="b", source_loc=loc)
+    return PropImplication(antecedent=ant, consequent=con, overlapping=overlapping, source_loc=loc)
+
+
+def test_compose_implication_overlap_returns_checker() -> None:
+    """compose(PropImplication(overlapping=True, ...)) returns a CheckerNode."""
+    loc = _make_loc()
+    clock = _make_clock()
+    node = PropImplication(
+        antecedent=BoolExpr(text="a", source_loc=loc),
+        consequent=BoolExpr(text="b", source_loc=loc),
         overlapping=True,
         source_loc=loc,
     )
-    with pytest.raises(UnsupportedConstruct):
-        compose(impl_node, clock, None, "a |-> b")
+    checker = compose(node, clock, "impl_check", "a |-> b")
+    assert isinstance(checker, CheckerNode)
+
+
+def test_compose_implication_overlap_template_name() -> None:
+    """PropImplication with overlapping=True uses 'overlap_bitvec' template."""
+    node = _make_impl_node(overlapping=True)
+    clock = _make_clock()
+    checker = compose(node, clock, "impl_check", "a |-> b")
+    assert checker.template_name == "overlap_bitvec"
+
+
+def test_compose_implication_nonoverlap_template_name() -> None:
+    """PropImplication with overlapping=False uses 'nonoverlap' template."""
+    node = _make_impl_node(overlapping=False)
+    clock = _make_clock()
+    checker = compose(node, clock, "nonoverlap_check", "a |=> b")
+    assert checker.template_name == "nonoverlap"
+
+
+def test_compose_implication_children_count() -> None:
+    """PropImplication checker has exactly 2 children (antecedent + consequent)."""
+    node = _make_impl_node()
+    clock = _make_clock()
+    checker = compose(node, clock, "impl_check", "a |-> b")
+    assert len(checker.children) == 2
+
+
+def test_compose_implication_antecedent_child_is_bool_expr() -> None:
+    """First child of PropImplication checker uses 'bool_expr' template."""
+    node = _make_impl_node()
+    clock = _make_clock()
+    checker = compose(node, clock, "impl_check", "a |-> b")
+    assert checker.children[0].template_name == "bool_expr"
+
+
+def test_compose_implication_consequent_child_is_bool_expr() -> None:
+    """Second child of PropImplication checker uses 'bool_expr' template for BoolExpr consequent."""
+    node = _make_impl_node()
+    clock = _make_clock()
+    checker = compose(node, clock, "impl_check", "a |-> b")
+    assert checker.children[1].template_name == "bool_expr"
+
+
+def test_compose_implication_bv_width_bool_consequent() -> None:
+    """BoolExpr consequent produces bv_width='1' (single-cycle, max_delay=0)."""
+    node = _make_impl_node(consequent_delays=None)
+    clock = _make_clock()
+    checker = compose(node, clock, "impl_check", "a |-> b")
+    assert checker.params["bv_width"] == "1"
+
+
+def test_compose_implication_bv_width_delay_consequent() -> None:
+    """SeqConcat consequent with delays=((2,5),) produces bv_width='6'."""
+    node = _make_impl_node(consequent_delays=((2, 5),))
+    clock = _make_clock()
+    checker = compose(node, clock, "impl_check", "a |-> a ##[2:5] b")
+    assert checker.params["bv_width"] == "6"
+
+
+def test_compose_implication_bv_width_multi_delay() -> None:
+    """SeqConcat consequent with delays=((2,2),(3,3)) produces bv_width='6' (max_delay=5, width=6)."""
+    node = _make_impl_node(consequent_delays=((2, 2), (3, 3)))
+    clock = _make_clock()
+    checker = compose(node, clock, "impl_check", "a |-> a ##2 b ##3 c")
+    assert checker.params["bv_width"] == "6"
+
+
+def test_compose_implication_with_delay_consequent_has_seq_children() -> None:
+    """PropImplication with SeqConcat consequent: second child is seq_concat_top."""
+    node = _make_impl_node(consequent_delays=((2, 5),))
+    clock = _make_clock()
+    checker = compose(node, clock, "impl_check", "a |-> a ##[2:5] b")
+    # consequent child should be seq_concat_top with its own sub-children
+    assert checker.children[1].template_name == "seq_concat_top"
+    assert len(checker.children[1].children) > 0
+
+
+def test_compose_implication_does_not_raise() -> None:
+    """compose() on PropImplication does NOT raise UnsupportedConstruct."""
+    loc = _make_loc()
+    clock = _make_clock()
+    node = PropImplication(
+        antecedent=BoolExpr(text="a", source_loc=loc),
+        consequent=BoolExpr(text="b", source_loc=loc),
+        overlapping=True,
+        source_loc=loc,
+    )
+    # Should not raise
+    checker = compose(node, clock, None, "a |-> b")
+    assert checker is not None
