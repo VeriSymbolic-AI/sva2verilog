@@ -20,7 +20,7 @@ import re
 
 from sva2rtl import __version__
 from sva2rtl.errors import UnsupportedConstruct
-from sva2rtl.ir import BoolExpr, CheckerNode, ClockSpec, SeqConcat, SourceLoc, SVANode
+from sva2rtl.ir import BoolExpr, CheckerNode, ClockSpec, PropImplication, SeqConcat, SourceLoc, SVANode
 
 # ── SV keyword table ──────────────────────────────────────────────────────
 
@@ -375,6 +375,8 @@ def compose(
             return _compose_bool_expr(node, clock, label, original_text)
         case SeqConcat():
             return _compose_seq_concat(node, clock, label, original_text)
+        case PropImplication():
+            return _compose_implication(node, clock, label, original_text)
         case _:
             raise UnsupportedConstruct(
                 message=(
@@ -502,6 +504,60 @@ def _make_delay_node(
         observed_signals=(),
         source_loc=source_loc,
         children=(),
+    )
+
+
+def _compute_bv_width(consequent: SVANode) -> int:
+    """Compute BV_WIDTH = max(max_delay_in_consequent + 1, 1).
+
+    max_delay = sum of all delay_max values in the consequent chain.
+    Each bit position in the shift register represents one cycle of thread age,
+    so we need enough positions for the longest possible consequent evaluation
+    window.
+    """
+    match consequent:
+        case BoolExpr():
+            return 1  # single-cycle: max_delay=0, width=1
+        case SeqConcat():
+            max_delay = sum(d_max for _, d_max in consequent.delays)
+            return max(max_delay + 1, 1)
+        case _:
+            return 8  # safe default for unknown structures
+
+
+def _compose_implication(
+    node: PropImplication,
+    clock: ClockSpec,
+    label: str | None,
+    original_text: str,
+) -> CheckerNode:
+    """Build a hierarchical CheckerNode for a PropImplication (|-> or |=>)."""
+    module_name = module_name_from_label(label, original_text)
+    template = "overlap_bitvec" if node.overlapping else "nonoverlap"
+
+    ant_checker = compose(node.antecedent, clock, None, original_text)
+    con_checker = compose(node.consequent, clock, None, original_text)
+
+    bv_width = _compute_bv_width(node.consequent)
+    all_signals = _collect_signals([ant_checker, con_checker])
+
+    params: dict[str, str] = {
+        "module_name": module_name,
+        "bv_width": str(bv_width),
+        "clock_signal": clock.signal,
+        "clock_edge": clock.edge,
+        "source_loc": str(node.source_loc),
+        "sva2rtl_version": __version__,
+        "original_text": original_text,
+    }
+
+    return CheckerNode(
+        template_name=template,
+        module_name=module_name,
+        params=params,
+        observed_signals=all_signals,
+        source_loc=node.source_loc,
+        children=(ant_checker, con_checker),
     )
 
 
