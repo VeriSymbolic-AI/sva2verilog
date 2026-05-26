@@ -8,7 +8,15 @@ import pytest
 
 from sva2rtl.composer import compose, extract_signals, module_name_from_label
 from sva2rtl.errors import UnsupportedConstruct
-from sva2rtl.ir import BoolExpr, CheckerNode, ClockSpec, PropImplication, SeqConcat, SourceLoc, SVANode
+from sva2rtl.ir import (
+    BoolExpr,
+    CheckerNode,
+    ClockSpec,
+    PropImplication,
+    SeqConcat,
+    SourceLoc,
+    SVANode,
+)
 
 # ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -522,7 +530,7 @@ def test_compose_implication_bv_width_delay_consequent() -> None:
 
 
 def test_compose_implication_bv_width_multi_delay() -> None:
-    """SeqConcat consequent with delays=((2,2),(3,3)) produces bv_width='6' (max_delay=5, width=6)."""
+    """SeqConcat consequent with delays=((2,2),(3,3)) -> bv_width='6'."""
     node = _make_impl_node(consequent_delays=((2, 2), (3, 3)))
     clock = _make_clock()
     checker = compose(node, clock, "impl_check", "a |-> a ##2 b ##3 c")

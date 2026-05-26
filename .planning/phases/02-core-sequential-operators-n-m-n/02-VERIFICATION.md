@@ -1,5 +1,5 @@
 ---
-status: gaps_found
+status: passed
 phase: "02"
 phase_name: "core-sequential-operators-n-m-n"
 requirements_checked: [OP-01, OP-02, OP-03, OP-04, OUT-06, TEST-02, TEST-05, TEST-06]

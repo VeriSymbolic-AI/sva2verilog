@@ -20,7 +20,15 @@ import re
 
 from sva2rtl import __version__
 from sva2rtl.errors import UnsupportedConstruct
-from sva2rtl.ir import BoolExpr, CheckerNode, ClockSpec, PropImplication, SeqConcat, SourceLoc, SVANode
+from sva2rtl.ir import (
+    BoolExpr,
+    CheckerNode,
+    ClockSpec,
+    PropImplication,
+    SeqConcat,
+    SourceLoc,
+    SVANode,
+)
 
 # ── SV keyword table ──────────────────────────────────────────────────────
 
