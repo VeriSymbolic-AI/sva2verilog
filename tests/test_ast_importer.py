@@ -14,7 +14,7 @@ from sva2rtl.ast_importer import (
     import_assertion,
 )
 from sva2rtl.errors import UnsupportedConstruct
-from sva2rtl.ir import BoolExpr, ClockSpec, SourceLoc
+from sva2rtl.ir import BoolExpr, ClockSpec, SeqConcat, SourceLoc
 
 # Fixture directory
 _FIXTURES = Path(__file__).parent / "fixtures"
@@ -205,22 +205,69 @@ def test_import_assertion_complex_expr() -> None:
     assert "!" in text
 
 
-def test_import_assertion_unsupported() -> None:
-    """unsupported_delay.json raises UnsupportedConstruct with source_loc."""
+def test_import_assertion_seq_concat_returns_seq_concat() -> None:
+    """unsupported_delay.json (a ##1 b) now returns SeqConcat — no longer unsupported."""
     ast = json.loads((_FIXTURES / "unsupported_delay.json").read_text())
-    with pytest.raises(UnsupportedConstruct) as exc_info:
-        import_assertion(ast)
-    assert exc_info.value.source_loc is not None
-    assert exc_info.value.source_loc.line > 0
+    node, clock, text, label = import_assertion(ast)
+    assert isinstance(node, SeqConcat)
 
 
-def test_import_assertion_unsupported_construct_name() -> None:
-    """UnsupportedConstruct from SequenceConcat has descriptive construct_name."""
+def test_import_assertion_seq_concat_delays() -> None:
+    """a ##1 b produces delays=((1, 1),) — one delay for two elements."""
     ast = json.loads((_FIXTURES / "unsupported_delay.json").read_text())
-    with pytest.raises(UnsupportedConstruct) as exc_info:
-        import_assertion(ast)
-    name = exc_info.value.construct_name.lower()
-    assert "##n" in name or "sequence" in name
+    node, _, _, _ = import_assertion(ast)
+    assert isinstance(node, SeqConcat)
+    assert node.delays == ((1, 1),)
+
+
+def test_import_assertion_seq_concat_element_count() -> None:
+    """a ##1 b produces exactly two child elements."""
+    ast = json.loads((_FIXTURES / "unsupported_delay.json").read_text())
+    node, _, _, _ = import_assertion(ast)
+    assert isinstance(node, SeqConcat)
+    assert len(node.elements) == 2
+
+
+def test_import_assertion_seq_concat_elements_are_bool_expr() -> None:
+    """Each element of a ##1 b is a BoolExpr."""
+    ast = json.loads((_FIXTURES / "unsupported_delay.json").read_text())
+    node, _, _, _ = import_assertion(ast)
+    assert isinstance(node, SeqConcat)
+    assert isinstance(node.elements[0], BoolExpr)
+    assert isinstance(node.elements[1], BoolExpr)
+
+
+def test_import_assertion_seq_concat_element_texts() -> None:
+    """Elements of a ##1 b have texts 'a' and 'b'."""
+    ast = json.loads((_FIXTURES / "unsupported_delay.json").read_text())
+    node, _, _, _ = import_assertion(ast)
+    assert isinstance(node, SeqConcat)
+    assert isinstance(node.elements[0], BoolExpr)
+    assert isinstance(node.elements[1], BoolExpr)
+    assert node.elements[0].text == "a"
+    assert node.elements[1].text == "b"
+
+
+def test_import_assertion_seq_concat_text_reconstruction() -> None:
+    """Text for a ##1 b is reconstructed as 'a ##1 b'."""
+    ast = json.loads((_FIXTURES / "unsupported_delay.json").read_text())
+    _, _, text, _ = import_assertion(ast)
+    assert "##1" in text or "##" in text
+    assert "a" in text
+    assert "b" in text
+
+
+def test_import_assertion_seq_concat_clock() -> None:
+    """Clock extracted from unsupported_delay.json is posedge clk."""
+    ast = json.loads((_FIXTURES / "unsupported_delay.json").read_text())
+    _, clock, _, _ = import_assertion(ast)
+    assert clock.edge == "posedge"
+    assert clock.signal == "clk"
+
+
+def test_import_assertion_sequence_repetition_still_unsupported() -> None:
+    """SequenceRepetition is still unsupported in Phase 2."""
+    assert "SequenceRepetition" in UNSUPPORTED_KINDS_PHASE1
 
 
 # ── extract_source_loc tests ──────────────────────────────────────────────
@@ -257,11 +304,6 @@ def test_extract_source_loc_partial_fields() -> None:
 
 
 # ── UNSUPPORTED_KINDS_PHASE1 sanity check ────────────────────────────────
-
-
-def test_unsupported_kinds_table_has_sequence_concat() -> None:
-    """UNSUPPORTED_KINDS_PHASE1 must reject SequenceConcat."""
-    assert "SequenceConcat" in UNSUPPORTED_KINDS_PHASE1
 
 
 def test_unsupported_kinds_table_has_sequence_repetition() -> None:

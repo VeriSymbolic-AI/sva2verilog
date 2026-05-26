@@ -20,7 +20,7 @@ from __future__ import annotations
 from typing import Any
 
 from sva2rtl.errors import SvaCompileError, UnsupportedConstruct
-from sva2rtl.ir import BoolExpr, ClockSpec, SourceLoc, SVANode
+from sva2rtl.ir import BoolExpr, ClockSpec, SeqConcat, SourceLoc, SVANode
 
 # ── Operator tables ────────────────────────────────────────────────────────
 
@@ -47,7 +47,6 @@ _UNARY_OPS: dict[str, str] = {
 
 # Phase 1 unsupported node kinds; value is a human-readable construct name.
 UNSUPPORTED_KINDS_PHASE1: dict[str, str] = {
-    "SequenceConcat": "##N sequence concatenation (Phase 2)",
     "SequenceRepetition": "[*N] consecutive repetition (Phase 2)",
 }
 
@@ -289,12 +288,96 @@ def _import_concurrent_assertion(
     clock_spec = _extract_clock(body)
     expr_node: dict[str, Any] = body.get("expr", {})
 
-    # Reject unsupported top-level expression kinds before recursing
-    _check_unsupported(expr_node, extract_source_loc(expr_node))
+    match expr_node.get("kind"):
+        case "SequenceConcat":
+            seq_ir = _build_seq_concat(expr_node, source_loc)
+            ir_node: SVANode = seq_ir
+            text = _reconstruct_seq_text(seq_ir)
+        case _:
+            _check_unsupported(expr_node, extract_source_loc(expr_node))
+            text = expr_to_sv(expr_node)
+            ir_node = BoolExpr(text=text, source_loc=source_loc)
 
-    text = expr_to_sv(expr_node)
-    ir_node: SVANode = BoolExpr(text=text, source_loc=source_loc)
     return ir_node, clock_spec, text, label
+
+
+def _dispatch_expr_to_ir(node: dict[str, Any]) -> SVANode:
+    """Convert an expression node to an SVANode (BoolExpr or SeqConcat).
+
+    Used when building child elements of a SequenceConcat.
+    """
+    source_loc = extract_source_loc(node)
+    match node.get("kind"):
+        case "SequenceConcat":
+            return _build_seq_concat(node, source_loc)
+        case _:
+            _check_unsupported(node, source_loc)
+            text = expr_to_sv(node)
+            return BoolExpr(text=text, source_loc=source_loc)
+
+
+def _build_seq_concat(node: dict[str, Any], source_loc: SourceLoc) -> SeqConcat:
+    """Build a SeqConcat IR node from a slang SequenceConcat JSON node.
+
+    In slang JSON each element carries the delay AFTER that element
+    (before the next one).  The last element always has min=0, max=0 as a
+    trailing sentinel and MUST be skipped.
+    """
+    elements_raw: list[dict[str, Any]] = node.get("elements", [])
+    elements: list[SVANode] = []
+    delays: list[tuple[int, int]] = []
+
+    for i, elem in enumerate(elements_raw):
+        seq_node = elem.get("sequence", {})
+        elements.append(_dispatch_expr_to_ir(seq_node))
+
+        # Skip last element's delay — always (0, 0) sentinel in slang JSON
+        if i < len(elements_raw) - 1:
+            d_min = int(elem.get("min", "0"))
+            d_max = int(elem.get("max", "0"))
+
+            if d_min < 0 or d_max < 0:
+                elem_loc = extract_source_loc(elem)
+                raise SvaCompileError(
+                    message=(
+                        f"SVA-E003: Invalid delay range [{d_min}:{d_max}] — "
+                        f"negative delay value at {elem_loc}"
+                    )
+                )
+            if d_min > d_max:
+                elem_loc = extract_source_loc(elem)
+                raise SvaCompileError(
+                    message=(
+                        f"SVA-E003: Invalid delay range [{d_min}:{d_max}] — "
+                        f"minimum exceeds maximum at {elem_loc}"
+                    )
+                )
+            delays.append((d_min, d_max))
+
+    return SeqConcat(
+        elements=tuple(elements),
+        delays=tuple(delays),
+        source_loc=source_loc,
+    )
+
+
+def _reconstruct_seq_text(node: SeqConcat) -> str:
+    """Reconstruct an SVA text representation from a SeqConcat IR node."""
+    parts: list[str] = []
+    for i, elem in enumerate(node.elements):
+        if isinstance(elem, BoolExpr):
+            parts.append(elem.text)
+        elif isinstance(elem, SeqConcat):
+            parts.append(_reconstruct_seq_text(elem))
+        else:
+            parts.append("<expr>")
+        if i < len(node.delays):
+            d_min, d_max = node.delays[i]
+            if d_min == d_max:
+                parts.append(f"##{d_min}")
+            else:
+                parts.append(f"##[{d_min}:{d_max}]")
+    return " ".join(parts)
 
 
 def _extract_clock(prop_spec: dict[str, Any]) -> ClockSpec:
