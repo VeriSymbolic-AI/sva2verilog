@@ -1,7 +1,7 @@
 ---
 wave: 2
 depends_on:
-  - PLAN-2.1
+  - "01"
 files_modified:
   - src/sva2rtl/ast_importer.py
   - src/sva2rtl/composer.py

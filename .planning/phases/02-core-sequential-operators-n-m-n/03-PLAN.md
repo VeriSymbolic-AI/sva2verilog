@@ -1,8 +1,8 @@
 ---
 wave: 3
 depends_on:
-  - PLAN-2.1
-  - PLAN-2.2
+  - "01"
+  - "02"
 files_modified:
   - tests/test_sequential.py
   - tests/test_behavioral_oracle.py
