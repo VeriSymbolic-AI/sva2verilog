@@ -14,7 +14,7 @@ from sva2rtl.ast_importer import (
     import_assertion,
 )
 from sva2rtl.errors import UnsupportedConstruct
-from sva2rtl.ir import BoolExpr, ClockSpec, SeqConcat, SourceLoc
+from sva2rtl.ir import BoolExpr, ClockSpec, PropImplication, SeqConcat, SourceLoc
 
 # Fixture directory
 _FIXTURES = Path(__file__).parent / "fixtures"
@@ -309,3 +309,94 @@ def test_extract_source_loc_partial_fields() -> None:
 def test_unsupported_kinds_table_has_sequence_repetition() -> None:
     """UNSUPPORTED_KINDS_PHASE1 must reject SequenceRepetition."""
     assert "SequenceRepetition" in UNSUPPORTED_KINDS_PHASE1
+
+
+# ── PropImplication import tests ─────────────────────────────────────────
+
+
+def test_import_implication_overlap_returns_prop_implication() -> None:
+    """implication_overlap.json produces a PropImplication node."""
+    ast = json.loads((_FIXTURES / "implication_overlap.json").read_text())
+    node, _, _, _ = import_assertion(ast)
+    assert isinstance(node, PropImplication)
+
+
+def test_import_implication_overlap_is_overlapping() -> None:
+    """implication_overlap.json PropImplication has overlapping=True."""
+    ast = json.loads((_FIXTURES / "implication_overlap.json").read_text())
+    node, _, _, _ = import_assertion(ast)
+    assert isinstance(node, PropImplication)
+    assert node.overlapping is True
+
+
+def test_import_implication_nonoverlap_returns_prop_implication() -> None:
+    """implication_nonoverlap.json produces a PropImplication node."""
+    ast = json.loads((_FIXTURES / "implication_nonoverlap.json").read_text())
+    node, _, _, _ = import_assertion(ast)
+    assert isinstance(node, PropImplication)
+
+
+def test_import_implication_nonoverlap_is_not_overlapping() -> None:
+    """implication_nonoverlap.json PropImplication has overlapping=False."""
+    ast = json.loads((_FIXTURES / "implication_nonoverlap.json").read_text())
+    node, _, _, _ = import_assertion(ast)
+    assert isinstance(node, PropImplication)
+    assert node.overlapping is False
+
+
+def test_import_implication_antecedent_is_bool_expr() -> None:
+    """PropImplication antecedent from simple 'a |-> b' is a BoolExpr."""
+    ast = json.loads((_FIXTURES / "implication_overlap.json").read_text())
+    node, _, _, _ = import_assertion(ast)
+    assert isinstance(node, PropImplication)
+    assert isinstance(node.antecedent, BoolExpr)
+
+
+def test_import_implication_consequent_is_bool_expr() -> None:
+    """PropImplication consequent from simple 'a |-> b' is a BoolExpr."""
+    ast = json.loads((_FIXTURES / "implication_overlap.json").read_text())
+    node, _, _, _ = import_assertion(ast)
+    assert isinstance(node, PropImplication)
+    assert isinstance(node.consequent, BoolExpr)
+
+
+def test_import_implication_antecedent_text() -> None:
+    """PropImplication antecedent has text='a'."""
+    ast = json.loads((_FIXTURES / "implication_overlap.json").read_text())
+    node, _, _, _ = import_assertion(ast)
+    assert isinstance(node, PropImplication)
+    assert isinstance(node.antecedent, BoolExpr)
+    assert node.antecedent.text == "a"
+
+
+def test_import_implication_consequent_text() -> None:
+    """PropImplication consequent has text='b'."""
+    ast = json.loads((_FIXTURES / "implication_overlap.json").read_text())
+    node, _, _, _ = import_assertion(ast)
+    assert isinstance(node, PropImplication)
+    assert isinstance(node.consequent, BoolExpr)
+    assert node.consequent.text == "b"
+
+
+def test_import_implication_overlap_label() -> None:
+    """implication_overlap.json label is 'impl_check'."""
+    ast = json.loads((_FIXTURES / "implication_overlap.json").read_text())
+    _, _, _, label = import_assertion(ast)
+    assert label == "impl_check"
+
+
+def test_import_implication_bitvec_consequent_is_seq_concat() -> None:
+    """implication_bitvec.json has a SeqConcat consequent (a |-> a ##[2:5] b)."""
+    ast = json.loads((_FIXTURES / "implication_bitvec.json").read_text())
+    node, _, _, _ = import_assertion(ast)
+    assert isinstance(node, PropImplication)
+    assert isinstance(node.consequent, SeqConcat)
+
+
+def test_import_implication_bitvec_consequent_delays() -> None:
+    """implication_bitvec.json consequent SeqConcat has delays=((2,5),)."""
+    ast = json.loads((_FIXTURES / "implication_bitvec.json").read_text())
+    node, _, _, _ = import_assertion(ast)
+    assert isinstance(node, PropImplication)
+    assert isinstance(node.consequent, SeqConcat)
+    assert node.consequent.delays == ((2, 5),)
