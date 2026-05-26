@@ -12,6 +12,8 @@ Design decisions:
 - ``_get_template_dir()`` resolves the templates directory relative to this
   source file using the ``src/`` layout convention, so it works in both editable
   installs and direct ``python -m`` invocations.
+- ``emit_all()`` recursively renders all sub-modules for hierarchical checkers
+  (Phase 2+) and returns a ``{module_name: sv_text}`` dict.
 """
 
 from __future__ import annotations
@@ -93,11 +95,60 @@ def emit(checker: CheckerNode, template_dir: Path | None = None) -> str:
     tmpl = env.get_template(template_file)
 
     # Build render context: start from the string params dict, then add
-    # non-string values (observed_signals) that the template iterates over.
+    # non-string values (observed_signals, children) that the template iterates.
     ctx: dict[str, object] = dict(checker.params)
     ctx["observed_signals"] = checker.observed_signals
+    ctx["children"] = checker.children
 
     return str(tmpl.render(**ctx))
+
+
+def emit_all(
+    checker: CheckerNode,
+    template_dir: Path | None = None,
+) -> dict[str, str]:
+    """Render a hierarchical ``CheckerNode`` tree into one SV string per module.
+
+    Recursively visits all descendant sub-modules depth-first, rendering each
+    unique module exactly once.  Returns a mapping of ``module_name → sv_text``
+    in dependency order (children before parents).
+
+    Parameters
+    ----------
+    checker:
+        The root ``CheckerNode`` to render (typically the top-level wrapper).
+    template_dir:
+        Override for the templates directory.  ``None`` uses the default.
+
+    Returns
+    -------
+    dict[str, str]
+        Ordered mapping of ``{module_name: sv_text}`` for every unique module
+        in the hierarchy.  The top-level checker is last.
+    """
+    env = _make_env(template_dir)
+    results: dict[str, str] = {}
+    _emit_recursive(checker, env, results)
+    return results
+
+
+def _emit_recursive(
+    checker: CheckerNode,
+    env: Environment,
+    results: dict[str, str],
+) -> None:
+    """Depth-first recursive renderer; populates *results* in-place."""
+    for child in checker.children:
+        if child.module_name not in results:
+            _emit_recursive(child, env, results)
+
+    if checker.module_name not in results:
+        template_file = checker.template_name + ".sv.j2"
+        tmpl = env.get_template(template_file)
+        ctx: dict[str, object] = dict(checker.params)
+        ctx["observed_signals"] = checker.observed_signals
+        ctx["children"] = checker.children
+        results[checker.module_name] = str(tmpl.render(**ctx))
 
 
 def write_output(sv_text: str, output_path: Path | None) -> None:
@@ -117,3 +168,19 @@ def write_output(sv_text: str, output_path: Path | None) -> None:
         return
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(sv_text, encoding="utf-8")
+
+
+def write_output_dir(modules: dict[str, str], output_dir: Path) -> None:
+    """Write each module SV text to ``<output_dir>/<module_name>.sv``.
+
+    Parameters
+    ----------
+    modules:
+        Mapping of ``{module_name: sv_text}`` as returned by ``emit_all()``.
+    output_dir:
+        Target directory.  Created (with parents) if it does not yet exist.
+    """
+    output_dir.mkdir(parents=True, exist_ok=True)
+    for module_name, sv_text in modules.items():
+        out_file = output_dir / f"{module_name}.sv"
+        out_file.write_text(sv_text, encoding="utf-8")

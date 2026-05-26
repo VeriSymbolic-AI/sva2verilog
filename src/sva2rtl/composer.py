@@ -431,11 +431,14 @@ def _compose_seq_concat(
     following token-passing wiring: A.pass → delay.start → B.start.
     """
     module_name = module_name_from_label(label, original_text)
+    # Build a base name (without leading "sva_") for child sub-labels so that
+    # module_name_from_label doesn't double-prefix with "sva_sva_".
+    base = module_name[4:] if module_name.startswith("sva_") else module_name
     children: list[CheckerNode] = []
 
     for i, elem in enumerate(node.elements):
         # Use a hash-based sub-label so each child gets a unique module name
-        child_label = f"{module_name}_e{i}"
+        child_label = f"{base}_e{i}"
         elem_checker = compose(elem, clock, child_label, original_text)
         children.append(elem_checker)
 

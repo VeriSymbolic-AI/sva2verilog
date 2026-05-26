@@ -155,22 +155,24 @@ def test_pipeline_sync_reset() -> None:
     )
 
 
-# ── Test 6: unsupported construct raises UnsupportedConstruct ─────────────
+# ── Test 6: SequenceConcat is now supported (Phase 2) ───────────────────
 
 
-def test_pipeline_unsupported_raises() -> None:
-    """unsupported_delay.json raises UnsupportedConstruct with SVA-E002.
+def test_pipeline_seq_concat_succeeds() -> None:
+    """unsupported_delay.json (a ##1 b) now succeeds — SequenceConcat is Phase 2 supported.
 
-    Validates that SequenceConcat (##N) is correctly rejected with a
-    precise error code and a non-None source location.
+    Validates that the pipeline no longer raises for simple ##N sequences.
     """
-    ast = _load("unsupported_delay.json")
-    with pytest.raises(UnsupportedConstruct) as exc_info:
-        import_assertion(ast)
+    from sva2rtl.emitter import emit_all
+    from sva2rtl.ir import SeqConcat
 
-    exc = exc_info.value
-    assert exc.source_loc is not None, "UnsupportedConstruct must have a source_loc"
-    assert "SVA-E002" in str(exc), f"Expected 'SVA-E002' in exception string, got: {exc!s}"
+    ast = _load("unsupported_delay.json")
+    ir_node, clock, text, label = import_assertion(ast)
+    assert isinstance(ir_node, SeqConcat), "Should import as SeqConcat"
+    checker = compose(ir_node, clock, label, text)
+    modules = emit_all(checker)
+    # Should produce multiple module files
+    assert len(modules) >= 3  # bool_a, delay, bool_b, top
 
 
 # ── Test 7: complex expression pipeline ──────────────────────────────────
