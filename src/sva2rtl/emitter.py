@@ -184,3 +184,42 @@ def write_output_dir(modules: dict[str, str], output_dir: Path) -> None:
     for module_name, sv_text in modules.items():
         out_file = output_dir / f"{module_name}.sv"
         out_file.write_text(sv_text, encoding="utf-8")
+
+
+def emit_bind(
+    checker: CheckerNode,
+    dut_module: str,
+    template_dir: Path | None = None,
+) -> str:
+    """Render a SystemVerilog ``bind`` statement for a generated monitor module.
+
+    The bind statement wires the monitor's ports to the DUT's signals using
+    ``bind <dut_module> <monitor_module> u_<monitor_module> (...)`` syntax,
+    making the DUT's internal signals directly visible to the monitor without
+    modifying the DUT source.
+
+    Parameters
+    ----------
+    checker:
+        The root ``CheckerNode`` of the compiled property (as returned by
+        ``compose()``).  ``checker.module_name`` and ``checker.observed_signals``
+        are used to generate the port connection list.
+    dut_module:
+        Name of the DUT module to bind into, e.g. ``"my_cpu_core"``.
+    template_dir:
+        Override for the templates directory.  ``None`` uses the project-root
+        ``templates/`` directory.
+
+    Returns
+    -------
+    str
+        SystemVerilog bind statement text, ending with a newline.
+    """
+    env = _make_env(template_dir)
+    tmpl = env.get_template("bind.sv.j2")
+
+    ctx: dict[str, object] = dict(checker.params)
+    ctx["observed_signals"] = checker.observed_signals
+    ctx["dut_module"] = dut_module
+
+    return str(tmpl.render(**ctx))
