@@ -289,18 +289,25 @@ def test_emit_cnt_width_in_golden() -> None:
 
 
 def test_oracle_rep_exact_3() -> None:
-    """rep_consecutive [*3]: pass fires at exactly 3 consecutive true cycles."""
-    sim = SVABehavioralSim("rep_consecutive", {"rep_min": 3, "rep_max": 3})
-    out0 = sim.tick({"start": True,  "sig": True})   # count=1
-    out1 = sim.tick({"start": False, "sig": True})   # count=2
-    out2 = sim.tick({"start": False, "sig": True})   # count=3 → pass
-    out3 = sim.tick({"start": False, "sig": True})   # count stays 3, still pass
-    _ = out3  # captured for potential future assertion; count capped at rep_max
+    """rep_consecutive [*3]: pass fires at exactly the 4th tick (old_count=3).
 
-    assert not out0["pass"], "count=1 < rep_min=3: no pass"
-    assert not out1["pass"], "count=2 < rep_min=3: no pass"
-    assert out2["pass"],     "count=3 == rep_min=3: pass"
-    assert out2["active"],   "running at count=3: active"
+    Outputs are derived from OLD registered state:
+    tick 0 (start+sig): old_running=False → active=F, pass=F; update: running=T, count=1
+    tick 1 (sig):       old_count=1 < 3  → active=T, pass=F; update: count=2
+    tick 2 (sig):       old_count=2 < 3  → active=T, pass=F; update: count=3
+    tick 3 (sig):       old_count=3 == 3 → active=T, pass=T (capped at rep_max)
+    """
+    sim = SVABehavioralSim("rep_consecutive", {"rep_min": 3, "rep_max": 3})
+    out0 = sim.tick({"start": True,  "sig": True})   # old_count=N/A (not running)
+    out1 = sim.tick({"start": False, "sig": True})   # old_count=1
+    out2 = sim.tick({"start": False, "sig": True})   # old_count=2
+    out3 = sim.tick({"start": False, "sig": True})   # old_count=3 → pass
+
+    assert not out0["pass"], "old_running=False: no pass on start cycle"
+    assert not out1["pass"], "old_count=1 < rep_min=3: no pass"
+    assert not out2["pass"], "old_count=2 < rep_min=3: no pass"
+    assert out3["pass"],     "old_count=3 == rep_min=3: pass"
+    assert out3["active"],   "running at old_count=3: active"
 
 
 def test_oracle_rep_fail_early() -> None:
@@ -324,20 +331,24 @@ def test_oracle_rep_no_start_no_eval() -> None:
 
 
 def test_oracle_rep_range_2_5_pass_counts() -> None:
-    """rep_consecutive [*2:5]: pass fires at counts 2, 3, 4, 5 but not at 1."""
-    sim = SVABehavioralSim("rep_consecutive", {"rep_min": 2, "rep_max": 5})
-    sim.tick({"start": True,  "sig": True})   # count=1: no pass
-    out1 = sim.tick({"start": False, "sig": True})   # count=2: pass
-    out2 = sim.tick({"start": False, "sig": True})   # count=3: pass
-    out3 = sim.tick({"start": False, "sig": True})   # count=4: pass
-    out4 = sim.tick({"start": False, "sig": True})   # count=5: pass (at max)
-    out5 = sim.tick({"start": False, "sig": True})   # count stays 5: still pass
+    """rep_consecutive [*2:5]: pass fires when old_count in [2,5].
 
-    assert out1["pass"], "count=2: pass (>= rep_min=2)"
-    assert out2["pass"], "count=3: pass"
-    assert out3["pass"], "count=4: pass"
-    assert out4["pass"], "count=5 == rep_max=5: pass"
-    assert out5["pass"], "count stays 5: still pass"
+    With OLD-state outputs, the first pass fires at tick 2 (old_count=2),
+    not tick 1 (old_count=1 < rep_min=2).
+    """
+    sim = SVABehavioralSim("rep_consecutive", {"rep_min": 2, "rep_max": 5})
+    sim.tick({"start": True,  "sig": True})   # tick 0: old_running=F → no pass; update count=1
+    out1 = sim.tick({"start": False, "sig": True})   # tick 1: old_count=1 < 2 → no pass
+    out2 = sim.tick({"start": False, "sig": True})   # tick 2: old_count=2 → pass
+    out3 = sim.tick({"start": False, "sig": True})   # tick 3: old_count=3 → pass
+    out4 = sim.tick({"start": False, "sig": True})   # tick 4: old_count=4 → pass
+    out5 = sim.tick({"start": False, "sig": True})   # tick 5: old_count=5 == rep_max → pass
+
+    assert not out1["pass"], "old_count=1 < rep_min=2: no pass"
+    assert out2["pass"], "old_count=2: pass"
+    assert out3["pass"], "old_count=3: pass"
+    assert out4["pass"], "old_count=4: pass"
+    assert out5["pass"], "old_count=5 == rep_max=5: pass"
 
 
 def test_oracle_rep_range_fail_before_min() -> None:

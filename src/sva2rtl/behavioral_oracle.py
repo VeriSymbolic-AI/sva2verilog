@@ -101,11 +101,19 @@ class SVABehavioralSim:
 
             * Delay operators: ``"start": bool``
             * Implication operators: ``"ant_pass": bool``, ``"con_pass": bool``
+            * Any kind: ``"disable": bool`` — models synchronous disable_i:
+              clears all state and returns all-zero outputs (same as rst_n
+              assertion but without clearing attempt_fired permanently).
 
         Returns
         -------
         dict with keys: ``"active"``, ``"pass"``, ``"fail"``, ``"overflow"``
         """
+        # ── Synchronous disable: mirrors disable_i in the RTL templates ──────
+        if bool(signals.get("disable", False)):
+            self.reset()
+            return {"active": False, "pass": False, "fail": False, "overflow": False}
+
         if self._kind in ("delay_fixed", "delay_range"):
             return self._tick_delay(signals)
         elif self._kind == "implication_overlap":
@@ -143,44 +151,34 @@ class SVABehavioralSim:
             }
 
         # ── Counter-based delay ───────────────────────────────────────────
-        # Capture pre-tick state
-        was_running = self._running
-        prev_count = self._counter
+        # Capture OLD state BEFORE any update — mirrors RTL combinational
+        # outputs reading registered (pre-NBA) values at posedge clk.
+        old_running = self._running
+        old_count = self._counter
 
-        # State update (models always_ff behavior)
+        # State update (models always_ff NBA behavior)
         if start:
             self._counter = 0
             self._running = True
             self._attempt_fired = True
-        elif was_running:
-            if prev_count >= delay_max:
+        elif old_running:
+            if old_count >= delay_max:
                 self._running = False
                 self._counter = 0
             else:
-                self._counter = prev_count + 1
+                self._counter = old_count + 1
 
-        # Output based on NEW state
-        cur_running = self._running
-        cur_count = self._counter
-
-        # If start just fired, count is 0 and running is True
-        if start:
-            active = True
-            chk_count = 0
-        else:
-            active = cur_running
-            chk_count = cur_count
-
-        # pass = running and count in [delay_min, delay_max]
-        # But we model registered outputs: pass reflects the state that
-        # was latched at the END of this cycle.
-        # For a counter starting at 0 on start:
-        #   cycle 0 (start): count=0, pass iff delay_min==0
-        #   cycle 1: count=1, pass iff 1 in [delay_min, delay_max]
-        pass_val = active and (chk_count >= delay_min) and (chk_count <= delay_max)
+        # Outputs derived from OLD registered state (combinational in RTL):
+        #   active = running_q (old)
+        #   pass   = running_q && count_q in [delay_min, delay_max] (old)
+        # On the start cycle old_running is False, so active=False, pass=False.
+        # Pass first fires at the cycle where old_count == delay_min (i.e.,
+        # delay_min cycles after start).
+        active_val = old_running
+        pass_val = old_running and (old_count >= delay_min) and (old_count <= delay_max)
 
         return {
-            "active": active,
+            "active": active_val,
             "pass": pass_val,
             "fail": False,
             "overflow": False,
@@ -191,45 +189,52 @@ class SVABehavioralSim:
     def _tick_rep_consecutive(self, signals: dict[str, bool]) -> dict[str, bool]:
         """Model expr[*M:N] semantics: count consecutive cycles where sig is true.
 
-        start+sig on a cycle begins counting (count=1, running=True).
-        Each subsequent cycle where sig is true increments the counter (capped at rep_max).
-        Any cycle where sig is false while running clears the state (broken sequence).
-        pass = running and sig and count in [rep_min, rep_max]
-        fail = running and not sig and count < rep_min
+        Mirrors RTL combinational outputs from OLD registered state:
+
+        RTL ``always_ff`` only starts running on ``(start && sig_eval)``; a
+        start with sig=False fires ``attempt_fired`` but does NOT set
+        ``running_q`` (unlike the old Python model which set running=True with
+        count=0).
+
+        Outputs are combinational from OLD state + CURRENT sig:
+          pass   = running_q(old) && sig && count_q(old) in [rep_min, rep_max]
+          fail   = running_q(old) && !sig && count_q(old) < rep_min
+          active = running_q(old)
         """
         start: bool = bool(signals.get("start", False))
         sig: bool = bool(signals.get("sig", False))
         rep_min: int = int(self._params.get("rep_min", 1))
         rep_max: int = int(self._params.get("rep_max", 1))
 
+        # Capture OLD state BEFORE any update
+        old_running = self._rep_running
+        old_count = self._rep_count
+
+        # State update — mirrors RTL always_ff: only (start && sig) starts run
         if start and sig:
             self._rep_running = True
             self._rep_count = 1
             self._attempt_fired = True
         elif start and not sig:
-            # start with sig=False: start attempt fires but immediately breaks
-            self._rep_running = True
-            self._rep_count = 0
+            # Attempt fires but sequence immediately broken; RTL does NOT set
+            # running_q=1 when start fires without sig.
             self._attempt_fired = True
-        elif self._rep_running and sig:
-            if self._rep_count < rep_max:
-                self._rep_count += 1
-        elif self._rep_running and not sig:
-            # sequence broken
-            pass  # evaluate fail before clearing below
-
-        pass_val = (
-            self._rep_running and sig
-            and self._rep_count >= rep_min
-            and self._rep_count <= rep_max
-        )
-        fail_val = self._rep_running and not sig and self._rep_count < rep_min
-        active_val = self._rep_running
-
-        # Clear running state on broken sequence (after computing fail)
-        if self._rep_running and not sig:
+        elif old_running and sig:
+            if old_count < rep_max:
+                self._rep_count = old_count + 1
+        elif old_running and not sig:
+            # Sequence broken — clear running
             self._rep_running = False
             self._rep_count = 0
+
+        # Outputs derived from OLD registered state (combinational in RTL)
+        pass_val = (
+            old_running and sig
+            and old_count >= rep_min
+            and old_count <= rep_max
+        )
+        fail_val = old_running and not sig and old_count < rep_min
+        active_val = old_running
 
         return {
             "active": active_val,

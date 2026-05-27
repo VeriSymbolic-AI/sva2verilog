@@ -31,40 +31,51 @@ def _run(sim: SVABehavioralSim, stimuli: list[dict[str, bool]]) -> list[dict[str
 
 
 def test_oracle_delay_fixed_3() -> None:
-    """TEST-06: ##3 — start at cycle 0 → pass at cycle 3 only.
+    """TEST-06: ##3 — start at cycle 0 → pass at cycle 4 only.
 
-    Cycles 0, 1, 2: pass=False (counter still below delay_min=3)
-    Cycle 3: pass=True (counter reaches 3)
-    Cycle 4: running resets → pass=False again
+    The oracle outputs are derived from OLD registered state (combinational RTL):
+    Cycle 0 (start): old_running=False → active=False, pass=False
+    Cycle 1: old_count=0 → active=True, pass=False (0 < 3)
+    Cycle 2: old_count=1 → active=True, pass=False (1 < 3)
+    Cycle 3: old_count=2 → active=True, pass=False (2 < 3)
+    Cycle 4: old_count=3 == delay_min → active=True, pass=True
+    Cycle 5: old_running=False (expired) → active=False, pass=False
     """
     sim = SVABehavioralSim("delay_fixed", {"delay_min": 3, "delay_max": 3})
     outputs = _run(sim, [
         {"start": True},   # tick 0
         {"start": False},  # tick 1
         {"start": False},  # tick 2
-        {"start": False},  # tick 3  → pass
-        {"start": False},  # tick 4  → inactive
+        {"start": False},  # tick 3
+        {"start": False},  # tick 4  → pass
+        {"start": False},  # tick 5  → inactive
     ])
-    assert not outputs[0]["pass"], "tick 0: should not pass (counter=0 < 3)"
-    assert not outputs[1]["pass"], "tick 1: should not pass (counter=1 < 3)"
-    assert not outputs[2]["pass"], "tick 2: should not pass (counter=2 < 3)"
-    assert outputs[3]["pass"],     "tick 3: should pass (counter=3 == delay_min)"
-    assert not outputs[4]["pass"], "tick 4: counter expired, no pass"
+    assert not outputs[0]["pass"], "tick 0: old_running=False → no pass"
+    assert not outputs[1]["pass"], "tick 1: old_count=0 < 3 → no pass"
+    assert not outputs[2]["pass"], "tick 2: old_count=1 < 3 → no pass"
+    assert not outputs[3]["pass"], "tick 3: old_count=2 < 3 → no pass"
+    assert outputs[4]["pass"],     "tick 4: old_count=3 == delay_min → pass"
+    assert not outputs[5]["pass"], "tick 5: counter expired, no pass"
 
-    # active should be True during ticks 0–3 and False after
-    assert outputs[0]["active"], "tick 0: active (start fired)"
+    # active: start cycle sees old_running=False; ticks 1–4 see old_running=True
+    assert not outputs[0]["active"], "tick 0: start fires but old_running=False"
     assert outputs[1]["active"], "tick 1: active (running)"
     assert outputs[2]["active"], "tick 2: active (running)"
-    assert outputs[3]["active"], "tick 3: active at pass point"
-    assert not outputs[4]["active"], "tick 4: inactive after window expired"
+    assert outputs[3]["active"], "tick 3: active (running)"
+    assert outputs[4]["active"], "tick 4: active at pass point"
+    assert not outputs[5]["active"], "tick 5: inactive after window expired"
 
 
 def test_oracle_delay_range_2_5() -> None:
-    """TEST-06: ##[2:5] — start at cycle 0 → pass at cycles 2, 3, 4, 5."""
+    """TEST-06: ##[2:5] — start at cycle 0 → pass at cycles 3, 4, 5, 6.
+
+    Outputs are from OLD registered state; start cycle has old_running=False so
+    pass=False.  Pass window opens one cycle later than the raw counter value.
+    """
     sim = SVABehavioralSim("delay_range", {"delay_min": 2, "delay_max": 5})
     outputs = _run(sim, [{"start": i == 0} for i in range(8)])
-    #                            tick: 0      1      2     3     4     5     6      7
-    expected_pass: list[bool] = [False, False, True, True, True, True, False, False]
+    #                            tick: 0      1      2      3     4     5     6     7
+    expected_pass: list[bool] = [False, False, False, True, True, True, True, False]
     for i, (out, exp) in enumerate(zip(outputs, expected_pass)):
         assert out["pass"] == exp, (
             f"tick {i}: expected pass={exp}, got {out['pass']}"
@@ -93,19 +104,25 @@ def test_oracle_delay_no_spurious_pass() -> None:
 
 
 def test_oracle_delay_back_to_back_starts() -> None:
-    """TEST-06: ##2 — second start overwrites counter, restarting the window."""
+    """TEST-06: ##2 — second start overwrites counter, restarting the window.
+
+    With OLD-state outputs the pass fires one cycle later than the raw counter:
+    After second start at tick 2, pass fires at tick 5 (old_count=2 == delay_min).
+    """
     sim = SVABehavioralSim("delay_fixed", {"delay_min": 2, "delay_max": 2})
     # First start at tick 0
-    sim.tick({"start": True})   # tick 0: counter=0
-    sim.tick({"start": False})  # tick 1: counter=1
+    sim.tick({"start": True})   # tick 0: running=True, counter=0
+    sim.tick({"start": False})  # tick 1: counter→1
     # Second start at tick 2 — should RESTART counter
-    out2 = sim.tick({"start": True})   # tick 2: counter reset to 0
-    # After restart, pass should fire 2 cycles later (tick 4 relative to session start)
-    out3 = sim.tick({"start": False})  # tick 3: counter=1
-    out4 = sim.tick({"start": False})  # tick 4: counter=2 → pass
-    assert not out2["pass"], "restart tick: counter=0 < delay_min=2"
-    assert not out3["pass"], "1 cycle after restart: counter=1 < delay_min=2"
-    assert out4["pass"],     "2 cycles after restart: should pass"
+    out2 = sim.tick({"start": True})   # tick 2: old_count=1, counter reset to 0
+    # After restart, pass should fire 3 more cycles later (old_count=2 == delay_min)
+    out3 = sim.tick({"start": False})  # tick 3: old_count=0 < 2 → no pass
+    out4 = sim.tick({"start": False})  # tick 4: old_count=1 < 2 → no pass
+    out5 = sim.tick({"start": False})  # tick 5: old_count=2 == delay_min → pass
+    assert not out2["pass"], "restart tick: old_count=1 < delay_min=2"
+    assert not out3["pass"], "1 cycle after restart: old_count=0 < delay_min=2"
+    assert not out4["pass"], "2 cycles after restart: old_count=1 < delay_min=2"
+    assert out5["pass"],     "3 cycles after restart: old_count=2 → pass"
 
 
 # ── Implication overlap oracle tests (|->) ────────────────────────────────────
