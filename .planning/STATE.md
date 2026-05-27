@@ -3,12 +3,12 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 current_phase: 3
-status: ready_to_plan
-last_updated: "2026-05-26T14:07:23.062Z"
+status: ready_to_execute
+last_updated: "2026-05-27T03:00:00.000Z"
 progress:
   total_phases: 6
   completed_phases: 2
-  total_plans: 8
+  total_plans: 12
   completed_plans: 8
   percent: 33
 ---
@@ -41,7 +41,7 @@ progress:
 |-------|------|--------|-------------|
 | 1 | Foundation: IR + Slang + Boolean → SV Monitor | ✅ Complete (5/5 plans) | PARSE-01/02/04/05, OUT-01/02/03/07/08, CLI-05/06, TEST-01 |
 | 2 | Core Sequential Operators (##N, |->)  | 🔲 Not started | OP-01/02/03/04, OUT-06, TEST-02/05/06 |
-| 3 | Remaining Tier 1 + Sim Validation | 🔲 Not started | OP-05–10, PARSE-03, OUT-04, TEST-03/04 |
+| 3 | Remaining Tier 1 + Sim Validation | 📋 Planned (4 plans, 3 waves) | OP-05–10, PARSE-03, OUT-04, TEST-03/04 |
 | 4 | Normalization + Composition Engine | 🔲 Not started | PIPE-01/02 |
 | 5 | Optimization Passes | 🔲 Not started | PIPE-03/04/05 |
 | 6 | CLI Polish + Verilog-2001 + Integration | 🔲 Not started | CLI-01–04, OUT-05 |
@@ -50,7 +50,14 @@ progress:
 
 ## Active Phase
 
-**Phase 2** — Core Sequential Operators (##N, |->)
+**Phase 3** — Remaining Tier 1 Operators + Named Sequences + Simulation Validation
+
+### Phase 3 Plan Checklist
+
+- [ ] **3.1** Consecutive repetition `[*N]/[*M:N]` — counter-based FSM (Wave 1)
+- [ ] **3.2** Signal functions `$rose/$fell/$stable/$past` — edge detect + shift register (Wave 1)
+- [ ] **3.3** `disable iff` + interface update + named sequences + bind generation (Wave 2)
+- [ ] **3.4** Simulation validation harness — dual oracle (Wave 3)
 
 ### Phase 1 Plan Checklist (COMPLETE)
 
@@ -115,6 +122,7 @@ progress:
 | 2026-05-25 | Plan 1.3 complete — composer.py, emitter.py, templates/bool_expr.sv.j2, golden files (bool_labeled.sv, bool_simple.sv), 44 new tests (104 total); OUT-01/02/03/07/08 satisfied |
 | 2026-05-25 | Plan 1.4 complete — cli.py click entry point, SV fixture files, 9 CLI tests; CLI-05/CLI-06 satisfied |
 | 2026-05-25 | Plan 1.5 complete — conftest.py, test_integration.py (12 tests), test_pipeline_e2e.py (6 tests); TEST-01/PARSE-05/OUT-02/OUT-03 satisfied; Phase 1 COMPLETE (131 tests: 126 pass, 5 skip) |
+| 2026-05-27 | Phase 3 planned — 4 plans, 3 waves, 10 requirements. Plan-checker PASSED. |
 
 ---
 
