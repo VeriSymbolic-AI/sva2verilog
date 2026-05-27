@@ -97,7 +97,7 @@ Consecutive repetition `[*N]` and the `$`-functions (`$rose`, `$fell`, `$stable`
 
 | # | Plan | Key Deliverables |
 |---|------|-----------------|
-| 3.1 | Consecutive repetition `[*N]` and `[*M:N]` | `templates/rep_consecutive.sv.j2` (counter-based FSM, parameterized M/N, counted FSM with window accept), golden tests for `[*1]`, `[*3]`, `[*2:5]`, `[*0:$]` rejects with SVA-E002 |
+| 3.1 | ✅ Consecutive repetition `[*N]` and `[*M:N]` | `templates/rep_consecutive.sv.j2` (counter-based FSM, parameterized M/N, counted FSM with window accept), golden tests for `[*1]`, `[*3]`, `[*2:5]`, `[*0:$]` rejects with SVA-E002 |
 | 3.2 | Signal function operators | `templates/rose.sv.j2`, `fell.sv.j2`, `stable.sv.j2`, `past.sv.j2` (edge-detect FF, XNOR comparator, N-stage pipeline); unit tests asserting exactly 1 FF for `$rose`/`$fell`/`$stable`, N FFs for `$past(sig, N)` |
 | 3.3 | `disable iff` + named sequence/property expansion | `templates/disable_iff.sv.j2` (async combinational gate on all state/outputs — not synchronous reset); `ast_importer.py` inline expansion of named `sequence`/`property` declarations (PARSE-03); `checker_top.sv.j2` completed with `bind` wrapper + auto-port inference (OUT-04) |
 | 3.4 | Simulation validation harness | `tests/simulation/` suite; Icarus Verilog behavioral oracle: each generated monitor simulated with stimulus → `pass`/`fail` compared against behavioral SVA reference; end-to-end oracle tests for all Tier 1 operators (TEST-03, TEST-04) |
