@@ -1,7 +1,7 @@
 """Integration tests — full pipeline from JSON fixture to emitted SV.
 
 These tests bypass the slang subprocess and exercise:
-    ast_importer.import_assertion → composer.compose → emitter.emit
+    ast_importer.import_assertion → normalizer.normalize → composer.compose → emitter.emit
 
 No slang binary is required; all tests use pre-captured JSON fixtures in
 ``tests/fixtures/``.
@@ -22,6 +22,7 @@ from sva2rtl.ast_importer import import_assertion
 from sva2rtl.composer import compose
 from sva2rtl.emitter import emit
 from sva2rtl.ir import BoolExpr
+from sva2rtl.normalizer import normalize
 from tests.conftest import assert_golden
 
 # ── Fixture paths ─────────────────────────────────────────────────────────
@@ -39,6 +40,7 @@ def _run(name: str) -> str:
     """Run the full pipeline on a JSON fixture and return emitted SV text."""
     ast = _load(name)
     node, clock, text, label = import_assertion(ast)
+    node = normalize(node)
     checker = compose(node, clock, label, text)
     return emit(checker)
 
