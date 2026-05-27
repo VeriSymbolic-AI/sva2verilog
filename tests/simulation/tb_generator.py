@@ -184,12 +184,12 @@ def generate_testbench(
         _w(f"        @(posedge {clock_signal});")
         if has_overflow_flag:
             _w(
-                "        $fdisplay($stdout, \"%b %b %b %b\","
+                "        $display(\"%b %b %b %b\","
                 " active, pass_out, fail_out, overflow_flag);"
             )
         else:
             _w(
-                "        $fdisplay($stdout, \"%b %b %b\","
+                "        $display(\"%b %b %b\","
                 " active, pass_out, fail_out);"
             )
         if i < len(stimulus) - 1:
