@@ -4,18 +4,18 @@ milestone: v1.0
 milestone_name: milestone
 current_phase: 03
 status: ready_to_execute
-last_updated: "2026-05-27T10:00:00.000Z"
+last_updated: "2026-05-27T18:00:00.000Z"
 progress:
   total_phases: 6
   completed_phases: 2
   total_plans: 12
-  completed_plans: 10
-  percent: 42
+  completed_plans: 11
+  percent: 46
 ---
 
 # Project State: sva2rtl
 
-**Last updated:** 2026-05-25
+**Last updated:** 2026-05-27
 **Current phase:** 03
 **Mode:** mvp
 
@@ -29,8 +29,8 @@ progress:
 | Requirements | ✅ Defined (40 v1 requirements, traceability updated) |
 | Research | ✅ Complete (HIGH confidence across all areas) |
 | Architecture | ✅ Documented (token-passing, 9-stage pipeline) |
-| Code | ✅ Phase 1 complete — all 5 plans done; sva2rtl bool_assert.sv works end-to-end; Phase 3 Plans 3.1 + 3.2 complete |
-| Tests | ✅ 341 tests collected (331 pass, 10 skip); mypy --strict + ruff clean |
+| Code | ✅ Phase 1 complete — all 5 plans done; sva2rtl bool_assert.sv works end-to-end; Phase 3 Plans 3.1 + 3.2 + 3.3 complete |
+| Tests | ✅ 383 tests collected (383 pass, 10 skip); mypy --strict + ruff clean |
 | CI | ❌ Not configured |
 
 ---
@@ -56,7 +56,7 @@ progress:
 
 - [x] **3.1** Consecutive repetition `[*N]/[*M:N]` — counter-based FSM (Wave 1)
 - [x] **3.2** Signal functions `$rose/$fell/$stable/$past` — edge detect + shift register (Wave 1)
-- [ ] **3.3** `disable iff` + interface update + named sequences + bind generation (Wave 2)
+- [x] **3.3** `disable iff` + interface update + named sequences + bind generation (Wave 2)
 - [ ] **3.4** Simulation validation harness — dual oracle (Wave 3)
 
 ### Phase 1 Plan Checklist (COMPLETE)
@@ -124,7 +124,7 @@ progress:
 | 2026-05-25 | Plan 1.5 complete — conftest.py, test_integration.py (12 tests), test_pipeline_e2e.py (6 tests); TEST-01/PARSE-05/OUT-02/OUT-03 satisfied; Phase 1 COMPLETE (131 tests: 126 pass, 5 skip) |
 | 2026-05-27 | Phase 3 planned — 4 plans, 3 waves, 10 requirements. Plan-checker PASSED. |
 | 2026-05-27 | Plan 3.1 complete — SeqRepetition IR, importer dispatch, composer, rep_consecutive.sv.j2 template, behavioral oracle, 23 tests; OP-05 satisfied |
-| 2026-05-27 | Plan 3.2 complete — SignalFunc IR, importer dispatch for $rose/$fell/$stable/$past, 4 templates (rose/fell/stable/past), behavioral oracle, 38 tests; OP-06/07/08/09 satisfied; 341 tests pass |
+| 2026-05-27 | Plan 3.3 complete — DisableIff IR/importer/composer/template, named sequence expansion (PARSE-03), bind generation (OUT-04), disable_i/disabled_o interface on all 9 templates, 3 golden files fixed (duplicate instance name bug), 42 new tests; OP-10/PARSE-03/OUT-04 satisfied; 383 tests pass |
 
 ---
 

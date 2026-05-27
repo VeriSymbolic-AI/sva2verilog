@@ -32,7 +32,7 @@ module sva_bitvec_impl #(
     assign con_start_w = bv_q[BV_WIDTH-1];
 
     // ── Antecedent child instantiation ───────────────────────────────────────
-    sva_prop_6b3e6163 u_sva_prop_6b3e6163 (
+    sva_bitvec_impl_ant u_sva_bitvec_impl_ant (
         .clk(clk),
         .rst_n    (rst_n),
         .start    (start),
@@ -46,7 +46,7 @@ module sva_bitvec_impl #(
     );
 
     // ── Consequent child instantiation ───────────────────────────────────────
-    sva_prop_6b3e6163 u_sva_prop_6b3e6163 (
+    sva_bitvec_impl_con u_sva_bitvec_impl_con (
         .clk(clk),
         .rst_n    (rst_n),
         .start    (con_start_w),

@@ -32,7 +32,7 @@ module sva_impl_check #(
     assign con_start_w = bv_q[BV_WIDTH-1];
 
     // ── Antecedent child instantiation ───────────────────────────────────────
-    sva_prop_47ec2b81 u_sva_prop_47ec2b81 (
+    sva_impl_check_ant u_sva_impl_check_ant (
         .clk(clk),
         .rst_n    (rst_n),
         .start    (start),
@@ -46,7 +46,7 @@ module sva_impl_check #(
     );
 
     // ── Consequent child instantiation ───────────────────────────────────────
-    sva_prop_47ec2b81 u_sva_prop_47ec2b81 (
+    sva_impl_check_con u_sva_impl_check_con (
         .clk(clk),
         .rst_n    (rst_n),
         .start    (con_start_w),

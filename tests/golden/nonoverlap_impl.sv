@@ -32,7 +32,7 @@ module sva_nonoverlap_check #(
     assign con_start_w = bv_q[BV_WIDTH-1];
 
     // ── Antecedent child instantiation ───────────────────────────────────────
-    sva_prop_e9c0f9a2 u_sva_prop_e9c0f9a2 (
+    sva_nonoverlap_check_ant u_sva_nonoverlap_check_ant (
         .clk(clk),
         .rst_n    (rst_n),
         .start    (start),
@@ -46,7 +46,7 @@ module sva_nonoverlap_check #(
     );
 
     // ── Consequent child instantiation ───────────────────────────────────────
-    sva_prop_e9c0f9a2 u_sva_prop_e9c0f9a2 (
+    sva_nonoverlap_check_con u_sva_nonoverlap_check_con (
         .clk(clk),
         .rst_n    (rst_n),
         .start    (con_start_w),

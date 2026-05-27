@@ -353,6 +353,7 @@ def compose(
     clock: ClockSpec,
     label: str | None,
     original_text: str,
+    cse_origin: str | None = None,
 ) -> CheckerNode:
     """Transform a top-level SVA IR node into an emittable ``CheckerNode``.
 
@@ -370,6 +371,10 @@ def compose(
     original_text:
         The reconstructed SV expression text.  Embedded verbatim in the
         generated module header comment (requirement OUT-08).
+    cse_origin:
+        Optional named-sequence label for CSE provenance tagging.  Set to the
+        sequence declaration name when the node was expanded from a named
+        sequence reference.  Default ``None``.
 
     Returns
     -------
@@ -383,17 +388,17 @@ def compose(
     """
     match node:
         case BoolExpr():
-            return _compose_bool_expr(node, clock, label, original_text)
+            return _compose_bool_expr(node, clock, label, original_text, cse_origin)
         case SeqConcat():
-            return _compose_seq_concat(node, clock, label, original_text)
+            return _compose_seq_concat(node, clock, label, original_text, cse_origin)
         case SeqRepetition():
-            return _compose_repetition(node, clock, label, original_text)
+            return _compose_repetition(node, clock, label, original_text, cse_origin)
         case SignalFunc():
-            return _compose_signal_func(node, clock, label, original_text)
+            return _compose_signal_func(node, clock, label, original_text, cse_origin)
         case PropImplication():
-            return _compose_implication(node, clock, label, original_text)
+            return _compose_implication(node, clock, label, original_text, cse_origin)
         case DisableIff():
-            return _compose_disable_iff(node, clock, label, original_text)
+            return _compose_disable_iff(node, clock, label, original_text, cse_origin)
         case _:
             raise UnsupportedConstruct(
                 message=(
@@ -413,6 +418,7 @@ def _compose_bool_expr(
     clock: ClockSpec,
     label: str | None,
     original_text: str,
+    cse_origin: str | None = None,
 ) -> CheckerNode:
     """Build a leaf CheckerNode for a BoolExpr."""
     module_name = module_name_from_label(label, original_text)
@@ -435,6 +441,7 @@ def _compose_bool_expr(
         observed_signals=observed,
         source_loc=node.source_loc,
         children=(),
+        cse_origin=cse_origin,
     )
 
 
@@ -443,6 +450,7 @@ def _compose_seq_concat(
     clock: ClockSpec,
     label: str | None,
     original_text: str,
+    cse_origin: str | None = None,
 ) -> CheckerNode:
     """Build a hierarchical CheckerNode tree for a SeqConcat.
 
@@ -484,6 +492,7 @@ def _compose_seq_concat(
         observed_signals=all_signals,
         source_loc=node.source_loc,
         children=tuple(children),
+        cse_origin=cse_origin,
     )
 
 
@@ -492,6 +501,7 @@ def _compose_repetition(
     clock: ClockSpec,
     label: str | None,
     original_text: str,
+    cse_origin: str | None = None,
 ) -> CheckerNode:
     """Build a leaf CheckerNode for a consecutive repetition expr[*M:N]."""
     module_name = module_name_from_label(label, original_text)
@@ -524,6 +534,7 @@ def _compose_repetition(
         observed_signals=observed,
         source_loc=node.source_loc,
         children=(),
+        cse_origin=cse_origin,
     )
 
 
@@ -532,6 +543,7 @@ def _compose_signal_func(
     clock: ClockSpec,
     label: str | None,
     original_text: str,
+    cse_origin: str | None = None,
 ) -> CheckerNode:
     """Build a leaf CheckerNode for a signal function ($rose/$fell/$stable/$past).
 
@@ -560,6 +572,7 @@ def _compose_signal_func(
         observed_signals=observed,
         source_loc=node.source_loc,
         children=(),
+        cse_origin=cse_origin,
     )
 
 
@@ -622,13 +635,19 @@ def _compose_implication(
     clock: ClockSpec,
     label: str | None,
     original_text: str,
+    cse_origin: str | None = None,
 ) -> CheckerNode:
     """Build a hierarchical CheckerNode for a PropImplication (|-> or |=>)."""
     module_name = module_name_from_label(label, original_text)
     template = "overlap_bitvec" if node.overlapping else "nonoverlap"
 
-    ant_checker = compose(node.antecedent, clock, None, original_text)
-    con_checker = compose(node.consequent, clock, None, original_text)
+    # Give each child a unique sub-label so their module names never collide
+    # with the parent wrapper (or each other) when label is None and both
+    # antecedent and consequent hash the same original_text.  Same pattern as
+    # _compose_seq_concat uses for _e{i} children.
+    base = module_name[4:] if module_name.startswith("sva_") else module_name
+    ant_checker = compose(node.antecedent, clock, f"{base}_ant", original_text)
+    con_checker = compose(node.consequent, clock, f"{base}_con", original_text)
 
     bv_width = _compute_bv_width(node.consequent)
     all_signals = _collect_signals([ant_checker, con_checker])
@@ -650,6 +669,7 @@ def _compose_implication(
         observed_signals=all_signals,
         source_loc=node.source_loc,
         children=(ant_checker, con_checker),
+        cse_origin=cse_origin,
     )
 
 
@@ -670,6 +690,7 @@ def _compose_disable_iff(
     clock: ClockSpec,
     label: str | None,
     original_text: str,
+    cse_origin: str | None = None,
 ) -> CheckerNode:
     """Build a wrapper CheckerNode for ``disable iff (cond) body``.
 
@@ -688,11 +709,18 @@ def _compose_disable_iff(
         Assertion label or ``None`` for hash-based naming.
     original_text:
         Reconstructed SVA expression text for the header comment.
+    cse_origin:
+        Optional named-sequence label for CSE provenance tagging.
     """
     module_name = module_name_from_label(label, original_text)
+    # Build a unique sub-label for the body so it never collides with the
+    # disable_iff_top wrapper when label is None (both would otherwise hash
+    # the same original_text → same module_name).
+    base = module_name[4:] if module_name.startswith("sva_") else module_name
+    body_label = f"{base}_body"
 
     # Compose the body (wrapped property / sequence)
-    body_checker = compose(node.body, clock, None, original_text)
+    body_checker = compose(node.body, clock, body_label, original_text)
 
     # Extract the condition expression text from the condition node
     if isinstance(node.condition, BoolExpr):
@@ -725,4 +753,5 @@ def _compose_disable_iff(
         observed_signals=all_signals,
         source_loc=node.source_loc,
         children=(body_checker,),
+        cse_origin=cse_origin,
     )
