@@ -348,6 +348,102 @@ def test_oracle_reset_after_overflow() -> None:
     assert out1["pass"],         "after reset: normal |-> pass at tick 1"
 
 
+# ── Disable signal tests (TEST-03, TEST-04) ───────────────────────────────────
+
+
+def test_oracle_disable_returns_all_zero() -> None:
+    """TEST-03: passing disable=True to tick() returns all-zero outputs.
+
+    Models the ``disable_i`` synchronous clear behavior: regardless of current
+    state, the oracle returns {active:0, pass:0, fail:0, overflow:0}.
+    """
+    sim = SVABehavioralSim("delay_fixed", {"delay_min": 3, "delay_max": 3})
+    sim.tick({"start": True})   # tick 0: running=True, counter=0
+    sim.tick({"start": False})  # tick 1: counter=1
+
+    # disable fires while delay is mid-flight
+    out_dis = sim.tick({"start": False, "disable": True})
+    assert not out_dis["active"],   "disable: active must be 0"
+    assert not out_dis["pass"],     "disable: pass must be 0"
+    assert not out_dis["fail"],     "disable: fail must be 0"
+    assert not out_dis["overflow"], "disable: overflow must be 0"
+
+
+def test_oracle_disable_clears_delay_state() -> None:
+    """TEST-03: after disable=True, delay state is cleared — no late pass fires.
+
+    Thread was started at tick 0 (##3 delay); disable at tick 1 clears state.
+    Without the disable, pass would fire at tick 4.  After disable, no pass.
+    """
+    sim = SVABehavioralSim("delay_fixed", {"delay_min": 3, "delay_max": 3})
+    sim.tick({"start": True})             # tick 0: start
+    sim.tick({"start": False, "disable": True})  # tick 1: disable → clears
+
+    # Ticks 2-5: no pass should fire (state was cleared)
+    for i in range(4):
+        out = sim.tick({"start": False})
+        assert not out["pass"],   f"tick {i+2}: pass must not fire after disable"
+        assert not out["active"], f"tick {i+2}: active must be 0 after disable"
+
+
+def test_oracle_disable_clears_implication_state() -> None:
+    """TEST-04: disable=True mid-flight clears BV threads in |-> oracle.
+
+    Thread inserted at tick 0; disable at tick 0 end (on tick 1) clears bv.
+    Without disable, fail would fire at tick 1.
+    """
+    sim = SVABehavioralSim("implication_overlap", {"bv_width": 1})
+    sim.tick({"ant_pass": True, "con_pass": False})  # tick 0: thread in bv
+
+    # disable at tick 1 — clears bv before the thread can mature into fail
+    out_dis = sim.tick({"ant_pass": False, "con_pass": False, "disable": True})
+    assert not out_dis["fail"], "disable: fail must be gated even with mature thread"
+
+    # tick 2: bv should be empty — no fail from the lost thread
+    out2 = sim.tick({"ant_pass": False, "con_pass": False})
+    assert not out2["fail"],   "after disable: thread was cleared → no fail"
+    assert not out2["active"], "after disable: bv empty → inactive"
+
+
+def test_oracle_disable_clears_nonoverlap_state() -> None:
+    """TEST-04: disable=True clears ant_pass_delayed in |=> oracle.
+
+    Antecedent fires at tick 0, setting ant_pass_delayed for tick 1.
+    Disable at tick 1 clears ant_pass_delayed → no thread enters bv.
+    """
+    sim = SVABehavioralSim("implication_nonoverlap", {"bv_width": 1})
+    sim.tick({"ant_pass": True, "con_pass": False})  # tick 0: sets ant_pass_delayed
+
+    # disable at tick 1 — clears delayed register
+    out_dis = sim.tick({"ant_pass": False, "con_pass": False, "disable": True})
+    assert not out_dis["fail"], "disable: fail gated"
+
+    # tick 2: no thread should have entered bv
+    out2 = sim.tick({"ant_pass": False, "con_pass": False})
+    assert not out2["fail"],   "after disable: ant_pass_delayed cleared → no thread"
+    assert not out2["active"], "after disable: inactive"
+
+
+def test_oracle_disable_clears_rep_consecutive_state() -> None:
+    """TEST-03: disable=True during rep_consecutive run clears counter.
+
+    Oracle running a[*3]: started at tick 0.  Disable at tick 1 clears state.
+    Without disable, fail would fire at tick 2 (a goes low with count < rep_min=3).
+    """
+    sim = SVABehavioralSim("rep_consecutive", {"rep_min": 3, "rep_max": 3})
+    sim.tick({"start": True, "sig": True})   # tick 0: count=1
+
+    # disable at tick 1 — clears running state
+    out_dis = sim.tick({"start": False, "sig": False, "disable": True})
+    assert not out_dis["fail"],   "disable: fail gated"
+    assert not out_dis["active"], "disable: active=0"
+
+    # tick 2: cleared — no fail from the abandoned thread
+    out2 = sim.tick({"start": False, "sig": False})
+    assert not out2["fail"],   "after disable: state cleared → no fail"
+    assert not out2["active"], "after disable: not running"
+
+
 # ── Invalid kind guard ────────────────────────────────────────────────────────
 
 
