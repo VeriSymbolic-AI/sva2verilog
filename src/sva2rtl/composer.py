@@ -729,10 +729,16 @@ def _compose_disable_iff(
         cond_expr = "<cond>"
 
     # Collect signals: condition signals + body signals (no duplicates)
-    cond_signals = extract_signals(cond_expr)
+    # Exclude rst_n and clock_signal — these are always hardcoded ports in every
+    # generated module and must not appear again in the observed_signals loop.
+    _reserved_ports = {"rst_n", clock.signal}
+    cond_signals = tuple(
+        (p, s) for p, s in extract_signals(cond_expr) if p not in _reserved_ports
+    )
     cond_seen = {p for p, _ in cond_signals}
     body_extra = tuple(
-        (p, s) for p, s in body_checker.observed_signals if p not in cond_seen
+        (p, s) for p, s in body_checker.observed_signals
+        if p not in cond_seen and p not in _reserved_ports
     )
     all_signals = cond_signals + body_extra
 

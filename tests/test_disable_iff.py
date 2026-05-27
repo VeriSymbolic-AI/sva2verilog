@@ -119,11 +119,16 @@ def test_compose_disable_iff_single_child() -> None:
 
 
 def test_compose_disable_iff_observed_signals() -> None:
-    """CheckerNode for disable iff includes signals from both condition and body."""
+    """CheckerNode for disable iff includes signals from both condition and body.
+
+    rst_n is a reserved port hardcoded in every generated module template, so it
+    must NOT appear in observed_signals (to avoid duplicate port declarations).
+    """
     checker = _load_disable_iff_checker()
     port_names = {p for p, _ in checker.observed_signals}
-    # rst_n from condition (!rst_n), a and b from body (a |-> b)
-    assert "rst_n" in port_names
+    # rst_n is reserved — must be excluded from observed_signals
+    assert "rst_n" not in port_names
+    # a and b come from the body (a |-> b)
     assert "a" in port_names
     assert "b" in port_names
 
