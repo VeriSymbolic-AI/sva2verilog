@@ -130,6 +130,28 @@ class PropImplication(SVANode):
     overlapping: bool = True  # False means |=>
 
 
+@dataclass(frozen=True)
+class DisableIff(SVANode):
+    """``disable iff (expr) property`` — conditional disable wrapper (Phase 3+).
+
+    When the ``condition`` is true the property evaluation is suppressed for
+    that cycle: outputs gate to 0 and the internal state is synchronously
+    cleared (same semantics as asserting disable_i on the underlying checker).
+
+    Attributes:
+        condition:  Boolean expression that disables the check when true.
+        body:       The wrapped property or sequence.
+
+    Example::
+
+        // disable iff (reset_n == 0) a |-> b
+        DisableIff(condition=BoolExpr(text="!reset_n", ...), body=PropImplication(...), ...)
+    """
+
+    condition: SVANode  # boolean expression for the disable condition
+    body: SVANode       # the wrapped property/sequence
+
+
 # ── Clocking ───────────────────────────────────────────────────────────────
 
 
@@ -188,6 +210,7 @@ class CheckerNode:
     observed_signals: tuple[tuple[str, str], ...]  # (port_name, signal_name)
     source_loc: SourceLoc
     children: tuple[CheckerNode, ...] = ()
+    cse_origin: str | None = None  # named-sequence label for CSE tag (task 3.3.5)
 
     # params is a mutable dict, which prevents the auto-generated __hash__ and
     # __eq__ from working correctly on a frozen dataclass.  We override them
@@ -202,6 +225,7 @@ class CheckerNode:
                 self.observed_signals,
                 self.source_loc,
                 self.children,
+                self.cse_origin,
             )
         )
 
@@ -215,4 +239,5 @@ class CheckerNode:
             and self.observed_signals == other.observed_signals
             and self.source_loc == other.source_loc
             and self.children == other.children
+            and self.cse_origin == other.cse_origin
         )

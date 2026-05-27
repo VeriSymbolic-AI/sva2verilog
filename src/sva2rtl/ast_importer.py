@@ -23,6 +23,7 @@ from sva2rtl.errors import SvaCompileError, UnsupportedConstruct
 from sva2rtl.ir import (
     BoolExpr,
     ClockSpec,
+    DisableIff,
     PropImplication,
     SeqConcat,
     SeqRepetition,
@@ -332,6 +333,17 @@ def _import_concurrent_assertion(
             _check_unsupported(expr_node, extract_source_loc(expr_node))
             text = expr_to_sv(expr_node)
             ir_node = BoolExpr(text=text, source_loc=source_loc)
+
+    # ── disable iff wrapping ────────────────────────────────────────────────
+    # slang puts the disable condition in PropertySpec.disableIff when the
+    # property uses ``disable iff (cond) <body>`` syntax.
+    disable_node: dict[str, Any] | None = body.get("disableIff")
+    if disable_node is not None:
+        disable_loc = extract_source_loc(disable_node)
+        cond_text = expr_to_sv(disable_node)
+        cond_ir = BoolExpr(text=cond_text, source_loc=disable_loc)
+        ir_node = DisableIff(condition=cond_ir, body=ir_node, source_loc=source_loc)
+        text = f"disable iff ({cond_text}) {text}"
 
     return ir_node, clock_spec, text, label
 
