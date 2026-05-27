@@ -176,3 +176,49 @@ def test_e2e_bool_assert_stdout() -> None:
     )
     assert "module sva_my_check" in result.output
     assert "endmodule" in result.output
+
+
+# ── Test 7: --dump-tree on bool_assert.sv ────────────────────────────────────
+
+
+@requires_slang
+def test_e2e_dump_tree_bool_assert() -> None:
+    """--dump-tree on bool_assert.sv exits 0 and prints structured tree output.
+
+    Verifies the --dump-tree flag produces expected section headers,
+    CheckerNode markers with hashes, and the bool_expr template name.
+    """
+    runner = CliRunner()
+    result = runner.invoke(
+        main, [str(_FIXTURES / "bool_assert.sv"), "--dump-tree"]
+    )
+    assert result.exit_code == 0, (
+        f"Expected exit code 0, got {result.exit_code}.\nOutput: {result.output}"
+    )
+    assert "=== Pre-normalized IR ===" in result.output
+    assert "=== Composition Tree ===" in result.output
+    assert "CheckerNode:" in result.output
+    assert "[hash:" in result.output
+    assert "bool_expr" in result.output
+
+
+# ── Test 8: --dump-tree does not create output file ──────────────────────────
+
+
+@requires_slang
+def test_e2e_dump_tree_no_output_file(tmp_path: Path) -> None:
+    """--dump-tree with --output prevents RTL file creation.
+
+    Even when --output is specified, --dump-tree should print the tree
+    and exit without writing any RTL file.
+    """
+    runner = CliRunner()
+    output_file = tmp_path / "should_not_exist.sv"
+    result = runner.invoke(
+        main,
+        [str(_FIXTURES / "bool_assert.sv"), "--dump-tree", "--output", str(output_file)],
+    )
+    assert result.exit_code == 0, (
+        f"Expected exit code 0, got {result.exit_code}.\nOutput: {result.output}"
+    )
+    assert not output_file.exists(), "RTL file should not exist when --dump-tree is used"
