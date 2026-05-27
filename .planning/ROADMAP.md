@@ -120,7 +120,7 @@ OP-05, OP-06, OP-07, OP-08, OP-09, OP-10, PARSE-03, OUT-04, TEST-03, TEST-04
 
 **Mode:** mvp
 **Delivers:** A proper token-passing composition engine (TIMA Lab architecture) with a normalization preprocessing pass. Complex multi-operator chains that were handled ad-hoc in Phase 2–3 now route through the canonical architecture. `--dump-tree` becomes the debugging window into composition.
-**Progress:** 2/3 plans complete
+**Progress:** 3/3 plans complete ✅
 **Unlocks:** Phase 5 optimization (optimizer requires a well-formed CheckerNode tree from the composition engine); reliable handling of deeply nested/composite SVA patterns
 
 ### Why This Slice
@@ -133,7 +133,7 @@ Phases 2–3 wire templates directly (workable for isolated operators). Phase 4 
 |---|------|-----------------|
 | 4.1 | IR normalization pass | `normalizer.py`: bottom-up rewrites — `|=>` → `##1 |->` desugaring; flatten `SeqConcat` chains; canonicalize `##[N:N]` → `##N`; expand small fixed repetitions `[*N]` where N ≤ 3; normalize boolean constants; pure IR→IR (no side effects), fully tested | ✅ 2026-05-28 |
 | 4.2 | Composition engine (token-passing) | `composer.py`: walks normalized IR, selects operator templates, wires `pass(antecedent)` → `start(consequent)` token signals; builds `CheckerNode` tree with stable structural hashes; replaces ad-hoc direct wiring from Phase 2–3 | ✅ 2026-05-28 |
-| 4.3 | Integration + regression validation | Complex compositions tested: `a |-> ##[1:3] (b [*2:4] ##1 c)`; `--dump-tree` prints CheckerNode tree with token-passing wiring; all Phase 1–3 golden files regenerate byte-for-byte; all simulation oracle tests still pass |
+| 4.3 | Integration + regression validation | Complex compositions tested: `a |-> ##[1:3] (b [*2:4] ##1 c)`; `--dump-tree` prints CheckerNode tree with token-passing wiring; all Phase 1–3 golden files regenerate byte-for-byte; all simulation oracle tests still pass | ✅ 2026-05-28 |
 
 ### Requirements
 
