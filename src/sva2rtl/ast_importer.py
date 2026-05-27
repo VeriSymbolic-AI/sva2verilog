@@ -66,6 +66,12 @@ UNSUPPORTED_KINDS_PHASE1: dict[str, str] = {}
 # Implication operators are now handled natively (Phase 2).
 _UNSUPPORTED_BINARY_OPS: dict[str, str] = {}
 
+# ── Named sequence/property declarations (Phase 3) ─────────────────────────
+# Populated by import_assertion() from the current AST's module body members.
+# Maps declaration name -> raw slang AST member dict.
+# Single-threaded compiler; module-level state is safe.
+_DECLARATIONS: dict[str, dict[str, Any]] = {}
+
 
 # ── Public API ─────────────────────────────────────────────────────────────
 
@@ -99,6 +105,16 @@ def import_assertion(
     design = ast.get("design", {})
     members: list[dict[str, Any]] = design.get("members", [])
 
+    # First pass: collect named sequence/property declarations from each
+    # InstanceBody so that _dispatch_expr_to_ir can inline SequenceInstance refs.
+    global _DECLARATIONS
+    for member in members:
+        if member.get("kind") == "Instance":
+            body = member.get("body", {})
+            if body.get("kind") == "InstanceBody":
+                _DECLARATIONS = _collect_declarations(body.get("members", []))
+
+    # Second pass: locate and import the ConcurrentAssertion.
     # Flatten members from all Instance/InstanceBody nodes
     for member in members:
         if member.get("kind") == "Instance":
@@ -112,6 +128,34 @@ def import_assertion(
         message="No concurrent assertion found in the slang AST. "
         "Ensure the input file contains an 'assert property (...)' statement."
     )
+
+
+def extract_dut_module(ast: dict[str, Any]) -> str:
+    """Extract the top-level DUT module name from a slang ``--ast-json`` dict.
+
+    Returns the ``name`` field of the first ``Instance`` member in
+    ``design.members``.  This is the module name that the bind statement
+    will target.
+
+    Parameters
+    ----------
+    ast:
+        Parsed slang ``--ast-json`` dict (top-level key ``"design"``).
+
+    Returns
+    -------
+    str
+        The DUT module instance name (e.g. ``"my_module"``), or
+        ``"<unknown>"`` when no ``Instance`` member is found.
+    """
+    design = ast.get("design", {})
+    members: list[dict[str, Any]] = design.get("members", [])
+    for member in members:
+        if member.get("kind") == "Instance":
+            name = str(member.get("name", ""))
+            if name:
+                return name
+    return "<unknown>"
 
 
 def expr_to_sv(node: dict[str, Any]) -> str:
@@ -252,6 +296,27 @@ def _check_unsupported(node: dict[str, Any], source_loc: SourceLoc) -> None:
         )
 
 
+def _collect_declarations(members: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """Scan module body *members* for named sequence/property declarations.
+
+    Returns
+    -------
+    dict[str, dict[str, Any]]
+        Mapping of declaration name → body expression AST dict.
+        Only members with ``kind == "Sequence"`` or ``kind == "Property"``
+        are collected; all other member kinds are silently ignored.
+    """
+    decls: dict[str, dict[str, Any]] = {}
+    for member in members:
+        kind = member.get("kind", "")
+        if kind in ("Sequence", "Property"):
+            name = str(member.get("name", ""))
+            if name:
+                body = member.get("body", {})
+                decls[name] = body
+    return decls
+
+
 def _find_assertion_in_members(
     members: list[dict[str, Any]],
 ) -> tuple[SVANode, ClockSpec, str, str | None] | None:
@@ -329,6 +394,10 @@ def _import_concurrent_assertion(
             prop_ir = _build_prop_implication(expr_node, source_loc)
             ir_node = prop_ir
             text = _reconstruct_impl_text(prop_ir)
+        case "SequenceInstance":
+            expanded = _expand_named_sequence(expr_node, source_loc, frozenset())
+            ir_node = expanded
+            text = _reconstruct_node_text(expanded)
         case _:
             _check_unsupported(expr_node, extract_source_loc(expr_node))
             text = expr_to_sv(expr_node)
@@ -348,26 +417,34 @@ def _import_concurrent_assertion(
     return ir_node, clock_spec, text, label
 
 
-def _dispatch_expr_to_ir(node: dict[str, Any]) -> SVANode:
+def _dispatch_expr_to_ir(node: dict[str, Any], _visited: frozenset[str] = frozenset()) -> SVANode:
     """Convert an expression node to an SVANode (BoolExpr or SeqConcat).
 
-    Used when building child elements of a SequenceConcat.
+    Used when building child elements of a SequenceConcat.  *_visited* is the
+    frozenset of named sequence names currently being expanded; it is threaded
+    through recursive calls for cycle detection (SVA-E003).
     """
     source_loc = extract_source_loc(node)
     match node.get("kind"):
         case "SequenceConcat":
-            return _build_seq_concat(node, source_loc)
+            return _build_seq_concat(node, source_loc, _visited)
         case "SimpleAssertionExpr" if node.get("repetition", {}).get("kind") == "Consecutive":
-            return _build_seq_repetition(node, source_loc)
+            return _build_seq_repetition(node, source_loc, _visited)
         case "CallExpression" if node.get("subroutineName") in _SUPPORTED_SIGNAL_FUNCS:
             return _build_signal_func(node, source_loc)
+        case "SequenceInstance":
+            return _expand_named_sequence(node, source_loc, _visited)
         case _:
             _check_unsupported(node, source_loc)
             text = expr_to_sv(node)
             return BoolExpr(text=text, source_loc=source_loc)
 
 
-def _build_seq_repetition(node: dict[str, Any], source_loc: SourceLoc) -> SeqRepetition:
+def _build_seq_repetition(
+    node: dict[str, Any],
+    source_loc: SourceLoc,
+    _visited: frozenset[str] = frozenset(),
+) -> SeqRepetition:
     """Build a SeqRepetition IR node from a slang SimpleAssertionExpr JSON node.
 
     The ``repetition`` sub-dict must have ``kind == "Consecutive"``.
@@ -385,7 +462,7 @@ def _build_seq_repetition(node: dict[str, Any], source_loc: SourceLoc) -> SeqRep
         )
     rep_max = int(max_val)
     inner_node = node.get("expr", {})
-    inner = _dispatch_expr_to_ir(inner_node) if inner_node else BoolExpr(
+    inner = _dispatch_expr_to_ir(inner_node, _visited) if inner_node else BoolExpr(
         text="<expr>", source_loc=source_loc
     )
     return SeqRepetition(expr=inner, rep_min=rep_min, rep_max=rep_max, source_loc=source_loc)
@@ -465,7 +542,11 @@ def _reconstruct_signal_func_text(node: SignalFunc) -> str:
     return f"${node.func_name}({node.signal})"
 
 
-def _build_seq_concat(node: dict[str, Any], source_loc: SourceLoc) -> SeqConcat:
+def _build_seq_concat(
+    node: dict[str, Any],
+    source_loc: SourceLoc,
+    _visited: frozenset[str] = frozenset(),
+) -> SeqConcat:
     """Build a SeqConcat IR node from a slang SequenceConcat JSON node.
 
     In slang JSON each element carries the delay AFTER that element
@@ -478,7 +559,7 @@ def _build_seq_concat(node: dict[str, Any], source_loc: SourceLoc) -> SeqConcat:
 
     for i, elem in enumerate(elements_raw):
         seq_node = elem.get("sequence", {})
-        elements.append(_dispatch_expr_to_ir(seq_node))
+        elements.append(_dispatch_expr_to_ir(seq_node, _visited))
 
         # Skip last element's delay — always (0, 0) sentinel in slang JSON
         if i < len(elements_raw) - 1:
@@ -518,6 +599,10 @@ def _reconstruct_seq_text(node: SeqConcat) -> str:
             parts.append(elem.text)
         elif isinstance(elem, SeqConcat):
             parts.append(_reconstruct_seq_text(elem))
+        elif isinstance(elem, SeqRepetition):
+            parts.append(_reconstruct_rep_text(elem))
+        elif isinstance(elem, SignalFunc):
+            parts.append(_reconstruct_signal_func_text(elem))
         else:
             parts.append("<expr>")
         if i < len(node.delays):
@@ -532,10 +617,11 @@ def _reconstruct_seq_text(node: SeqConcat) -> str:
 def _build_prop_implication(
     node: dict[str, Any],
     source_loc: SourceLoc,
+    _visited: frozenset[str] = frozenset(),
 ) -> PropImplication:
     """Build a PropImplication IR node from a slang BinaryPropertyExpr JSON node."""
-    ant = _dispatch_expr_to_ir(node["left"])
-    con = _dispatch_expr_to_ir(node["right"])
+    ant = _dispatch_expr_to_ir(node["left"], _visited)
+    con = _dispatch_expr_to_ir(node["right"], _visited)
     overlapping = node.get("op") == "OverlappedImplication"
     return PropImplication(
         antecedent=ant,
@@ -561,6 +647,71 @@ def _reconstruct_impl_text(node: PropImplication) -> str:
     else:
         con_text = "<con>"
     return f"{ant_text} {op} {con_text}"
+
+
+def _reconstruct_node_text(node: SVANode) -> str:
+    """Return a human-readable SVA text string for any IR node type.
+
+    Used when a named sequence is inline-expanded and its text needs to be
+    reconstructed for the generated module header comment.
+    """
+    if isinstance(node, BoolExpr):
+        return node.text
+    if isinstance(node, SeqConcat):
+        return _reconstruct_seq_text(node)
+    if isinstance(node, SeqRepetition):
+        return _reconstruct_rep_text(node)
+    if isinstance(node, SignalFunc):
+        return _reconstruct_signal_func_text(node)
+    if isinstance(node, PropImplication):
+        return _reconstruct_impl_text(node)
+    return "<expr>"
+
+
+def _expand_named_sequence(
+    node: dict[str, Any],
+    source_loc: SourceLoc,
+    visited: frozenset[str],
+) -> SVANode:
+    """Inline-expand a ``SequenceInstance`` reference to its IR node.
+
+    Looks up the sequence body in ``_DECLARATIONS``, recursively dispatches
+    it through ``_dispatch_expr_to_ir``, and returns the resulting IR node.
+
+    Parameters
+    ----------
+    node:
+        The ``SequenceInstance`` slang AST dict.
+    source_loc:
+        Source location of the reference site (used in error messages).
+    visited:
+        Frozenset of sequence names currently being expanded.  When *seq_name*
+        is already present, a circular reference has been detected.
+
+    Raises
+    ------
+    SvaCompileError
+        SVA-E003 on circular reference or when the declaration is not found.
+    """
+    seq_name = str(node.get("sequenceName", ""))
+    if seq_name in visited:
+        raise SvaCompileError(
+            message=(
+                f"SVA-E003: circular sequence reference: '{seq_name}' at "
+                f"{source_loc}; recursive/mutually-recursive sequences are "
+                "not synthesizable."
+            )
+        )
+    decl_body = _DECLARATIONS.get(seq_name)
+    if decl_body is None:
+        raise SvaCompileError(
+            message=(
+                f"SVA-E003: named sequence/property '{seq_name}' referenced at "
+                f"{source_loc} is not defined in the current compilation unit."
+            )
+        )
+    new_visited = visited | frozenset({seq_name})
+    return _dispatch_expr_to_ir(decl_body, new_visited)
 
 
 def _extract_clock(prop_spec: dict[str, Any]) -> ClockSpec:
