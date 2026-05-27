@@ -29,8 +29,8 @@ progress:
 | Requirements | ✅ Defined (40 v1 requirements, traceability updated) |
 | Research | ✅ Complete (HIGH confidence across all areas) |
 | Architecture | ✅ Documented (token-passing, 9-stage pipeline) |
-| Code | ✅ Phase 1 complete — all 5 plans done; sva2rtl bool_assert.sv works end-to-end; Phase 3 complete — all 4 plans done; 453 tests pass |
-| Tests | ✅ 453 tests collected (453 pass, 10 skip); mypy --strict + ruff clean |
+| Code | ✅ Phase 1 complete — all 5 plans done; sva2rtl bool_assert.sv works end-to-end; Phase 3 complete — all 4 plans done; Phase 4 Plan 4.1 done — normalizer.py; 470 tests pass |
+| Tests | ✅ 470 tests collected (470 pass, 10 skip); mypy --strict + ruff clean |
 | CI | ❌ Not configured |
 
 ---
@@ -42,7 +42,7 @@ progress:
 | 1 | Foundation: IR + Slang + Boolean → SV Monitor | ✅ Complete (5/5 plans) | PARSE-01/02/04/05, OUT-01/02/03/07/08, CLI-05/06, TEST-01 |
 | 2 | Core Sequential Operators (##N, |->)  | 🔲 Not started | OP-01/02/03/04, OUT-06, TEST-02/05/06 |
 | 3 | Remaining Tier 1 + Sim Validation | ✅ Complete (4/4 plans) | OP-05–10, PARSE-03, OUT-04, TEST-03/04 |
-| 4 | Normalization + Composition Engine | 📋 Planned (3 plans, 2 waves) | PIPE-01/02 |
+| 4 | Normalization + Composition Engine | 🔄 In Progress (1/3 plans) | PIPE-01/02 |
 | 5 | Optimization Passes | 🔲 Not started | PIPE-03/04/05 |
 | 6 | CLI Polish + Verilog-2001 + Integration | 🔲 Not started | CLI-01–04, OUT-05 |
 
@@ -54,7 +54,7 @@ progress:
 
 ### Phase 4 Plan Checklist
 
-- [ ] **4.1** IR normalization pass — `normalizer.py`: `[*1]` identity, SeqConcat flattening, constant fold, idempotent (Wave 1)
+- [x] **4.1** IR normalization pass — `normalizer.py`: `[*1]` identity, SeqConcat flattening, constant fold, idempotent (Wave 1) ✅ 2026-05-28
 - [ ] **4.2** Composition engine — structural hash + pipeline integration, `normalize()` wired into CLI + tests (Wave 1, depends 4.1)
 - [ ] **4.3** Integration + regression validation — `--dump-tree`, golden parity, simulation oracle re-run (Wave 2)
 
@@ -132,7 +132,7 @@ progress:
 | 2026-05-27 | Plan 3.1 complete — SeqRepetition IR, importer dispatch, composer, rep_consecutive.sv.j2 template, behavioral oracle, 23 tests; OP-05 satisfied |
 | 2026-05-27 | Plan 3.3 complete — DisableIff IR/importer/composer/template, named sequence expansion (PARSE-03), bind generation (OUT-04), disable_i/disabled_o interface on all 9 templates, 3 golden files fixed (duplicate instance name bug), 42 new tests; OP-10/PARSE-03/OUT-04 satisfied; 383 tests pass |
 | 2026-05-27 | Plan 3.4 complete — simulation validation harness; tb_generator.py + iverilog runner; 43 simulation tests (rose/fell/stable/past/rep/disable_iff/delay/implication); BV_WIDTH=1 RTL fix; reserved-port dedup fix; 5 oracle disable-key unit tests; 453 tests pass (10 skip); TEST-03/TEST-04 satisfied; Phase 3 COMPLETE |
-| 2026-05-27 | Phase 4 planned — 3 plans, 2 waves. Research + pattern mapping + plan-checker PASSED (2 LOW non-blocking notes). Ready to execute. |
+| 2026-05-28 | Plan 4.1 complete — normalizer.py: [*1] identity removal, SeqConcat flattening, PropImplication preserved (D-05), 17 tests; PIPE-01 partially satisfied; 470 tests pass |
 
 ---
 
