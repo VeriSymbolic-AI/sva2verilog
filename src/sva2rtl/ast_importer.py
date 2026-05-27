@@ -26,6 +26,7 @@ from sva2rtl.ir import (
     PropImplication,
     SeqConcat,
     SeqRepetition,
+    SignalFunc,
     SourceLoc,
     SVANode,
 )
@@ -52,6 +53,11 @@ _UNARY_OPS: dict[str, str] = {
     "UnaryMinus": "-",
     "UnaryPlus": "+",
 }
+
+# Supported SVA signal function names (subroutineName in slang CallExpression).
+_SUPPORTED_SIGNAL_FUNCS: frozenset[str] = frozenset(
+    {"$rose", "$fell", "$stable", "$past"}
+)
 
 # Phase 1 unsupported node kinds; value is a human-readable construct name.
 UNSUPPORTED_KINDS_PHASE1: dict[str, str] = {}
@@ -172,6 +178,17 @@ def expr_to_sv(node: dict[str, Any]) -> str:
 
         case "SequenceExpr":
             return expr_to_sv(node["expr"])
+
+        case "CallExpression":
+            func_name = str(node.get("subroutineName", ""))
+            if func_name in _SUPPORTED_SIGNAL_FUNCS:
+                sf = _build_signal_func(node, source_loc)
+                return _reconstruct_signal_func_text(sf)
+            raise UnsupportedConstruct(
+                message=f"Unsupported system function: '{func_name}'",
+                construct_name=func_name,
+                source_loc=source_loc,
+            )
 
         case "BinaryPropertyExpr":
             op_str = node.get("op", "")
@@ -300,6 +317,10 @@ def _import_concurrent_assertion(
             rep_ir = _build_seq_repetition(expr_node, source_loc)
             ir_node = rep_ir
             text = _reconstruct_rep_text(rep_ir)
+        case "CallExpression" if expr_node.get("subroutineName") in _SUPPORTED_SIGNAL_FUNCS:
+            sf_ir = _build_signal_func(expr_node, source_loc)
+            ir_node = sf_ir
+            text = _reconstruct_signal_func_text(sf_ir)
         case "BinaryPropertyExpr" if expr_node.get("op") in (
             "OverlappedImplication",
             "NonOverlappedImplication",
@@ -326,6 +347,8 @@ def _dispatch_expr_to_ir(node: dict[str, Any]) -> SVANode:
             return _build_seq_concat(node, source_loc)
         case "SimpleAssertionExpr" if node.get("repetition", {}).get("kind") == "Consecutive":
             return _build_seq_repetition(node, source_loc)
+        case "CallExpression" if node.get("subroutineName") in _SUPPORTED_SIGNAL_FUNCS:
+            return _build_signal_func(node, source_loc)
         case _:
             _check_unsupported(node, source_loc)
             text = expr_to_sv(node)
@@ -367,6 +390,67 @@ def _reconstruct_rep_text(node: SeqRepetition) -> str:
     if node.rep_min == node.rep_max:
         return f"{inner_text} [*{node.rep_min}]"
     return f"{inner_text} [*{node.rep_min}:{node.rep_max}]"
+
+
+def _build_signal_func(node: dict[str, Any], source_loc: SourceLoc) -> SignalFunc:
+    """Build a SignalFunc IR node from a slang CallExpression JSON node.
+
+    Supports ``$rose``, ``$fell``, ``$stable``, ``$past``.
+    For ``$past(sig, N)``, N must be an ``IntegerLiteral``; otherwise raises
+    ``UnsupportedConstruct`` (non-compile-time depth is not synthesizable).
+
+    Raises ``SvaCompileError`` when the first argument signal cannot be extracted.
+    """
+    raw_name: str = str(node.get("subroutineName", ""))
+    func_name = raw_name.lstrip("$")  # "$rose" -> "rose", "$past" -> "past"
+
+    arguments: list[dict[str, Any]] = node.get("arguments", [])
+    if not arguments:
+        raise SvaCompileError(
+            message=(
+                f"SVA-E004: signal function '{raw_name}' at {source_loc} "
+                "requires at least one argument."
+            )
+        )
+
+    # Extract signal name from first argument (expected NamedValue)
+    arg0 = arguments[0]
+    if arg0.get("kind") == "NamedValue":
+        symbol: str = str(arg0.get("symbol", " "))
+        signal = symbol.split(" ", 1)[-1]
+    else:
+        signal_text = expr_to_sv(arg0)
+        signal = signal_text
+
+    # Extract depth from second argument (only for $past)
+    depth: int = 1
+    if func_name == "past" and len(arguments) >= 2:
+        arg1 = arguments[1]
+        if arg1.get("kind") != "IntegerLiteral":
+            arg1_loc = extract_source_loc(arg1)
+            raise UnsupportedConstruct(
+                message=(
+                    f"$past depth must be a compile-time integer literal at {arg1_loc}; "
+                    "non-literal depth is not synthesizable."
+                ),
+                construct_name="$past_dynamic_depth",
+                source_loc=arg1_loc,
+            )
+        depth = int(arg1.get("value", 1))
+
+    return SignalFunc(
+        func_name=func_name,
+        signal=signal,
+        depth=depth,
+        source_loc=source_loc,
+    )
+
+
+def _reconstruct_signal_func_text(node: SignalFunc) -> str:
+    """Reconstruct SVA text for a SignalFunc IR node (e.g. ``$rose(sig)`` or ``$past(sig, 3)``)."""
+    if node.func_name == "past" and node.depth != 1:
+        return f"${node.func_name}({node.signal}, {node.depth})"
+    return f"${node.func_name}({node.signal})"
 
 
 def _build_seq_concat(node: dict[str, Any], source_loc: SourceLoc) -> SeqConcat:
