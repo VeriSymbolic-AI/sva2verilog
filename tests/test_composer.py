@@ -6,7 +6,13 @@ import re
 
 import pytest
 
-from sva2rtl.composer import compose, extract_signals, module_name_from_label
+from sva2rtl.composer import (
+    compose,
+    compute_hash_map,
+    extract_signals,
+    module_name_from_label,
+    structural_hash,
+)
 from sva2rtl.errors import UnsupportedConstruct
 from sva2rtl.ir import (
     BoolExpr,
@@ -17,6 +23,7 @@ from sva2rtl.ir import (
     SourceLoc,
     SVANode,
 )
+from sva2rtl.normalizer import normalize
 
 # ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -560,3 +567,154 @@ def test_compose_implication_does_not_raise() -> None:
     # Should not raise
     checker = compose(node, clock, None, "a |-> b")
     assert checker is not None
+
+
+# ── Normalize->Compose parity (Phase 4) ─────────────────────────────────
+
+
+def test_normalize_compose_parity_bool_expr() -> None:
+    """BoolExpr through normalize->compose gives same CheckerNode as compose alone."""
+    loc = _make_loc()
+    clock = _make_clock()
+    node = BoolExpr(text="(a && b)", source_loc=loc)
+
+    direct = compose(node, clock, "parity_bool", "(a && b)")
+    normalized_node = normalize(node)
+    via_normalize = compose(normalized_node, clock, "parity_bool", "(a && b)")
+
+    assert direct == via_normalize
+
+
+def test_normalize_compose_parity_seq_concat() -> None:
+    """Flat SeqConcat through normalize->compose matches compose alone."""
+    loc = _make_loc()
+    clock = _make_clock()
+    node = SeqConcat(
+        source_loc=loc,
+        elements=(
+            BoolExpr(text="a", source_loc=loc),
+            BoolExpr(text="b", source_loc=loc),
+        ),
+        delays=((2, 2),),
+    )
+
+    direct = compose(node, clock, "parity_concat", "a ##2 b")
+    normalized_node = normalize(node)
+    via_normalize = compose(normalized_node, clock, "parity_concat", "a ##2 b")
+
+    assert direct == via_normalize
+
+
+def test_normalize_compose_parity_implication_overlap() -> None:
+    """Overlapping PropImplication through normalize->compose matches compose alone."""
+    loc = _make_loc()
+    clock = _make_clock()
+    node = PropImplication(
+        antecedent=BoolExpr(text="a", source_loc=loc),
+        consequent=BoolExpr(text="b", source_loc=loc),
+        overlapping=True,
+        source_loc=loc,
+    )
+
+    direct = compose(node, clock, "parity_impl", "a |-> b")
+    normalized_node = normalize(node)
+    via_normalize = compose(normalized_node, clock, "parity_impl", "a |-> b")
+
+    assert direct == via_normalize
+
+
+def test_normalize_compose_parity_implication_nonoverlap() -> None:
+    """Non-overlapping PropImplication through normalize->compose matches compose alone."""
+    loc = _make_loc()
+    clock = _make_clock()
+    node = PropImplication(
+        antecedent=BoolExpr(text="a", source_loc=loc),
+        consequent=BoolExpr(text="b", source_loc=loc),
+        overlapping=False,
+        source_loc=loc,
+    )
+
+    direct = compose(node, clock, "parity_nonoverlap", "a |=> b")
+    normalized_node = normalize(node)
+    via_normalize = compose(normalized_node, clock, "parity_nonoverlap", "a |=> b")
+
+    assert direct == via_normalize
+
+
+# ── Structural hash (Phase 4) ────────────────────────────────────────────
+
+
+def test_structural_hash_deterministic() -> None:
+    """Same node produces same hash across two calls."""
+    loc = _make_loc()
+    clock = _make_clock()
+    node = BoolExpr(text="x", source_loc=loc)
+    checker = compose(node, clock, "hash_det", "x")
+
+    h1 = structural_hash(checker)
+    h2 = structural_hash(checker)
+
+    assert h1 == h2
+    assert re.match(r"^[0-9a-f]{8}$", h1)
+
+
+def test_structural_hash_ignores_module_name() -> None:
+    """Two nodes differing only in module_name produce same hash."""
+    loc = _make_loc()
+    clock = _make_clock()
+    node = BoolExpr(text="sig", source_loc=loc)
+
+    checker_a = compose(node, clock, "name_a", "sig")
+    checker_b = compose(node, clock, "name_b", "sig")
+
+    # module_name differs
+    assert checker_a.module_name != checker_b.module_name
+    # structural hash should be identical
+    assert structural_hash(checker_a) == structural_hash(checker_b)
+
+
+def test_structural_hash_differs_on_template() -> None:
+    """Two nodes with different template_name produce different hashes."""
+    loc = _make_loc()
+    node_a = CheckerNode(
+        template_name="bool_expr",
+        module_name="sva_test",
+        params={"clock_signal": "clk", "clock_edge": "posedge", "bool_expr": "a"},
+        observed_signals=(("a", "a"),),
+        source_loc=loc,
+        children=(),
+    )
+    node_b = CheckerNode(
+        template_name="concat_delay",
+        module_name="sva_test",
+        params={"clock_signal": "clk", "clock_edge": "posedge", "bool_expr": "a"},
+        observed_signals=(("a", "a"),),
+        source_loc=loc,
+        children=(),
+    )
+
+    assert structural_hash(node_a) != structural_hash(node_b)
+
+
+def test_compute_hash_map_includes_children() -> None:
+    """A parent with 2 children produces a hash_map with 3 entries."""
+    loc = _make_loc()
+    clock = _make_clock()
+    node = SeqConcat(
+        source_loc=loc,
+        elements=(
+            BoolExpr(text="a", source_loc=loc),
+            BoolExpr(text="b", source_loc=loc),
+        ),
+        delays=((1, 1),),
+    )
+    checker = compose(node, clock, "hash_map_check", "a ##1 b")
+    # seq_concat_top has 3 children: bool_a, delay, bool_b
+    assert len(checker.children) == 3
+
+    hm = compute_hash_map(checker)
+    # 1 parent + 3 children = 4 entries
+    assert len(hm) == 4
+    # All values are 8-char hex
+    for name, h in hm.items():
+        assert re.match(r"^[0-9a-f]{8}$", h), f"Bad hash for {name}: {h}"
