@@ -24,6 +24,7 @@ from sva2rtl.ir import (
     BoolExpr,
     CheckerNode,
     ClockSpec,
+    DisableIff,
     PropImplication,
     SeqConcat,
     SeqRepetition,
@@ -391,6 +392,8 @@ def compose(
             return _compose_signal_func(node, clock, label, original_text)
         case PropImplication():
             return _compose_implication(node, clock, label, original_text)
+        case DisableIff():
+            return _compose_disable_iff(node, clock, label, original_text)
         case _:
             raise UnsupportedConstruct(
                 message=(
@@ -660,3 +663,66 @@ def _collect_signals(
             if port_name not in seen:
                 seen[port_name] = None
     return tuple((name, name) for name in seen)
+
+
+def _compose_disable_iff(
+    node: DisableIff,
+    clock: ClockSpec,
+    label: str | None,
+    original_text: str,
+) -> CheckerNode:
+    """Build a wrapper CheckerNode for ``disable iff (cond) body``.
+
+    The wrapper evaluates the disable condition combinationally and OR-combines
+    it with the incoming ``disable_i``, feeding the result into the body
+    checker's ``disable_i`` port.  All outputs are passed through directly
+    from the body checker.
+
+    Parameters
+    ----------
+    node:
+        The ``DisableIff`` IR node.
+    clock:
+        Clock spec for the child instantiation.
+    label:
+        Assertion label or ``None`` for hash-based naming.
+    original_text:
+        Reconstructed SVA expression text for the header comment.
+    """
+    module_name = module_name_from_label(label, original_text)
+
+    # Compose the body (wrapped property / sequence)
+    body_checker = compose(node.body, clock, None, original_text)
+
+    # Extract the condition expression text from the condition node
+    if isinstance(node.condition, BoolExpr):
+        cond_expr = node.condition.text
+    else:
+        cond_expr = "<cond>"
+
+    # Collect signals: condition signals + body signals (no duplicates)
+    cond_signals = extract_signals(cond_expr)
+    cond_seen = {p for p, _ in cond_signals}
+    body_extra = tuple(
+        (p, s) for p, s in body_checker.observed_signals if p not in cond_seen
+    )
+    all_signals = cond_signals + body_extra
+
+    params: dict[str, str] = {
+        "module_name": module_name,
+        "cond_expr": cond_expr,
+        "clock_signal": clock.signal,
+        "clock_edge": clock.edge,
+        "source_loc": str(node.source_loc),
+        "sva2rtl_version": __version__,
+        "original_text": original_text,
+    }
+
+    return CheckerNode(
+        template_name="disable_iff_top",
+        module_name=module_name,
+        params=params,
+        observed_signals=all_signals,
+        source_loc=node.source_loc,
+        children=(body_checker,),
+    )
