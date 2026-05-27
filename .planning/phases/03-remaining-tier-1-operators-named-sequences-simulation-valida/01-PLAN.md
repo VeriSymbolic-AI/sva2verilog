@@ -1,5 +1,3 @@
-# Plan 3.1: Consecutive Repetition `[*N]` and `[*M:N]`
-
 ---
 wave: 1
 depends_on: []
@@ -18,6 +16,8 @@ autonomous: true
 requirements:
   - OP-05
 ---
+
+# Plan 3.1: Consecutive Repetition `[*N]` and `[*M:N]`
 
 ## Summary
 

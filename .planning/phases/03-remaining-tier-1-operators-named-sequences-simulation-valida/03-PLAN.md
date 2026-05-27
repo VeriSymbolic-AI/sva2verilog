@@ -1,10 +1,8 @@
-# Plan 3.3: `disable iff` + Interface Update + Named Sequences + Bind Generation
-
 ---
 wave: 2
 depends_on:
-  - PLAN-3.1
-  - PLAN-3.2
+  - "01"
+  - "02"
 files_modified:
   - src/sva2rtl/ir.py
   - src/sva2rtl/ast_importer.py
@@ -43,6 +41,8 @@ requirements:
   - PARSE-03
   - OUT-04
 ---
+
+# Plan 3.3: `disable iff` + Interface Update + Named Sequences + Bind Generation
 
 ## Summary
 

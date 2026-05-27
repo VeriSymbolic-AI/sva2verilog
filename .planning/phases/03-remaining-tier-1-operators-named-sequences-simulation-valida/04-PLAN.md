@@ -1,11 +1,9 @@
-# Plan 3.4: Simulation Validation Harness (TEST-03, TEST-04)
-
 ---
 wave: 3
 depends_on:
-  - PLAN-3.1
-  - PLAN-3.2
-  - PLAN-3.3
+  - "01"
+  - "02"
+  - "03"
 files_modified:
   - tests/simulation/__init__.py
   - tests/simulation/conftest.py
@@ -25,6 +23,8 @@ requirements:
   - TEST-03
   - TEST-04
 ---
+
+# Plan 3.4: Simulation Validation Harness (TEST-03, TEST-04)
 
 ## Summary
 
@@ -71,7 +71,9 @@ For each Tier 1 operator: generate stimulus trace -> run Python oracle -> produc
 - `conftest.py` skips tests when `iverilog` not found (verified by mock)
 - `tb_generator.py` contains `generate_testbench`, `parse_sim_output`, `compile_and_run` functions
 - `generate_testbench` produces valid Verilog with `module tb;`, clock, reset, stimulus, `$fopen`/`$fdisplay`
-- `parse_sim_output` correctly parses "0 1 0 1\n1 0 0 0\n" format into list of dicts
+- `parse_sim_output` correctly parses "0 1 0 1
+1 0 0 0
+" format into list of dicts
 - Root `conftest.py` registers `simulation` marker
 - `mypy --strict tests/simulation/tb_generator.py` exits 0
 </acceptance_criteria>

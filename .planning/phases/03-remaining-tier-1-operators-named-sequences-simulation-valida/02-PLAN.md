@@ -1,5 +1,3 @@
-# Plan 3.2: Signal Function Operators (`$rose`, `$fell`, `$stable`, `$past`)
-
 ---
 wave: 1
 depends_on: []
@@ -28,6 +26,8 @@ requirements:
   - OP-08
   - OP-09
 ---
+
+# Plan 3.2: Signal Function Operators (`$rose`, `$fell`, `$stable`, `$past`)
 
 ## Summary
 

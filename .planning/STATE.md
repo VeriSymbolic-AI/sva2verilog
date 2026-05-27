@@ -2,21 +2,21 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-current_phase: 03
-status: ready_to_execute
-last_updated: "2026-05-27T18:00:00.000Z"
+current_phase: 04
+status: ready_to_plan
+last_updated: "2026-05-27T22:00:00.000Z"
 progress:
   total_phases: 6
-  completed_phases: 2
+  completed_phases: 3
   total_plans: 12
-  completed_plans: 11
-  percent: 46
+  completed_plans: 12
+  percent: 62
 ---
 
 # Project State: sva2rtl
 
 **Last updated:** 2026-05-27
-**Current phase:** 03
+**Current phase:** 04
 **Mode:** mvp
 
 ---
@@ -29,8 +29,8 @@ progress:
 | Requirements | ✅ Defined (40 v1 requirements, traceability updated) |
 | Research | ✅ Complete (HIGH confidence across all areas) |
 | Architecture | ✅ Documented (token-passing, 9-stage pipeline) |
-| Code | ✅ Phase 1 complete — all 5 plans done; sva2rtl bool_assert.sv works end-to-end; Phase 3 Plans 3.1 + 3.2 + 3.3 complete |
-| Tests | ✅ 383 tests collected (383 pass, 10 skip); mypy --strict + ruff clean |
+| Code | ✅ Phase 1 complete — all 5 plans done; sva2rtl bool_assert.sv works end-to-end; Phase 3 complete — all 4 plans done; 453 tests pass |
+| Tests | ✅ 453 tests collected (453 pass, 10 skip); mypy --strict + ruff clean |
 | CI | ❌ Not configured |
 
 ---
@@ -41,8 +41,8 @@ progress:
 |-------|------|--------|-------------|
 | 1 | Foundation: IR + Slang + Boolean → SV Monitor | ✅ Complete (5/5 plans) | PARSE-01/02/04/05, OUT-01/02/03/07/08, CLI-05/06, TEST-01 |
 | 2 | Core Sequential Operators (##N, |->)  | 🔲 Not started | OP-01/02/03/04, OUT-06, TEST-02/05/06 |
-| 3 | Remaining Tier 1 + Sim Validation | 📋 Planned (4 plans, 3 waves) | OP-05–10, PARSE-03, OUT-04, TEST-03/04 |
-| 4 | Normalization + Composition Engine | 🔲 Not started | PIPE-01/02 |
+| 3 | Remaining Tier 1 + Sim Validation | ✅ Complete (4/4 plans) | OP-05–10, PARSE-03, OUT-04, TEST-03/04 |
+| 4 | Normalization + Composition Engine | 📋 Ready to plan | PIPE-01/02 |
 | 5 | Optimization Passes | 🔲 Not started | PIPE-03/04/05 |
 | 6 | CLI Polish + Verilog-2001 + Integration | 🔲 Not started | CLI-01–04, OUT-05 |
 
@@ -50,14 +50,20 @@ progress:
 
 ## Active Phase
 
-**Phase 3** — Remaining Tier 1 Operators + Named Sequences + Simulation Validation
+**Phase 4** — Normalization + Composition Engine
 
-### Phase 3 Plan Checklist
+### Phase 4 Plan Checklist
+
+- [ ] **4.1** IR normalization pass — `normalizer.py`: `|=>` desugaring, concat flatten, `##[N:N]` → `##N`, small fixed rep expansion, constant fold (Wave 1)
+- [ ] **4.2** Composition engine (token-passing) — `composer.py` proper IR walk; replaces ad-hoc direct wiring from Phase 2–3 (Wave 1)
+- [ ] **4.3** Integration + regression validation — complex compositions, `--dump-tree`, Phase 1–3 golden file parity (Wave 2)
+
+### Phase 3 Plan Checklist (COMPLETE)
 
 - [x] **3.1** Consecutive repetition `[*N]/[*M:N]` — counter-based FSM (Wave 1)
 - [x] **3.2** Signal functions `$rose/$fell/$stable/$past` — edge detect + shift register (Wave 1)
 - [x] **3.3** `disable iff` + interface update + named sequences + bind generation (Wave 2)
-- [ ] **3.4** Simulation validation harness — dual oracle (Wave 3)
+- [x] **3.4** Simulation validation harness — dual oracle (Wave 3)
 
 ### Phase 1 Plan Checklist (COMPLETE)
 
@@ -125,6 +131,7 @@ progress:
 | 2026-05-27 | Phase 3 planned — 4 plans, 3 waves, 10 requirements. Plan-checker PASSED. |
 | 2026-05-27 | Plan 3.1 complete — SeqRepetition IR, importer dispatch, composer, rep_consecutive.sv.j2 template, behavioral oracle, 23 tests; OP-05 satisfied |
 | 2026-05-27 | Plan 3.3 complete — DisableIff IR/importer/composer/template, named sequence expansion (PARSE-03), bind generation (OUT-04), disable_i/disabled_o interface on all 9 templates, 3 golden files fixed (duplicate instance name bug), 42 new tests; OP-10/PARSE-03/OUT-04 satisfied; 383 tests pass |
+| 2026-05-27 | Plan 3.4 complete — simulation validation harness; tb_generator.py + iverilog runner; 43 simulation tests (rose/fell/stable/past/rep/disable_iff/delay/implication); BV_WIDTH=1 RTL fix; reserved-port dedup fix; 5 oracle disable-key unit tests; 453 tests pass (10 skip); TEST-03/TEST-04 satisfied; Phase 3 COMPLETE |
 
 ---
 
