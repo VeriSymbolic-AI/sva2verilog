@@ -76,6 +76,24 @@ class SeqConcat(SVANode):
 
 
 @dataclass(frozen=True)
+class SeqRepetition(SVANode):
+    """Consecutive repetition: ``expr[*N]`` or ``expr[*M:N]`` (Phase 3+).
+
+    ``rep_min`` and ``rep_max`` are the lower and upper bounds of the
+    repetition count.  For a fixed repetition ``[*N]`` both equal N.
+    Unbounded ``[*0:$]`` is rejected at import time with SVA-E002.
+
+    Example::
+
+        SeqRepetition(expr=BoolExpr(text="a", ...), rep_min=3, rep_max=3, ...)
+    """
+
+    expr: SVANode
+    rep_min: int
+    rep_max: int
+
+
+@dataclass(frozen=True)
 class PropImplication(SVANode):
     """Overlapping (``|->``) or non-overlapping (``|=>``) implication (Phase 2+).
 

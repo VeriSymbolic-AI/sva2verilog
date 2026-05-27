@@ -20,7 +20,15 @@ from __future__ import annotations
 from typing import Any
 
 from sva2rtl.errors import SvaCompileError, UnsupportedConstruct
-from sva2rtl.ir import BoolExpr, ClockSpec, PropImplication, SeqConcat, SourceLoc, SVANode
+from sva2rtl.ir import (
+    BoolExpr,
+    ClockSpec,
+    PropImplication,
+    SeqConcat,
+    SeqRepetition,
+    SourceLoc,
+    SVANode,
+)
 
 # ── Operator tables ────────────────────────────────────────────────────────
 
@@ -46,9 +54,7 @@ _UNARY_OPS: dict[str, str] = {
 }
 
 # Phase 1 unsupported node kinds; value is a human-readable construct name.
-UNSUPPORTED_KINDS_PHASE1: dict[str, str] = {
-    "SequenceRepetition": "[*N] consecutive repetition (Phase 2)",
-}
+UNSUPPORTED_KINDS_PHASE1: dict[str, str] = {}
 
 # Implication operators are now handled natively (Phase 2).
 _UNSUPPORTED_BINARY_OPS: dict[str, str] = {}
@@ -290,6 +296,10 @@ def _import_concurrent_assertion(
             seq_ir = _build_seq_concat(expr_node, source_loc)
             ir_node: SVANode = seq_ir
             text = _reconstruct_seq_text(seq_ir)
+        case "SimpleAssertionExpr" if expr_node.get("repetition", {}).get("kind") == "Consecutive":
+            rep_ir = _build_seq_repetition(expr_node, source_loc)
+            ir_node = rep_ir
+            text = _reconstruct_rep_text(rep_ir)
         case "BinaryPropertyExpr" if expr_node.get("op") in (
             "OverlappedImplication",
             "NonOverlappedImplication",
@@ -314,10 +324,49 @@ def _dispatch_expr_to_ir(node: dict[str, Any]) -> SVANode:
     match node.get("kind"):
         case "SequenceConcat":
             return _build_seq_concat(node, source_loc)
+        case "SimpleAssertionExpr" if node.get("repetition", {}).get("kind") == "Consecutive":
+            return _build_seq_repetition(node, source_loc)
         case _:
             _check_unsupported(node, source_loc)
             text = expr_to_sv(node)
             return BoolExpr(text=text, source_loc=source_loc)
+
+
+def _build_seq_repetition(node: dict[str, Any], source_loc: SourceLoc) -> SeqRepetition:
+    """Build a SeqRepetition IR node from a slang SimpleAssertionExpr JSON node.
+
+    The ``repetition`` sub-dict must have ``kind == "Consecutive"``.
+    Raises ``SvaCompileError`` (SVA-E002) for unbounded repetition (max = "$").
+    """
+    rep = node.get("repetition", {})
+    rep_min = int(rep.get("min", 1))
+    max_val = rep.get("max", 1)
+    if max_val == "$":
+        raise SvaCompileError(
+            message=(
+                f"SVA-E002: unbounded repetition [*0:$] at {source_loc} is not "
+                "synthesizable; use a finite upper bound."
+            )
+        )
+    rep_max = int(max_val)
+    inner_node = node.get("expr", {})
+    inner = _dispatch_expr_to_ir(inner_node) if inner_node else BoolExpr(
+        text="<expr>", source_loc=source_loc
+    )
+    return SeqRepetition(expr=inner, rep_min=rep_min, rep_max=rep_max, source_loc=source_loc)
+
+
+def _reconstruct_rep_text(node: SeqRepetition) -> str:
+    """Reconstruct an SVA text representation from a SeqRepetition IR node."""
+    if isinstance(node.expr, BoolExpr):
+        inner_text = node.expr.text
+    elif isinstance(node.expr, SeqConcat):
+        inner_text = _reconstruct_seq_text(node.expr)
+    else:
+        inner_text = "<expr>"
+    if node.rep_min == node.rep_max:
+        return f"{inner_text} [*{node.rep_min}]"
+    return f"{inner_text} [*{node.rep_min}:{node.rep_max}]"
 
 
 def _build_seq_concat(node: dict[str, Any], source_loc: SourceLoc) -> SeqConcat:

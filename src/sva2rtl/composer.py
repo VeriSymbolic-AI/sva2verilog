@@ -26,6 +26,7 @@ from sva2rtl.ir import (
     ClockSpec,
     PropImplication,
     SeqConcat,
+    SeqRepetition,
     SourceLoc,
     SVANode,
 )
@@ -383,6 +384,8 @@ def compose(
             return _compose_bool_expr(node, clock, label, original_text)
         case SeqConcat():
             return _compose_seq_concat(node, clock, label, original_text)
+        case SeqRepetition():
+            return _compose_repetition(node, clock, label, original_text)
         case PropImplication():
             return _compose_implication(node, clock, label, original_text)
         case _:
@@ -475,6 +478,46 @@ def _compose_seq_concat(
         observed_signals=all_signals,
         source_loc=node.source_loc,
         children=tuple(children),
+    )
+
+
+def _compose_repetition(
+    node: SeqRepetition,
+    clock: ClockSpec,
+    label: str | None,
+    original_text: str,
+) -> CheckerNode:
+    """Build a leaf CheckerNode for a consecutive repetition expr[*M:N]."""
+    module_name = module_name_from_label(label, original_text)
+    cnt_width = max(1, math.ceil(math.log2(node.rep_max + 1))) if node.rep_max > 0 else 1
+
+    if isinstance(node.expr, BoolExpr):
+        observed = extract_signals(node.expr.text)
+        signal_expr = node.expr.text
+    else:
+        observed = ()
+        signal_expr = "<expr>"
+
+    params: dict[str, str] = {
+        "module_name": module_name,
+        "rep_min": str(node.rep_min),
+        "rep_max": str(node.rep_max),
+        "cnt_width": str(cnt_width),
+        "signal_expr": signal_expr,
+        "clock_signal": clock.signal,
+        "clock_edge": clock.edge,
+        "source_loc": str(node.source_loc),
+        "sva2rtl_version": __version__,
+        "original_text": original_text,
+    }
+
+    return CheckerNode(
+        template_name="rep_consecutive",
+        module_name=module_name,
+        params=params,
+        observed_signals=observed,
+        source_loc=node.source_loc,
+        children=(),
     )
 
 

@@ -43,6 +43,7 @@ class SVABehavioralSim:
             "delay_range",
             "implication_overlap",
             "implication_nonoverlap",
+            "rep_consecutive",
         }
         if kind not in _valid_kinds:
             raise ValueError(f"Unknown kind '{kind}'; must be one of {_valid_kinds}")
@@ -53,6 +54,10 @@ class SVABehavioralSim:
         # ── Delay-operator state ───────────────────────────────────────────
         self._counter: int = 0       # counts cycles since start
         self._running: bool = False  # delay evaluation in progress
+
+        # ── Repetition state ──────────────────────────────────────────────
+        self._rep_count: int = 0
+        self._rep_running: bool = False
 
         # ── Implication / bit-vector state ────────────────────────────────
         bv_width: int = int(params.get("bv_width", 1))
@@ -68,6 +73,8 @@ class SVABehavioralSim:
         """Clear all internal state (models synchronous rst_n assertion)."""
         self._counter = 0
         self._running = False
+        self._rep_count = 0
+        self._rep_running = False
         self._bv = 0
         self._overflow_flag = False
         self._ant_pass_delayed = False
@@ -92,6 +99,8 @@ class SVABehavioralSim:
             return self._tick_delay(signals)
         elif self._kind == "implication_overlap":
             return self._tick_overlap(signals)
+        elif self._kind == "rep_consecutive":
+            return self._tick_rep_consecutive(signals)
         else:  # implication_nonoverlap
             return self._tick_nonoverlap(signals)
 
@@ -155,6 +164,58 @@ class SVABehavioralSim:
             "active": active,
             "pass": pass_val,
             "fail": False,
+            "overflow": False,
+        }
+
+    # ── Consecutive repetition model ([*M:N]) ─────────────────────────────
+
+    def _tick_rep_consecutive(self, signals: dict[str, bool]) -> dict[str, bool]:
+        """Model expr[*M:N] semantics: count consecutive cycles where sig is true.
+
+        start+sig on a cycle begins counting (count=1, running=True).
+        Each subsequent cycle where sig is true increments the counter (capped at rep_max).
+        Any cycle where sig is false while running clears the state (broken sequence).
+        pass = running and sig and count in [rep_min, rep_max]
+        fail = running and not sig and count < rep_min
+        """
+        start: bool = bool(signals.get("start", False))
+        sig: bool = bool(signals.get("sig", False))
+        rep_min: int = int(self._params.get("rep_min", 1))
+        rep_max: int = int(self._params.get("rep_max", 1))
+
+        if start and sig:
+            self._rep_running = True
+            self._rep_count = 1
+            self._attempt_fired = True
+        elif start and not sig:
+            # start with sig=False: start attempt fires but immediately breaks
+            self._rep_running = True
+            self._rep_count = 0
+            self._attempt_fired = True
+        elif self._rep_running and sig:
+            if self._rep_count < rep_max:
+                self._rep_count += 1
+        elif self._rep_running and not sig:
+            # sequence broken
+            pass  # evaluate fail before clearing below
+
+        pass_val = (
+            self._rep_running and sig
+            and self._rep_count >= rep_min
+            and self._rep_count <= rep_max
+        )
+        fail_val = self._rep_running and not sig and self._rep_count < rep_min
+        active_val = self._rep_running
+
+        # Clear running state on broken sequence (after computing fail)
+        if self._rep_running and not sig:
+            self._rep_running = False
+            self._rep_count = 0
+
+        return {
+            "active": active_val,
+            "pass": pass_val,
+            "fail": fail_val,
             "overflow": False,
         }
 

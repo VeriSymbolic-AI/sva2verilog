@@ -1,0 +1,83 @@
+{
+  "design": {
+    "members": [
+      {
+        "kind": "Instance",
+        "name": "rep_fixed",
+        "source_file_start": "rep_fixed.sv",
+        "source_line_start": 1,
+        "source_column_start": 1,
+        "body": {
+          "kind": "InstanceBody",
+          "members": [
+            {
+              "kind": "Port",
+              "name": "clk",
+              "source_file_start": "rep_fixed.sv",
+              "source_line_start": 1,
+              "source_column_start": 20
+            },
+            {
+              "kind": "Port",
+              "name": "a",
+              "source_file_start": "rep_fixed.sv",
+              "source_line_start": 1,
+              "source_column_start": 25
+            },
+            {
+              "kind": "ConcurrentAssertion",
+              "assertionKind": "assert",
+              "source_file_start": "rep_fixed.sv",
+              "source_line_start": 2,
+              "source_column_start": 3,
+              "body": {
+                "kind": "PropertySpec",
+                "source_file_start": "rep_fixed.sv",
+                "source_line_start": 2,
+                "source_column_start": 19,
+                "clocking": {
+                  "kind": "TimingControl",
+                  "source_file_start": "rep_fixed.sv",
+                  "source_line_start": 2,
+                  "source_column_start": 19,
+                  "event": {
+                    "kind": "SignalEvent",
+                    "edge": "posedge",
+                    "source_file_start": "rep_fixed.sv",
+                    "source_line_start": 2,
+                    "source_column_start": 20,
+                    "expr": {
+                      "kind": "NamedValue",
+                      "symbol": "100 clk",
+                      "source_file_start": "rep_fixed.sv",
+                      "source_line_start": 2,
+                      "source_column_start": 28
+                    }
+                  }
+                },
+                "expr": {
+                  "kind": "SimpleAssertionExpr",
+                  "source_file_start": "rep_fixed.sv",
+                  "source_line_start": 2,
+                  "source_column_start": 32,
+                  "expr": {
+                    "kind": "NamedValue",
+                    "symbol": "101 a",
+                    "source_file_start": "rep_fixed.sv",
+                    "source_line_start": 2,
+                    "source_column_start": 32
+                  },
+                  "repetition": {
+                    "kind": "Consecutive",
+                    "min": 3,
+                    "max": 3
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

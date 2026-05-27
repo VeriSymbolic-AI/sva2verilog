@@ -265,9 +265,9 @@ def test_import_assertion_seq_concat_clock() -> None:
     assert clock.signal == "clk"
 
 
-def test_import_assertion_sequence_repetition_still_unsupported() -> None:
-    """SequenceRepetition is still unsupported in Phase 2."""
-    assert "SequenceRepetition" in UNSUPPORTED_KINDS_PHASE1
+def test_import_assertion_sequence_repetition_now_supported() -> None:
+    """SequenceRepetition is now supported in Phase 3 — not in UNSUPPORTED_KINDS_PHASE1."""
+    assert "SequenceRepetition" not in UNSUPPORTED_KINDS_PHASE1
 
 
 # ── extract_source_loc tests ──────────────────────────────────────────────
@@ -306,9 +306,9 @@ def test_extract_source_loc_partial_fields() -> None:
 # ── UNSUPPORTED_KINDS_PHASE1 sanity check ────────────────────────────────
 
 
-def test_unsupported_kinds_table_has_sequence_repetition() -> None:
-    """UNSUPPORTED_KINDS_PHASE1 must reject SequenceRepetition."""
-    assert "SequenceRepetition" in UNSUPPORTED_KINDS_PHASE1
+def test_unsupported_kinds_table_is_empty() -> None:
+    """UNSUPPORTED_KINDS_PHASE1 is now empty — all Phase 1/2/3 constructs are supported."""
+    assert len(UNSUPPORTED_KINDS_PHASE1) == 0
 
 
 # ── PropImplication import tests ─────────────────────────────────────────
