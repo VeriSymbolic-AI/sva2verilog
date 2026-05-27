@@ -94,6 +94,31 @@ class SeqRepetition(SVANode):
 
 
 @dataclass(frozen=True)
+class SignalFunc(SVANode):
+    """Signal function leaf: ``$rose``, ``$fell``, ``$stable``, or ``$past`` (Phase 3+).
+
+    These are edge/stability detection functions that operate on a single signal
+    and produce a 1-bit result.  Each maps to a small RTL template with either
+    one flip-flop (rose/fell/stable) or an N-stage shift register (past).
+
+    Attributes:
+        func_name:  One of ``"rose"``, ``"fell"``, ``"stable"``, ``"past"``.
+        signal:     The signal name, e.g. ``"req"``.
+        depth:      Pipeline depth for ``$past(sig, N)``; default ``1``.
+                    Ignored for rose/fell/stable.
+
+    Example::
+
+        SignalFunc(func_name="rose", signal="req", depth=1, source_loc=...)
+        SignalFunc(func_name="past", signal="data", depth=3, source_loc=...)
+    """
+
+    func_name: str   # "rose" | "fell" | "stable" | "past"
+    signal: str      # signal name referenced by the function
+    depth: int = 1   # pipeline depth for $past; 1 for all others
+
+
+@dataclass(frozen=True)
 class PropImplication(SVANode):
     """Overlapping (``|->``) or non-overlapping (``|=>``) implication (Phase 2+).
 
