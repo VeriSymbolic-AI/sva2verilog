@@ -17,6 +17,17 @@ import pytest
 
 from sva2rtl.ir import BoolExpr, ClockSpec, SourceLoc
 
+
+# ── Custom marker registration ─────────────────────────────────────────────
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    """Register project-specific pytest markers."""
+    config.addinivalue_line(
+        "markers",
+        "simulation: marks tests requiring iverilog (deselect with '-m not simulation')",
+    )
+
 # ── Conditional skip marker ────────────────────────────────────────────────
 
 has_slang: bool = shutil.which("slang") is not None

@@ -40,3 +40,6 @@ python_version = "3.12"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "simulation: marks tests requiring iverilog (deselect with '-m not simulation')",
+]
