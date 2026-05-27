@@ -7,7 +7,7 @@ Exit code mapping (requirement CLI-05):
     3 — SlangNotFound (binary absent from PATH or --slang-path)
 
 Pipeline order (requirement CLI-06):
-    invoke_slang -> import_assertion -> compose -> emit -> write_output
+    invoke_slang -> import_assertion -> normalize -> compose -> emit -> write_output
 """
 
 from __future__ import annotations
@@ -22,6 +22,7 @@ from sva2rtl.composer import compose
 from sva2rtl.emitter import emit, emit_all, write_output, write_output_dir
 from sva2rtl.errors import SlangNotFound, SvaError, UnsupportedConstruct
 from sva2rtl.frontend import invoke_slang
+from sva2rtl.normalizer import normalize
 
 
 @click.command()
@@ -49,6 +50,7 @@ def main(input_file: str, output: str | None, slang_path: str) -> None:
     try:
         ast = invoke_slang(Path(input_file), slang_path)
         node, clock, original_text, label = import_assertion(ast)
+        node = normalize(node)
         checker_node = compose(node, clock, label, original_text)
         if checker_node.children:
             # Hierarchical output: write one .sv file per module to a directory
