@@ -41,7 +41,13 @@ from sva2rtl.normalizer import normalize
     help="Path to slang binary (default: slang on PATH)",
     show_envvar=True,
 )
-def main(input_file: str, output: str | None, slang_path: str) -> None:
+@click.option(
+    "--dump-tree",
+    is_flag=True,
+    default=False,
+    help="Print CheckerNode composition tree and exit (no RTL emitted)",
+)
+def main(input_file: str, output: str | None, slang_path: str, dump_tree: bool) -> None:
     """Compile an SVA property file to a synthesizable SystemVerilog monitor.
 
     INPUT_FILE is a SystemVerilog file containing one or more concurrent
@@ -50,8 +56,18 @@ def main(input_file: str, output: str | None, slang_path: str) -> None:
     try:
         ast = invoke_slang(Path(input_file), slang_path)
         node, clock, original_text, label = import_assertion(ast)
+        raw_node = node
         node = normalize(node)
         checker_node = compose(node, clock, label, original_text)
+
+        if dump_tree:
+            from sva2rtl.composer import compute_hash_map
+            from sva2rtl.debug import format_dump_tree
+
+            hash_map = compute_hash_map(checker_node)
+            click.echo(format_dump_tree(raw_node, checker_node, hash_map))
+            sys.exit(0)
+
         if checker_node.children:
             # Hierarchical output: write one .sv file per module to a directory
             modules = emit_all(checker_node)
