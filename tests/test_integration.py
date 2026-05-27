@@ -18,12 +18,9 @@ import json
 from pathlib import Path
 from typing import cast
 
-import pytest
-
 from sva2rtl.ast_importer import import_assertion
 from sva2rtl.composer import compose
 from sva2rtl.emitter import emit
-from sva2rtl.errors import UnsupportedConstruct
 from sva2rtl.ir import BoolExpr
 from tests.conftest import assert_golden
 
@@ -124,10 +121,10 @@ def test_pipeline_registered_outputs() -> None:
     for reg in ("active_q", "pass_q", "fail_q", "attempt_fired_q"):
         assert reg in sv, f"Missing registered signal: {reg}"
 
-    # Outputs are driven from _q registers via assign, not from combinational logic
-    assert "assign active        = active_q" in sv
-    assert "assign pass          = pass_q" in sv
-    assert "assign fail          = fail_q" in sv
+    # Outputs are driven from _q registers (via disable_i gating), not from combinational logic
+    assert "assign active        = disable_i ? 1'b0 : active_q" in sv
+    assert "assign pass          = disable_i ? 1'b0 : pass_q" in sv
+    assert "assign fail          = disable_i ? 1'b0 : fail_q" in sv
     assert "assign attempt_fired = attempt_fired_q" in sv
 
     # Must NOT have direct combinational assign of outputs from inputs
@@ -145,8 +142,8 @@ def test_pipeline_sync_reset() -> None:
     """
     sv = _run("bool_simple.json")
 
-    # Synchronous reset condition present
-    assert "if (!rst_n)" in sv, "Missing 'if (!rst_n)' synchronous reset"
+    # Synchronous reset condition present (combined with disable_i since 3.3.1)
+    assert "if (!rst_n" in sv, "Missing 'if (!rst_n' synchronous reset"
 
     # All four FFs must be explicitly reset to 0
     resets = sv.count("<= 1'b0")

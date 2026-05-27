@@ -8,10 +8,12 @@ module {{ module_name }} (
 {% for port_name, _ in observed_signals %}
     input  logic {{ port_name }},
 {% endfor %}
+    input  logic disable_i,
     output logic active,
     output logic pass,
     output logic fail,
-    output logic attempt_fired
+    output logic attempt_fired,
+    output logic disabled_o
 );
     // ── Internal token wires (N+1 wires for N children) ─────────────────────
 {% for child in children %}
@@ -31,10 +33,12 @@ module {{ module_name }} (
 {% for port_name, _ in child.observed_signals %}
         .{{ port_name }}({{ port_name }}),
 {% endfor %}
+        .disable_i     (disable_i),
         .active        (w_active_{{ loop.index0 }}),
         .pass          (w_pass_{{ loop.index0 }}),
         .fail          (w_fail_{{ loop.index0 }}),
-        .attempt_fired (w_afired_{{ loop.index0 }})
+        .attempt_fired (w_afired_{{ loop.index0 }}),
+        .disabled_o    ()
     );
 {% else %}
     {{ child.module_name }} u_{{ child.module_name }} (
@@ -44,22 +48,25 @@ module {{ module_name }} (
 {% for port_name, _ in child.observed_signals %}
         .{{ port_name }}({{ port_name }}),
 {% endfor %}
+        .disable_i     (disable_i),
         .active        (w_active_{{ loop.index0 }}),
         .pass          (w_pass_{{ loop.index0 }}),
         .fail          (w_fail_{{ loop.index0 }}),
-        .attempt_fired (w_afired_{{ loop.index0 }})
+        .attempt_fired (w_afired_{{ loop.index0 }}),
+        .disabled_o    ()
     );
 {% endif %}
 {% endfor %}
 
     // ── Top-level output aggregation ─────────────────────────────────────────
     // active: any child is active
-    assign active = {% for child in children %}w_active_{{ loop.index0 }}{% if not loop.last %} | {% endif %}{% endfor %};
+    assign active = disable_i ? 1'b0 : ({% for child in children %}w_active_{{ loop.index0 }}{% if not loop.last %} | {% endif %}{% endfor %});
     // pass: final child's pass output
-    assign pass   = w_pass_{{ children | length - 1 }};
+    assign pass   = disable_i ? 1'b0 : w_pass_{{ children | length - 1 }};
     // fail: any child signals fail
-    assign fail   = {% for child in children %}w_fail_{{ loop.index0 }}{% if not loop.last %} | {% endif %}{% endfor %};
+    assign fail   = disable_i ? 1'b0 : ({% for child in children %}w_fail_{{ loop.index0 }}{% if not loop.last %} | {% endif %}{% endfor %});
     // attempt_fired: first child's attempt_fired (start of sequence)
     assign attempt_fired = w_afired_0;
+    assign disabled_o    = disable_i;
 
 endmodule

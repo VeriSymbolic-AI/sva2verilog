@@ -10,11 +10,13 @@ module {{ module_name }} #(
 {% for port_name, _ in observed_signals %}
     input  logic {{ port_name }},
 {% endfor %}
+    input  logic disable_i,
     output logic active,
     output logic pass,
     output logic fail,
     output logic attempt_fired,
-    output logic overflow_flag
+    output logic overflow_flag,
+    output logic disabled_o
 );
     // ── Internal wires from child modules ────────────────────────────────────
     logic ant_pass_w;
@@ -38,10 +40,12 @@ module {{ module_name }} #(
 {% for port_name, _ in children[0].observed_signals %}
         .{{ port_name }}({{ port_name }}),
 {% endfor %}
+        .disable_i     (disable_i),
         .active        (ant_active_w),
         .pass          (ant_pass_w),
         .fail          (ant_fail_w),
-        .attempt_fired (ant_afired_w)
+        .attempt_fired (ant_afired_w),
+        .disabled_o    ()
     );
 
     // ── Consequent child instantiation ───────────────────────────────────────
@@ -52,10 +56,12 @@ module {{ module_name }} #(
 {% for port_name, _ in children[1].observed_signals %}
         .{{ port_name }}({{ port_name }}),
 {% endfor %}
+        .disable_i     (disable_i),
         .active        (con_active_w),
         .pass          (con_pass_w),
         .fail          (con_fail_w),
-        .attempt_fired (con_afired_w)
+        .attempt_fired (con_afired_w),
+        .disabled_o    ()
     );
 
     // ── Bit-vector shift register (thread tracker) ────────────────────────────
@@ -70,7 +76,7 @@ module {{ module_name }} #(
     assign overflow_event = ant_pass_w && (&bv_q) && !overflow_flag_q;
 
     always_ff @({{ clock_edge }} {{ clock_signal }}) begin
-        if (!rst_n) begin
+        if (!rst_n || disable_i) begin
             bv_q            <= '0;
             overflow_flag_q <= 1'b0;
             attempt_fired_q <= 1'b0;
@@ -89,13 +95,14 @@ module {{ module_name }} #(
     end
 
     // ── Output assignments ────────────────────────────────────────────────────
-    // When halted, gate active/pass/fail to 0; overflow_flag remains sticky
-    assign active        = overflow_flag_q ? 1'b0 : (ant_active_w | con_active_w | (|bv_q));
-    assign pass          = overflow_flag_q ? 1'b0 : (bv_q[BV_WIDTH-1] & con_pass_w);
-    assign fail          = overflow_event  ? 1'b1 :
+    // When disabled, gate active/pass/fail to 0; overflow_flag remains sticky
+    assign active        = disable_i ? 1'b0 : (overflow_flag_q ? 1'b0 : (ant_active_w | con_active_w | (|bv_q)));
+    assign pass          = disable_i ? 1'b0 : (overflow_flag_q ? 1'b0 : (bv_q[BV_WIDTH-1] & con_pass_w));
+    assign fail          = disable_i ? 1'b0 : (overflow_event  ? 1'b1 :
                            overflow_flag_q ? 1'b0 :
-                           (bv_q[BV_WIDTH-1] & ~con_pass_w & con_start_w);
+                           (bv_q[BV_WIDTH-1] & ~con_pass_w & con_start_w));
     assign attempt_fired = attempt_fired_q;
     assign overflow_flag = overflow_flag_q;
+    assign disabled_o    = disable_i;
 
 endmodule

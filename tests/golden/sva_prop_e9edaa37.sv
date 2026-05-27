@@ -7,10 +7,12 @@ module sva_prop_e9edaa37 (
     input  logic start,
     input  logic a,
     input  logic b,
+    input  logic disable_i,
     output logic active,
     output logic pass,
     output logic fail,
-    output logic attempt_fired
+    output logic attempt_fired,
+    output logic disabled_o
 );
     // ── Internal token wires (N+1 wires for N children) ─────────────────────
     logic w_pass_0;
@@ -32,39 +34,46 @@ module sva_prop_e9edaa37 (
         .rst_n    (rst_n),
         .start    (start),
         .a(a),
+        .disable_i     (disable_i),
         .active        (w_active_0),
         .pass          (w_pass_0),
         .fail          (w_fail_0),
-        .attempt_fired (w_afired_0)
+        .attempt_fired (w_afired_0),
+        .disabled_o    ()
     );
     sva_delay_2_5 u_sva_delay_2_5 (
         .clk(clk),
         .rst_n    (rst_n),
         .start    (w_pass_0),
+        .disable_i     (disable_i),
         .active        (w_active_1),
         .pass          (w_pass_1),
         .fail          (w_fail_1),
-        .attempt_fired (w_afired_1)
+        .attempt_fired (w_afired_1),
+        .disabled_o    ()
     );
     sva_prop_e9edaa37_e1 u_sva_prop_e9edaa37_e1 (
         .clk(clk),
         .rst_n    (rst_n),
         .start    (w_pass_1),
         .b(b),
+        .disable_i     (disable_i),
         .active        (w_active_2),
         .pass          (w_pass_2),
         .fail          (w_fail_2),
-        .attempt_fired (w_afired_2)
+        .attempt_fired (w_afired_2),
+        .disabled_o    ()
     );
 
     // ── Top-level output aggregation ─────────────────────────────────────────
     // active: any child is active
-    assign active = w_active_0 | w_active_1 | w_active_2;
+    assign active = disable_i ? 1'b0 : (w_active_0 | w_active_1 | w_active_2);
     // pass: final child's pass output
-    assign pass   = w_pass_2;
+    assign pass   = disable_i ? 1'b0 : w_pass_2;
     // fail: any child signals fail
-    assign fail   = w_fail_0 | w_fail_1 | w_fail_2;
+    assign fail   = disable_i ? 1'b0 : (w_fail_0 | w_fail_1 | w_fail_2);
     // attempt_fired: first child's attempt_fired (start of sequence)
     assign attempt_fired = w_afired_0;
+    assign disabled_o    = disable_i;
 
 endmodule

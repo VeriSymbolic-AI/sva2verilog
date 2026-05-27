@@ -9,11 +9,13 @@ module sva_nonoverlap_check #(
     input  logic start,
     input  logic a,
     input  logic b,
+    input  logic disable_i,
     output logic active,
     output logic pass,
     output logic fail,
     output logic attempt_fired,
-    output logic overflow_flag
+    output logic overflow_flag,
+    output logic disabled_o
 );
     // ── Internal wires from child modules ────────────────────────────────────
     logic ant_pass_w;
@@ -35,10 +37,12 @@ module sva_nonoverlap_check #(
         .rst_n    (rst_n),
         .start    (start),
         .a(a),
+        .disable_i     (disable_i),
         .active        (ant_active_w),
         .pass          (ant_pass_w),
         .fail          (ant_fail_w),
-        .attempt_fired (ant_afired_w)
+        .attempt_fired (ant_afired_w),
+        .disabled_o    ()
     );
 
     // ── Consequent child instantiation ───────────────────────────────────────
@@ -47,10 +51,12 @@ module sva_nonoverlap_check #(
         .rst_n    (rst_n),
         .start    (con_start_w),
         .b(b),
+        .disable_i     (disable_i),
         .active        (con_active_w),
         .pass          (con_pass_w),
         .fail          (con_fail_w),
-        .attempt_fired (con_afired_w)
+        .attempt_fired (con_afired_w),
+        .disabled_o    ()
     );
 
     // ── 1-cycle delay register for |=> non-overlapping semantics ─────────────
@@ -68,7 +74,7 @@ module sva_nonoverlap_check #(
     assign overflow_event = ant_pass_delayed_q && (&bv_q) && !overflow_flag_q;
 
     always_ff @(posedge clk) begin
-        if (!rst_n) begin
+        if (!rst_n || disable_i) begin
             ant_pass_delayed_q <= 1'b0;
             bv_q               <= '0;
             overflow_flag_q    <= 1'b0;
@@ -90,12 +96,13 @@ module sva_nonoverlap_check #(
     end
 
     // ── Output assignments ────────────────────────────────────────────────────
-    assign active        = overflow_flag_q ? 1'b0 : (ant_active_w | con_active_w | (|bv_q));
-    assign pass          = overflow_flag_q ? 1'b0 : (bv_q[BV_WIDTH-1] & con_pass_w);
-    assign fail          = overflow_event  ? 1'b1 :
+    assign active        = disable_i ? 1'b0 : (overflow_flag_q ? 1'b0 : (ant_active_w | con_active_w | (|bv_q)));
+    assign pass          = disable_i ? 1'b0 : (overflow_flag_q ? 1'b0 : (bv_q[BV_WIDTH-1] & con_pass_w));
+    assign fail          = disable_i ? 1'b0 : (overflow_event  ? 1'b1 :
                            overflow_flag_q ? 1'b0 :
-                           (bv_q[BV_WIDTH-1] & ~con_pass_w & con_start_w);
+                           (bv_q[BV_WIDTH-1] & ~con_pass_w & con_start_w));
     assign attempt_fired = attempt_fired_q;
     assign overflow_flag = overflow_flag_q;
+    assign disabled_o    = disable_i;
 
 endmodule

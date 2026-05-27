@@ -6,10 +6,12 @@ module sva_prop_5c9caf75_e0 (
     input  logic rst_n,
     input  logic start,
     input  logic a,
+    input  logic disable_i,
     output logic active,
     output logic pass,
     output logic fail,
-    output logic attempt_fired
+    output logic attempt_fired,
+    output logic disabled_o
 );
 
     // ── Combinational evaluation ───────────────────────────────────────
@@ -19,7 +21,7 @@ module sva_prop_5c9caf75_e0 (
     // ── Registered outputs (OUT-02: no combinational glitches) ─────────
     logic active_q, pass_q, fail_q, attempt_fired_q;
     always_ff @(posedge clk) begin
-        if (!rst_n) begin
+        if (!rst_n || disable_i) begin
             active_q        <= 1'b0;
             pass_q          <= 1'b0;
             fail_q          <= 1'b0;
@@ -32,9 +34,10 @@ module sva_prop_5c9caf75_e0 (
         end
     end
 
-    assign active        = active_q;
-    assign pass          = pass_q;
-    assign fail          = fail_q;
+    assign active        = disable_i ? 1'b0 : active_q;
+    assign pass          = disable_i ? 1'b0 : pass_q;
+    assign fail          = disable_i ? 1'b0 : fail_q;
     assign attempt_fired = attempt_fired_q;
+    assign disabled_o    = disable_i;
 
 endmodule

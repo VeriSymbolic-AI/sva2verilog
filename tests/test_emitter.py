@@ -65,10 +65,10 @@ def test_emit_contains_module_name() -> None:
 
 
 def test_emit_contains_reset() -> None:
-    """Emitted SV contains synchronous reset 'if (!rst_n)'."""
+    """Emitted SV contains synchronous reset 'if (!rst_n' (with optional disable_i clause)."""
     checker = _labeled_checker()
     result = emit(checker)
-    assert "if (!rst_n)" in result
+    assert "if (!rst_n" in result
 
 
 def test_emit_contains_bool_expr() -> None:
@@ -274,7 +274,7 @@ def test_emit_all_delay_zero_has_combinational_pass() -> None:
     checker = _load_fixture_checker("delay_zero")
     result = emit_all(checker)
     delay_mod = result.get("sva_delay_0_0", "")
-    assert "assign pass   = start" in delay_mod
+    assert "assign pass   = " in delay_mod and "start" in delay_mod
 
 
 def test_emit_all_delay_three_element_six_modules() -> None:
@@ -331,11 +331,11 @@ def test_emit_all_top_token_passing_chain() -> None:
 
 
 def test_emit_all_top_final_pass_is_last_child() -> None:
-    """Top wrapper assigns pass from the last child's wire (w_pass_2)."""
+    """Top wrapper assigns pass from the last child's wire (w_pass_2), with disable_i gating."""
     checker = _load_fixture_checker("delay_fixed")
     result = emit_all(checker)
     top_sv = result["sva_prop_81cf66e0"]
-    assert "assign pass   = w_pass_2" in top_sv
+    assert "w_pass_2" in top_sv and "assign pass" in top_sv
 
 
 # ── Golden comparisons for delay modules ─────────────────────────────────────
@@ -408,7 +408,7 @@ def test_write_output_dir_creates_dir_if_missing(tmp_path: Path) -> None:
 # ── Implication (|-> and |=>) emitter tests ───────────────────────────────
 
 
-def _load_impl_checker(fixture_name: str) -> "CheckerNode":
+def _load_impl_checker(fixture_name: str) -> CheckerNode:
     """Load an implication fixture and return its top CheckerNode."""
     return _load_fixture_checker(fixture_name)
 

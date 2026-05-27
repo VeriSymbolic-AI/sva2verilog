@@ -7,10 +7,12 @@ module sva_delay_1_1 #(
     input  logic clk,
     input  logic rst_n,
     input  logic start,
+    input  logic disable_i,
     output logic active,
     output logic pass,
     output logic fail,
-    output logic attempt_fired
+    output logic attempt_fired,
+    output logic disabled_o
 );
     // ── Counter-based delay ──────────────────────────────────────────────────
     logic [CNT_WIDTH-1:0] count_q;
@@ -18,7 +20,7 @@ module sva_delay_1_1 #(
     logic                 attempt_fired_q;
 
     always_ff @(posedge clk) begin
-        if (!rst_n) begin
+        if (!rst_n || disable_i) begin
             count_q         <= '0;
             running_q       <= 1'b0;
             attempt_fired_q <= 1'b0;
@@ -37,8 +39,9 @@ module sva_delay_1_1 #(
         end
     end
 
-    assign active        = running_q;
-    assign pass          = running_q && (count_q >= 1'd1) && (count_q <= 1'd1);
+    assign active        = disable_i ? 1'b0 : running_q;
+    assign pass          = disable_i ? 1'b0 : (running_q && (count_q >= 1'd1) && (count_q <= 1'd1));
     assign fail          = 1'b0;
     assign attempt_fired = attempt_fired_q;
+    assign disabled_o    = disable_i;
 endmodule
