@@ -84,7 +84,7 @@ module sva_impl_check #(
             end else begin
                 overflow_flag_q <= overflow_flag_q | overflow_event;
                 // Shift right (all threads age by 1), insert new thread at MSB
-                bv_q <= {ant_pass_w, bv_q[BV_WIDTH-1:1]};
+                bv_q <= ant_pass_w;
             end
         end
     end

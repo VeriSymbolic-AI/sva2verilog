@@ -90,7 +90,7 @@ module sva_nonoverlap_check #(
                 overflow_flag_q <= overflow_flag_q | overflow_event;
                 // Shift right (all threads age by 1), insert new thread at MSB
                 // using DELAYED antecedent pass (1-cycle offset for |=>)
-                bv_q <= {ant_pass_delayed_q, bv_q[BV_WIDTH-1:1]};
+                bv_q <= ant_pass_delayed_q;
             end
         end
     end

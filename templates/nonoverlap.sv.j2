@@ -95,7 +95,11 @@ module {{ module_name }} #(
                 overflow_flag_q <= overflow_flag_q | overflow_event;
                 // Shift right (all threads age by 1), insert new thread at MSB
                 // using DELAYED antecedent pass (1-cycle offset for |=>)
+{% if bv_width | int > 1 %}
                 bv_q <= {ant_pass_delayed_q, bv_q[BV_WIDTH-1:1]};
+{% else %}
+                bv_q <= ant_pass_delayed_q;
+{% endif %}
             end
         end
     end

@@ -89,7 +89,11 @@ module {{ module_name }} #(
             end else begin
                 overflow_flag_q <= overflow_flag_q | overflow_event;
                 // Shift right (all threads age by 1), insert new thread at MSB
+{% if bv_width | int > 1 %}
                 bv_q <= {ant_pass_w, bv_q[BV_WIDTH-1:1]};
+{% else %}
+                bv_q <= ant_pass_w;
+{% endif %}
             end
         end
     end
