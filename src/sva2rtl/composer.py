@@ -27,6 +27,7 @@ from sva2rtl.ir import (
     PropImplication,
     SeqConcat,
     SeqRepetition,
+    SignalFunc,
     SourceLoc,
     SVANode,
 )
@@ -386,6 +387,8 @@ def compose(
             return _compose_seq_concat(node, clock, label, original_text)
         case SeqRepetition():
             return _compose_repetition(node, clock, label, original_text)
+        case SignalFunc():
+            return _compose_signal_func(node, clock, label, original_text)
         case PropImplication():
             return _compose_implication(node, clock, label, original_text)
         case _:
@@ -521,8 +524,43 @@ def _compose_repetition(
     )
 
 
-def _make_delay_node(
-    delay_min: int,
+def _compose_signal_func(
+    node: SignalFunc,
+    clock: ClockSpec,
+    label: str | None,
+    original_text: str,
+) -> CheckerNode:
+    """Build a leaf CheckerNode for a signal function ($rose/$fell/$stable/$past).
+
+    Each function maps directly to a template of the same name:
+      rose -> rose.sv.j2, fell -> fell.sv.j2, etc.
+    """
+    module_name = module_name_from_label(label, original_text)
+    # Single observed signal: (port_name, dut_signal_name)
+    observed: tuple[tuple[str, str], ...] = ((node.signal, node.signal),)
+
+    params: dict[str, str] = {
+        "module_name": module_name,
+        "signal_name": node.signal,
+        "depth": str(node.depth),
+        "clock_signal": clock.signal,
+        "clock_edge": clock.edge,
+        "source_loc": str(node.source_loc),
+        "sva2rtl_version": __version__,
+        "original_text": original_text,
+    }
+
+    return CheckerNode(
+        template_name=node.func_name,  # "rose", "fell", "stable", or "past"
+        module_name=module_name,
+        params=params,
+        observed_signals=observed,
+        source_loc=node.source_loc,
+        children=(),
+    )
+
+
+def _make_delay_node(    delay_min: int,
     delay_max: int,
     clock: ClockSpec,
     source_loc: SourceLoc,
