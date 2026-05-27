@@ -3,12 +3,12 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 current_phase: 4
-status: ready_to_plan
-last_updated: "2026-05-27T15:19:16.129Z"
+status: ready_to_execute
+last_updated: "2026-05-27T23:52:00.000Z"
 progress:
   total_phases: 6
   completed_phases: 3
-  total_plans: 12
+  total_plans: 15
   completed_plans: 12
   percent: 50
 ---
@@ -42,7 +42,7 @@ progress:
 | 1 | Foundation: IR + Slang + Boolean → SV Monitor | ✅ Complete (5/5 plans) | PARSE-01/02/04/05, OUT-01/02/03/07/08, CLI-05/06, TEST-01 |
 | 2 | Core Sequential Operators (##N, |->)  | 🔲 Not started | OP-01/02/03/04, OUT-06, TEST-02/05/06 |
 | 3 | Remaining Tier 1 + Sim Validation | ✅ Complete (4/4 plans) | OP-05–10, PARSE-03, OUT-04, TEST-03/04 |
-| 4 | Normalization + Composition Engine | 📋 Ready to plan | PIPE-01/02 |
+| 4 | Normalization + Composition Engine | 📋 Planned (3 plans, 2 waves) | PIPE-01/02 |
 | 5 | Optimization Passes | 🔲 Not started | PIPE-03/04/05 |
 | 6 | CLI Polish + Verilog-2001 + Integration | 🔲 Not started | CLI-01–04, OUT-05 |
 
@@ -54,9 +54,9 @@ progress:
 
 ### Phase 4 Plan Checklist
 
-- [ ] **4.1** IR normalization pass — `normalizer.py`: `|=>` desugaring, concat flatten, `##[N:N]` → `##N`, small fixed rep expansion, constant fold (Wave 1)
-- [ ] **4.2** Composition engine (token-passing) — `composer.py` proper IR walk; replaces ad-hoc direct wiring from Phase 2–3 (Wave 1)
-- [ ] **4.3** Integration + regression validation — complex compositions, `--dump-tree`, Phase 1–3 golden file parity (Wave 2)
+- [ ] **4.1** IR normalization pass — `normalizer.py`: `[*1]` identity, SeqConcat flattening, constant fold, idempotent (Wave 1)
+- [ ] **4.2** Composition engine — structural hash + pipeline integration, `normalize()` wired into CLI + tests (Wave 1, depends 4.1)
+- [ ] **4.3** Integration + regression validation — `--dump-tree`, golden parity, simulation oracle re-run (Wave 2)
 
 ### Phase 3 Plan Checklist (COMPLETE)
 
@@ -132,6 +132,7 @@ progress:
 | 2026-05-27 | Plan 3.1 complete — SeqRepetition IR, importer dispatch, composer, rep_consecutive.sv.j2 template, behavioral oracle, 23 tests; OP-05 satisfied |
 | 2026-05-27 | Plan 3.3 complete — DisableIff IR/importer/composer/template, named sequence expansion (PARSE-03), bind generation (OUT-04), disable_i/disabled_o interface on all 9 templates, 3 golden files fixed (duplicate instance name bug), 42 new tests; OP-10/PARSE-03/OUT-04 satisfied; 383 tests pass |
 | 2026-05-27 | Plan 3.4 complete — simulation validation harness; tb_generator.py + iverilog runner; 43 simulation tests (rose/fell/stable/past/rep/disable_iff/delay/implication); BV_WIDTH=1 RTL fix; reserved-port dedup fix; 5 oracle disable-key unit tests; 453 tests pass (10 skip); TEST-03/TEST-04 satisfied; Phase 3 COMPLETE |
+| 2026-05-27 | Phase 4 planned — 3 plans, 2 waves. Research + pattern mapping + plan-checker PASSED (2 LOW non-blocking notes). Ready to execute. |
 
 ---
 
