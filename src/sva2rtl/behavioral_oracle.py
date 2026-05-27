@@ -44,6 +44,10 @@ class SVABehavioralSim:
             "implication_overlap",
             "implication_nonoverlap",
             "rep_consecutive",
+            "rose",
+            "fell",
+            "stable",
+            "past",
         }
         if kind not in _valid_kinds:
             raise ValueError(f"Unknown kind '{kind}'; must be one of {_valid_kinds}")
@@ -58,6 +62,11 @@ class SVABehavioralSim:
         # ── Repetition state ──────────────────────────────────────────────
         self._rep_count: int = 0
         self._rep_running: bool = False
+
+        # ── Signal function state ─────────────────────────────────────────
+        self._sig_prev: bool = False
+        depth: int = int(params.get("depth", 1))
+        self._past_shift: list[bool] = [False] * max(depth, 1)
 
         # ── Implication / bit-vector state ────────────────────────────────
         bv_width: int = int(params.get("bv_width", 1))
@@ -75,6 +84,8 @@ class SVABehavioralSim:
         self._running = False
         self._rep_count = 0
         self._rep_running = False
+        self._sig_prev = False
+        self._past_shift = [False] * len(self._past_shift)
         self._bv = 0
         self._overflow_flag = False
         self._ant_pass_delayed = False
@@ -101,6 +112,14 @@ class SVABehavioralSim:
             return self._tick_overlap(signals)
         elif self._kind == "rep_consecutive":
             return self._tick_rep_consecutive(signals)
+        elif self._kind == "rose":
+            return self._tick_rose(signals)
+        elif self._kind == "fell":
+            return self._tick_fell(signals)
+        elif self._kind == "stable":
+            return self._tick_stable(signals)
+        elif self._kind == "past":
+            return self._tick_past(signals)
         else:  # implication_nonoverlap
             return self._tick_nonoverlap(signals)
 
@@ -219,8 +238,80 @@ class SVABehavioralSim:
             "overflow": False,
         }
 
-    # ── Overlapping implication model (|->)  ──────────────────────────────
+    # ── Signal function models ($rose, $fell, $stable, $past) ────────────
 
+    def _tick_rose(self, signals: dict[str, bool]) -> dict[str, bool]:
+        """Model $rose(sig): pass when sig transitions 0->1."""
+        start: bool = bool(signals.get("start", False))
+        sig: bool = bool(signals.get("sig", False))
+
+        # Detect BEFORE updating prev (models same-cycle registered compare)
+        rose_detect = sig and not self._sig_prev
+        self._sig_prev = sig
+
+        if start:
+            self._attempt_fired = True
+
+        pass_val = start and rose_detect
+        fail_val = start and not rose_detect
+        return {"active": start, "pass": pass_val, "fail": fail_val, "overflow": False}
+
+    def _tick_fell(self, signals: dict[str, bool]) -> dict[str, bool]:
+        """Model $fell(sig): pass when sig transitions 1->0."""
+        start: bool = bool(signals.get("start", False))
+        sig: bool = bool(signals.get("sig", False))
+
+        fell_detect = not sig and self._sig_prev
+        self._sig_prev = sig
+
+        if start:
+            self._attempt_fired = True
+
+        pass_val = start and fell_detect
+        fail_val = start and not fell_detect
+        return {"active": start, "pass": pass_val, "fail": fail_val, "overflow": False}
+
+    def _tick_stable(self, signals: dict[str, bool]) -> dict[str, bool]:
+        """Model $stable(sig): pass when sig is unchanged from previous cycle."""
+        start: bool = bool(signals.get("start", False))
+        sig: bool = bool(signals.get("sig", False))
+
+        stable_detect = sig == self._sig_prev
+        self._sig_prev = sig
+
+        if start:
+            self._attempt_fired = True
+
+        pass_val = start and stable_detect
+        fail_val = start and not stable_detect
+        return {"active": start, "pass": pass_val, "fail": fail_val, "overflow": False}
+
+    def _tick_past(self, signals: dict[str, bool]) -> dict[str, bool]:
+        """Model $past(sig, N): pass when the value of sig N cycles ago was true.
+
+        The shift register stores the last N values; index 0 is the oldest.
+        On each tick: pop the oldest, push current sig at the front.
+        past_value = the oldest sample (the one captured N cycles ago).
+        """
+        start: bool = bool(signals.get("start", False))
+        sig: bool = bool(signals.get("sig", False))
+
+        # Oldest sample = index 0 (FIFO order: [oldest, ..., newest])
+        # Actually we store [newest_at_[0], ..., oldest_at_[-1]] → shift left, oldest at end
+        # Implementation: shift_q[-1] = oldest; insert sig at position 0
+        past_value = self._past_shift[-1]
+
+        # Shift right: drop oldest, push new sig at position 0
+        self._past_shift = [sig] + self._past_shift[:-1]
+
+        if start:
+            self._attempt_fired = True
+
+        pass_val = start and past_value
+        fail_val = start and not past_value
+        return {"active": start, "pass": pass_val, "fail": fail_val, "overflow": False}
+
+    # ── Overlapping implication model (|->)  ──────────────────────────────
     def _tick_overlap(self, signals: dict[str, bool]) -> dict[str, bool]:
         """Model |-> semantics with shift-register bit-vector.
 
