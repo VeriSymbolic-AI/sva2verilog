@@ -348,6 +348,72 @@ def extract_signals(expr_text: str) -> tuple[tuple[str, str], ...]:
     return tuple((name, name) for name in seen)
 
 
+# ── Structural hashing (Phase 4) ─────────────────────────────────────────
+
+# Params excluded from structural hash — positional/presentation metadata
+# that should NOT affect whether two CheckerNodes are structurally identical.
+_VOLATILE_PARAMS: frozenset[str] = frozenset(
+    {"module_name", "source_loc", "sva2rtl_version", "original_text"}
+)
+
+
+def structural_hash(node: CheckerNode) -> str:
+    """Compute a deterministic structural hash for a CheckerNode.
+
+    Uses SHA-256 (via hashlib) to avoid PYTHONHASHSEED randomization.
+    Returns an 8-character hex digest for compact display.
+
+    The hash reflects the *semantic structure* of the node: template type,
+    non-volatile params, and all children (recursively).  Two nodes that
+    produce identical hardware — regardless of module name or source location —
+    will produce the same hash.
+
+    Parameters
+    ----------
+    node
+        The CheckerNode to hash.
+
+    Returns
+    -------
+    str
+        8-character lowercase hex string (first 32 bits of SHA-256).
+    """
+    h = hashlib.sha256()
+    h.update(node.template_name.encode())
+    for k, v in sorted(node.params.items()):
+        if k not in _VOLATILE_PARAMS:
+            h.update(f"{k}={v}".encode())
+    for child in node.children:
+        h.update(structural_hash(child).encode())
+    return h.hexdigest()[:8]
+
+
+def compute_hash_map(root: CheckerNode) -> dict[str, str]:
+    """Walk a CheckerNode tree and return {module_name: structural_hash} for all nodes.
+
+    Parameters
+    ----------
+    root
+        Root of the CheckerNode tree.
+
+    Returns
+    -------
+    dict[str, str]
+        Mapping from module_name to its 8-char structural hash, for the root
+        and all descendants.
+    """
+    result: dict[str, str] = {}
+    _collect_hashes(root, result)
+    return result
+
+
+def _collect_hashes(node: CheckerNode, out: dict[str, str]) -> None:
+    """Recursive helper for compute_hash_map."""
+    out[node.module_name] = structural_hash(node)
+    for child in node.children:
+        _collect_hashes(child, out)
+
+
 def compose(
     node: SVANode,
     clock: ClockSpec,
