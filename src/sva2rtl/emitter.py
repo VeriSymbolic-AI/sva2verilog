@@ -72,7 +72,12 @@ def _make_env(template_dir: Path | None = None) -> Environment:
 # ── Public API ────────────────────────────────────────────────────────────
 
 
-def emit(checker: CheckerNode, template_dir: Path | None = None) -> str:
+def emit(
+    checker: CheckerNode,
+    template_dir: Path | None = None,
+    *,
+    verilog_mode: bool = False,
+) -> str:
     """Render a ``CheckerNode`` to a SystemVerilog string via Jinja2.
 
     Parameters
@@ -83,6 +88,9 @@ def emit(checker: CheckerNode, template_dir: Path | None = None) -> str:
     template_dir:
         Override for the templates directory.  ``None`` resolves to the
         project-root ``templates/`` directory relative to this file.
+    verilog_mode:
+        When ``True``, templates emit Verilog-2001 compatible output
+        (no ``logic``, ``always_ff``, or ``'0`` literals).
 
     Returns
     -------
@@ -99,6 +107,7 @@ def emit(checker: CheckerNode, template_dir: Path | None = None) -> str:
     ctx: dict[str, object] = dict(checker.params)
     ctx["observed_signals"] = checker.observed_signals
     ctx["children"] = checker.children
+    ctx["verilog_mode"] = verilog_mode
 
     return str(tmpl.render(**ctx))
 
@@ -106,6 +115,8 @@ def emit(checker: CheckerNode, template_dir: Path | None = None) -> str:
 def emit_all(
     checker: CheckerNode,
     template_dir: Path | None = None,
+    *,
+    verilog_mode: bool = False,
 ) -> dict[str, str]:
     """Render a hierarchical ``CheckerNode`` tree into one SV string per module.
 
@@ -119,6 +130,9 @@ def emit_all(
         The root ``CheckerNode`` to render (typically the top-level wrapper).
     template_dir:
         Override for the templates directory.  ``None`` uses the default.
+    verilog_mode:
+        When ``True``, templates emit Verilog-2001 compatible output
+        (no ``logic``, ``always_ff``, or ``'0`` literals).
 
     Returns
     -------
@@ -128,7 +142,7 @@ def emit_all(
     """
     env = _make_env(template_dir)
     results: dict[str, str] = {}
-    _emit_recursive(checker, env, results)
+    _emit_recursive(checker, env, results, verilog_mode=verilog_mode)
     return results
 
 
@@ -136,11 +150,13 @@ def _emit_recursive(
     checker: CheckerNode,
     env: Environment,
     results: dict[str, str],
+    *,
+    verilog_mode: bool = False,
 ) -> None:
     """Depth-first recursive renderer; populates *results* in-place."""
     for child in checker.children:
         if child.module_name not in results:
-            _emit_recursive(child, env, results)
+            _emit_recursive(child, env, results, verilog_mode=verilog_mode)
 
     if checker.module_name not in results:
         template_file = checker.template_name + ".sv.j2"
@@ -148,6 +164,7 @@ def _emit_recursive(
         ctx: dict[str, object] = dict(checker.params)
         ctx["observed_signals"] = checker.observed_signals
         ctx["children"] = checker.children
+        ctx["verilog_mode"] = verilog_mode
         results[checker.module_name] = str(tmpl.render(**ctx))
 
 
@@ -190,6 +207,8 @@ def emit_bind(
     checker: CheckerNode,
     dut_module: str,
     template_dir: Path | None = None,
+    *,
+    verilog_mode: bool = False,
 ) -> str:
     """Render a SystemVerilog ``bind`` statement for a generated monitor module.
 
@@ -209,6 +228,9 @@ def emit_bind(
     template_dir:
         Override for the templates directory.  ``None`` uses the project-root
         ``templates/`` directory.
+    verilog_mode:
+        Accepted for API consistency; bind template does not vary between
+        SystemVerilog and Verilog-2001.
 
     Returns
     -------
@@ -221,5 +243,6 @@ def emit_bind(
     ctx: dict[str, object] = dict(checker.params)
     ctx["observed_signals"] = checker.observed_signals
     ctx["dut_module"] = dut_module
+    ctx["verilog_mode"] = verilog_mode
 
     return str(tmpl.render(**ctx))

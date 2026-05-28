@@ -4,6 +4,20 @@
 module {{ module_name }} #(
     parameter CNT_WIDTH = {{ cnt_width }}
 ) (
+{% if verilog_mode %}
+    input  {{ clock_signal }},
+    input  rst_n,
+    input  start,
+{% for port_name, _ in observed_signals %}
+    input  {{ port_name }},
+{% endfor %}
+    input  disable_i,
+    output active,
+    output pass,
+    output fail,
+    output attempt_fired,
+    output disabled_o
+{% else %}
     input  logic {{ clock_signal }},
     input  logic rst_n,
     input  logic start,
@@ -16,13 +30,43 @@ module {{ module_name }} #(
     output logic fail,
     output logic attempt_fired,
     output logic disabled_o
+{% endif %}
 );
 
     // ── Signal evaluation ────────────────────────────────────────────────────
+{% if verilog_mode %}
+    wire sig_eval;
+{% else %}
     logic sig_eval;
+{% endif %}
     assign sig_eval = ({{ signal_expr }});
 
     // ── Counter-based consecutive repetition FSM ─────────────────────────────
+{% if verilog_mode %}
+    reg [CNT_WIDTH-1:0] count_q;
+    reg                 running_q;
+    reg                 attempt_fired_q;
+
+    always @({{ clock_edge }} {{ clock_signal }}) begin
+        if (!rst_n || disable_i) begin
+            count_q         <= 0;
+            running_q       <= 1'b0;
+            attempt_fired_q <= 1'b0;
+        end else begin
+            attempt_fired_q <= attempt_fired_q | start;  // sticky
+            if (start && sig_eval) begin
+                running_q <= 1'b1;
+                count_q   <= {{ cnt_width }}'d1;
+            end else if (running_q && sig_eval) begin
+                if (count_q < {{ cnt_width }}'d{{ rep_max }})
+                    count_q <= count_q + 1'b1;
+            end else if (running_q && !sig_eval) begin
+                running_q <= 1'b0;
+                count_q   <= 0;
+            end
+        end
+    end
+{% else %}
     logic [CNT_WIDTH-1:0] count_q;
     logic                 running_q;
     logic                 attempt_fired_q;
@@ -46,11 +90,18 @@ module {{ module_name }} #(
             end
         end
     end
+{% endif %}
 
     // ── Output logic ─────────────────────────────────────────────────────────
+{% if verilog_mode %}
+    wire pass_internal;
+    wire fail_internal;
+    wire active_internal;
+{% else %}
     logic pass_internal;
     logic fail_internal;
     logic active_internal;
+{% endif %}
 
     assign active_internal = running_q;
     assign pass_internal   = running_q && sig_eval &&

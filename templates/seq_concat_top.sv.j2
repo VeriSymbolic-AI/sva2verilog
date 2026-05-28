@@ -2,6 +2,20 @@
 // Source: {{ source_loc }}
 // Original property: @({{ clock_edge }} {{ clock_signal }}) {{ original_text }}
 module {{ module_name }} (
+{% if verilog_mode %}
+    input  {{ clock_signal }},
+    input  rst_n,
+    input  start,
+{% for port_name, _ in observed_signals %}
+    input  {{ port_name }},
+{% endfor %}
+    input  disable_i,
+    output active,
+    output pass,
+    output fail,
+    output attempt_fired,
+    output disabled_o
+{% else %}
     input  logic {{ clock_signal }},
     input  logic rst_n,
     input  logic start,
@@ -14,13 +28,21 @@ module {{ module_name }} (
     output logic fail,
     output logic attempt_fired,
     output logic disabled_o
+{% endif %}
 );
     // ── Internal token wires (N+1 wires for N children) ─────────────────────
 {% for child in children %}
+{% if verilog_mode %}
+    wire w_pass_{{ loop.index0 }};
+    wire w_active_{{ loop.index0 }};
+    wire w_fail_{{ loop.index0 }};
+    wire w_afired_{{ loop.index0 }};
+{% else %}
     logic w_pass_{{ loop.index0 }};
     logic w_active_{{ loop.index0 }};
     logic w_fail_{{ loop.index0 }};
     logic w_afired_{{ loop.index0 }};
+{% endif %}
 {% endfor %}
 
     // ── Child module instantiations (token-passing chain) ────────────────────

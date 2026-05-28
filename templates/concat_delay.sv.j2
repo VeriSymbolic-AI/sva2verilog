@@ -4,6 +4,17 @@
 module {{ module_name }} #(
     parameter CNT_WIDTH = {{ cnt_width }}
 ) (
+{% if verilog_mode %}
+    input  {{ clock_signal }},
+    input  rst_n,
+    input  start,
+    input  disable_i,
+    output active,
+    output pass,
+    output fail,
+    output attempt_fired,
+    output disabled_o
+{% else %}
     input  logic {{ clock_signal }},
     input  logic rst_n,
     input  logic start,
@@ -13,6 +24,7 @@ module {{ module_name }} #(
     output logic fail,
     output logic attempt_fired,
     output logic disabled_o
+{% endif %}
 );
 {% if delay_min == "0" and delay_max == "0" %}
     // ── ##0 combinational pass-through ──────────────────────────────────────
@@ -21,8 +33,13 @@ module {{ module_name }} #(
     assign fail   = 1'b0;
 
     // ── attempt_fired: sticky, cleared only by rst_n / disable_i ───────────
+{% if verilog_mode %}
+    reg attempt_fired_q;
+    always @({{ clock_edge }} {{ clock_signal }}) begin
+{% else %}
     logic attempt_fired_q;
     always_ff @({{ clock_edge }} {{ clock_signal }}) begin
+{% endif %}
         if (!rst_n || disable_i)
             attempt_fired_q <= 1'b0;
         else
@@ -32,6 +49,31 @@ module {{ module_name }} #(
     assign disabled_o    = disable_i;
 {% else %}
     // ── Counter-based delay ──────────────────────────────────────────────────
+{% if verilog_mode %}
+    reg [CNT_WIDTH-1:0] count_q;
+    reg                 running_q;
+    reg                 attempt_fired_q;
+
+    always @({{ clock_edge }} {{ clock_signal }}) begin
+        if (!rst_n || disable_i) begin
+            count_q         <= 0;
+            running_q       <= 1'b0;
+            attempt_fired_q <= 1'b0;
+        end else begin
+            attempt_fired_q <= attempt_fired_q | start;  // sticky
+            if (start) begin
+                count_q   <= 0;
+                running_q <= 1'b1;
+            end else if (running_q) begin
+                if (count_q == {{ cnt_width }}'d{{ delay_max }}) begin
+                    running_q <= 1'b0;
+                end else begin
+                    count_q <= count_q + 1'b1;
+                end
+            end
+        end
+    end
+{% else %}
     logic [CNT_WIDTH-1:0] count_q;
     logic                 running_q;
     logic                 attempt_fired_q;
@@ -55,6 +97,7 @@ module {{ module_name }} #(
             end
         end
     end
+{% endif %}
 
     assign active        = disable_i ? 1'b0 : running_q;
     assign pass          = disable_i ? 1'b0 : (running_q && (count_q >= {{ cnt_width }}'d{{ delay_min }}) && (count_q <= {{ cnt_width }}'d{{ delay_max }}));

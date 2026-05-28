@@ -2,6 +2,18 @@
 // Source: {{ source_loc }}
 // Original property: @({{ clock_edge }} {{ clock_signal }}) {{ original_text }}
 module {{ module_name }} (
+{% if verilog_mode %}
+    input  {{ clock_signal }},
+    input  rst_n,
+    input  start,
+    input  {{ signal_name }},
+    input  disable_i,
+    output active,
+    output pass,
+    output fail,
+    output attempt_fired,
+    output disabled_o
+{% else %}
     input  logic {{ clock_signal }},
     input  logic rst_n,
     input  logic start,
@@ -12,13 +24,21 @@ module {{ module_name }} (
     output logic fail,
     output logic attempt_fired,
     output logic disabled_o
+{% endif %}
 );
 
     // ── Edge-detect registers ─────────────────────────────────────────────────
+{% if verilog_mode %}
+    reg sig_prev_q;
+    reg attempt_fired_q;
+
+    always @({{ clock_edge }} {{ clock_signal }}) begin
+{% else %}
     logic sig_prev_q;
     logic attempt_fired_q;
 
     always_ff @({{ clock_edge }} {{ clock_signal }}) begin
+{% endif %}
         if (!rst_n || disable_i) begin
             sig_prev_q      <= 1'b0;
             attempt_fired_q <= 1'b0;
@@ -30,12 +50,21 @@ module {{ module_name }} (
 
     // ── Detection logic ───────────────────────────────────────────────────────
     // $rose: 0->1 transition on previous-to-current clock edge
+{% if verilog_mode %}
+    wire rose_detect;
+{% else %}
     logic rose_detect;
+{% endif %}
     assign rose_detect = {{ signal_name }} & ~sig_prev_q;
 
     // ── Output logic ──────────────────────────────────────────────────────────
+{% if verilog_mode %}
+    wire pass_internal;
+    wire fail_internal;
+{% else %}
     logic pass_internal;
     logic fail_internal;
+{% endif %}
 
     assign pass_internal = start & rose_detect;
     assign fail_internal = start & ~rose_detect;

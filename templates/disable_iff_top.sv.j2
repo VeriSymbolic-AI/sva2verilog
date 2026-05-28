@@ -2,6 +2,20 @@
 // Source: {{ source_loc }}
 // Original property: @({{ clock_edge }} {{ clock_signal }}) {{ original_text }}
 module {{ module_name }} (
+{% if verilog_mode %}
+    input  {{ clock_signal }},
+    input  rst_n,
+    input  start,
+{% for port_name, _ in observed_signals %}
+    input  {{ port_name }},
+{% endfor %}
+    input  disable_i,
+    output active,
+    output pass,
+    output fail,
+    output attempt_fired,
+    output disabled_o
+{% else %}
     input  logic {{ clock_signal }},
     input  logic rst_n,
     input  logic start,
@@ -14,13 +28,22 @@ module {{ module_name }} (
     output logic fail,
     output logic attempt_fired,
     output logic disabled_o
+{% endif %}
 );
     // ── Combinational disable condition ───────────────────────────────────────
+{% if verilog_mode %}
+    wire cond_result;
+{% else %}
     logic cond_result;
+{% endif %}
     assign cond_result = ({{ cond_expr }});
 
     // ── Effective disable: local condition OR incoming disable_i ─────────────
+{% if verilog_mode %}
+    wire effective_disable;
+{% else %}
     logic effective_disable;
+{% endif %}
     assign effective_disable = disable_i | cond_result;
 
     // ── Body checker instantiation ────────────────────────────────────────────
