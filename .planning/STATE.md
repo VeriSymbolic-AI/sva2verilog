@@ -3,12 +3,12 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 current_phase: 5
-status: ready_to_plan
-last_updated: "2026-05-28T07:35:14.169Z"
+status: ready_to_execute
+last_updated: "2026-05-28T09:02:00.000Z"
 progress:
   total_phases: 6
   completed_phases: 4
-  total_plans: 15
+  total_plans: 18
   completed_plans: 15
   percent: 67
 ---
@@ -43,7 +43,7 @@ progress:
 | 2 | Core Sequential Operators (##N, |->)  | 🔲 Not started | OP-01/02/03/04, OUT-06, TEST-02/05/06 |
 | 3 | Remaining Tier 1 + Sim Validation | ✅ Complete (4/4 plans) | OP-05–10, PARSE-03, OUT-04, TEST-03/04 |
 | 4 | Normalization + Composition Engine | ✅ Complete (3/3 plans) | PIPE-01/02 |
-| 5 | Optimization Passes | 🔲 Not started | PIPE-03/04/05 |
+| 5 | Optimization Passes | 📋 Planned (3 plans) | PIPE-03/04/05 |
 | 6 | CLI Polish + Verilog-2001 + Integration | 🔲 Not started | CLI-01–04, OUT-05 |
 
 ---
@@ -51,6 +51,12 @@ progress:
 ## Active Phase
 
 **Phase 5** — Optimization Passes
+
+### Phase 5 Plan Checklist
+
+- [ ] **5.1** Optimizer framework + constant folding + concat merging (Wave 1)
+- [ ] **5.2** CSE deduplication + counter merging (Wave 2, depends 5.1)
+- [ ] **5.3** Dead-node elimination + parity suite + dump-tree summary (Wave 3, depends 5.2)
 
 ### Phase 4 Plan Checklist (COMPLETE)
 
@@ -134,6 +140,7 @@ progress:
 | 2026-05-27 | Plan 3.4 complete — simulation validation harness; tb_generator.py + iverilog runner; 43 simulation tests (rose/fell/stable/past/rep/disable_iff/delay/implication); BV_WIDTH=1 RTL fix; reserved-port dedup fix; 5 oracle disable-key unit tests; 453 tests pass (10 skip); TEST-03/TEST-04 satisfied; Phase 3 COMPLETE |
 | 2026-05-28 | Plan 4.1 complete — normalizer.py: [*1] identity removal, SeqConcat flattening, PropImplication preserved (D-05), 17 tests; PIPE-01 partially satisfied; 470 tests pass |
 | 2026-05-28 | Plan 4.3 complete — debug.py (format_dump_tree), --dump-tree CLI flag, test_dump_tree.py (11 tests), test_golden_parity.py (16 tests), 2 E2E tests; 502 tests pass; Phase 4 COMPLETE |
+| 2026-05-28 | Phase 5 planned — 3 plans, 3 waves, PIPE-03/04/05. Plan-checker PASSED. |
 
 ---
 
