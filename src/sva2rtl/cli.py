@@ -72,6 +72,7 @@ def main(
         raw_node = node
         node = normalize(node)
         checker_node = compose(node, clock, label, original_text)
+        unoptimized_checker = checker_node
 
         if not no_optimize:
             checker_node = optimize(checker_node)
@@ -81,7 +82,16 @@ def main(
             from sva2rtl.debug import format_dump_tree
 
             hash_map = compute_hash_map(checker_node)
-            click.echo(format_dump_tree(raw_node, checker_node, hash_map))
+            click.echo(
+                format_dump_tree(
+                    raw_node,
+                    checker_node,
+                    hash_map,
+                    unoptimized_checker=(
+                        unoptimized_checker if not no_optimize else None
+                    ),
+                )
+            )
             sys.exit(0)
 
         if checker_node.children:
