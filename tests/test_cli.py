@@ -130,9 +130,10 @@ def test_cli_success_stdout(runner: CliRunner, bool_assert_path: Path) -> None:
             return_value=(mock_node, mock_clock, "(a && b)", "my_check"),
         ):
             with patch("sva2rtl.cli.compose", return_value=mock_checker):
-                with patch("sva2rtl.cli.emit", return_value=_MOCK_SV_TEXT):
-                    with patch("sva2rtl.cli.write_output") as mock_write:
-                        result = runner.invoke(main, [str(bool_assert_path)])
+                with patch("sva2rtl.cli.optimize", return_value=mock_checker):
+                    with patch("sva2rtl.cli.emit", return_value=_MOCK_SV_TEXT):
+                        with patch("sva2rtl.cli.write_output") as mock_write:
+                            result = runner.invoke(main, [str(bool_assert_path)])
 
     assert result.exit_code == 0
     # write_output is called with None as output_path (stdout) when -o not given
@@ -158,9 +159,12 @@ def test_cli_success_output_file(runner: CliRunner, bool_assert_path: Path) -> N
             return_value=(mock_node, mock_clock, "(a && b)", "my_check"),
         ):
             with patch("sva2rtl.cli.compose", return_value=mock_checker):
-                with patch("sva2rtl.cli.emit", return_value=_MOCK_SV_TEXT):
-                    with patch("sva2rtl.cli.write_output") as mock_write:
-                        result = runner.invoke(main, [str(bool_assert_path), "--output", out_path])
+                with patch("sva2rtl.cli.optimize", return_value=mock_checker):
+                    with patch("sva2rtl.cli.emit", return_value=_MOCK_SV_TEXT):
+                        with patch("sva2rtl.cli.write_output") as mock_write:
+                            result = runner.invoke(
+                                main, [str(bool_assert_path), "--output", out_path]
+                            )
 
     assert result.exit_code == 0
     # write_output should have been called with Path(out_path) as second arg
@@ -205,6 +209,12 @@ def test_cli_pipeline_call_order(runner: CliRunner, bool_assert_path: Path) -> N
         checker.children = ()  # No children → single-file path
         return checker
 
+    def mock_optimize(*_args: object, **_kwargs: object) -> MagicMock:
+        call_order.append("optimize")
+        checker = MagicMock()
+        checker.children = ()
+        return checker
+
     def mock_emit(*_args: object, **_kwargs: object) -> str:
         call_order.append("emit")
         return _MOCK_SV_TEXT
@@ -215,15 +225,17 @@ def test_cli_pipeline_call_order(runner: CliRunner, bool_assert_path: Path) -> N
     with patch("sva2rtl.cli.invoke_slang", side_effect=mock_invoke_slang):
         with patch("sva2rtl.cli.import_assertion", side_effect=mock_import_assertion):
             with patch("sva2rtl.cli.compose", side_effect=mock_compose):
-                with patch("sva2rtl.cli.emit", side_effect=mock_emit):
-                    with patch("sva2rtl.cli.write_output", side_effect=mock_write_output):
-                        result = runner.invoke(main, [str(bool_assert_path)])
+                with patch("sva2rtl.cli.optimize", side_effect=mock_optimize):
+                    with patch("sva2rtl.cli.emit", side_effect=mock_emit):
+                        with patch("sva2rtl.cli.write_output", side_effect=mock_write_output):
+                            result = runner.invoke(main, [str(bool_assert_path)])
 
     assert result.exit_code == 0
     assert call_order == [
         "invoke_slang",
         "import_assertion",
         "compose",
+        "optimize",
         "emit",
         "write_output",
     ]
