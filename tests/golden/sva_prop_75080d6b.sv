@@ -29,7 +29,7 @@ module sva_prop_75080d6b (
     logic w_afired_2;
 
     // ── Child module instantiations (token-passing chain) ────────────────────
-    sva_prop_75080d6b_e0 u_sva_prop_75080d6b_e0 (
+    sva_prop_75080d6b_e0 u_sva_prop_75080d6b_e0_0 (
         .clk(clk),
         .rst_n    (rst_n),
         .start    (start),
@@ -41,7 +41,7 @@ module sva_prop_75080d6b (
         .attempt_fired (w_afired_0),
         .disabled_o    ()
     );
-    sva_delay_0_0 u_sva_delay_0_0 (
+    sva_delay_0_0 u_sva_delay_0_0_1 (
         .clk(clk),
         .rst_n    (rst_n),
         .start    (w_pass_0),
@@ -52,7 +52,7 @@ module sva_prop_75080d6b (
         .attempt_fired (w_afired_1),
         .disabled_o    ()
     );
-    sva_prop_75080d6b_e1 u_sva_prop_75080d6b_e1 (
+    sva_prop_75080d6b_e1 u_sva_prop_75080d6b_e1_2 (
         .clk(clk),
         .rst_n    (rst_n),
         .start    (w_pass_1),

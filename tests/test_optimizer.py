@@ -1,4 +1,6 @@
-"""Unit tests for src/sva2rtl/optimizer.py — constant_fold and concat_merge passes.
+"""Unit tests for src/sva2rtl/optimizer.py.
+
+Covers constant_fold, concat_merge, cse, counter_merge passes.
 
 Tests follow the normalizer.py test pattern:
 - Helper factories for constructing CheckerNode trees
@@ -17,7 +19,7 @@ from typing import cast
 from sva2rtl.composer import compose, structural_hash
 from sva2rtl.ir import CheckerNode, SourceLoc
 from sva2rtl.normalizer import normalize
-from sva2rtl.optimizer import concat_merge, constant_fold, optimize
+from sva2rtl.optimizer import concat_merge, constant_fold, counter_merge, cse, optimize
 
 # ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -364,3 +366,226 @@ def test_optimize_clock_signal_preserved_after_merge() -> None:
     merged = result.children[0]
     assert merged.params["clock_signal"] == "clk"
     assert merged.params["clock_edge"] == "posedge"
+
+
+# ── CSE pass tests ────────────────────────────────────────────────────────
+
+
+def test_cse_no_duplicates_identity() -> None:
+    """A tree with no duplicate subtrees is returned unchanged by cse()."""
+    d1 = _make_delay_checker(1, 2, "sva_delay_1_2")
+    d2 = _make_delay_checker(3, 4, "sva_delay_3_4")
+    top = _make_concat_top((d1, d2))
+    before = structural_hash(top)
+    result = cse(top)
+    assert structural_hash(result) == before
+
+
+def test_cse_deduplicates_identical_subtrees() -> None:
+    """Two children with identical structural_hash get the same canonical module_name."""
+    # Both delays have same (delay_min, delay_max) and params → same structural_hash
+    d1 = _make_delay_checker(3, 3)  # module_name=sva_delay_3_3
+    d2 = _make_delay_checker(3, 3)  # same params → same structural_hash
+    top = _make_concat_top((d1, d2))
+
+    result = cse(top)
+
+    # Both children should now share a CSE-canonical module_name
+    child_names = {c.module_name for c in result.children}
+    assert len(child_names) == 1
+    canonical = result.children[0].module_name
+    assert canonical.startswith("sva_cse_concat_delay_3_3")
+
+
+def test_cse_canonical_naming_concat_delay() -> None:
+    """CSE names concat_delay duplicates as sva_cse_concat_delay_{min}_{max}."""
+    d1 = _make_delay_checker(2, 5)
+    d2 = _make_delay_checker(2, 5)
+    top = _make_concat_top((d1, d2))
+    result = cse(top)
+
+    assert result.children[0].module_name == "sva_cse_concat_delay_2_5"
+    assert result.children[1].module_name == "sva_cse_concat_delay_2_5"
+
+
+def test_cse_python_identity_for_shared_nodes() -> None:
+    """CSE-unified nodes are the same Python object (id() identity)."""
+    d1 = _make_delay_checker(3, 3)
+    d2 = _make_delay_checker(3, 3)
+    top = _make_concat_top((d1, d2))
+    result = cse(top)
+
+    # Both children must be the exact same Python object
+    assert result.children[0] is result.children[1]
+
+
+def test_cse_skips_root() -> None:
+    """CSE never renames or replaces the root node itself."""
+    node = _make_bool_checker("a", "sva_check")
+    # Create a tree where root has only one occurrence — itself
+    result = cse(node)
+    # Root node must not be renamed
+    assert result.module_name == "sva_check"
+    assert result.template_name == "bool_expr"
+
+
+def test_cse_root_not_replaced_even_if_child_matches_root_hash() -> None:
+    """Root is never replaced even when a duplicate hash exists for root structure."""
+    # Construct a child that has the same structure as root by nesting
+    # This is a pathological case; just verify root module_name unchanged.
+    d = _make_delay_checker(1, 1)
+    top = _make_concat_top((d,), name="sva_top_unique")
+    result = cse(top)
+    assert result.module_name == "sva_top_unique"
+
+
+def test_cse_preserves_non_duplicate_children() -> None:
+    """CSE leaves children with unique structural_hashes untouched."""
+    d1 = _make_delay_checker(1, 2)
+    d2 = _make_delay_checker(3, 4)
+    top = _make_concat_top((d1, d2))
+    result = cse(top)
+
+    # Children have different hashes — no CSE applied; module_names unchanged
+    assert result.children[0].module_name == d1.module_name
+    assert result.children[1].module_name == d2.module_name
+
+
+def test_cse_deep_tree_deduplication() -> None:
+    """CSE deduplicates identical subtrees that are grandchildren of root."""
+    # Create two identical bool_expr nodes (same params → same hash)
+    bool1 = _make_bool_checker("x && y", "sva_bool_xy_copy1")
+    bool2 = _make_bool_checker("x && y", "sva_bool_xy_copy2")
+
+    inner1 = _make_concat_top((bool1,), name="sva_inner1")
+    inner2 = _make_concat_top((bool2,), name="sva_inner2")
+    outer = _make_concat_top((inner1, inner2), name="sva_outer")
+
+    result = cse(outer)
+
+    # The two inner seq_concat_top nodes have identical structure after
+    # their bool children are also identical — they should be deduplicated
+    # Both inner nodes have same structural_hash → same canonical name
+    assert result.children[0].module_name == result.children[1].module_name
+    assert result.children[0].module_name.startswith("sva_cse_")
+
+
+def test_cse_idempotent() -> None:
+    """cse(cse(tree)) has same structural_hash as cse(tree)."""
+    d1 = _make_delay_checker(3, 3)
+    d2 = _make_delay_checker(3, 3)
+    top = _make_concat_top((d1, d2))
+
+    once = cse(top)
+    twice = cse(once)
+    assert structural_hash(once) == structural_hash(twice)
+
+
+# ── counter_merge pass tests ──────────────────────────────────────────────
+
+
+def test_counter_merge_no_delays_identity() -> None:
+    """A tree with no concat_delay nodes is returned unchanged."""
+    node = _make_bool_checker("req && ack", "sva_check")
+    result = counter_merge(node)
+    assert result is node
+
+
+def test_counter_merge_same_hash_already_unified() -> None:
+    """counter_merge is a no-op when CSE has already unified same-hash delays."""
+    d1 = _make_delay_checker(3, 3)
+    d2 = _make_delay_checker(3, 3)
+    top = _make_concat_top((d1, d2))
+
+    # After CSE, both children have the same module_name
+    cse_result = cse(top)
+    # counter_merge sees them as already having one module_name → no-op
+    result = counter_merge(cse_result)
+    assert structural_hash(result) == structural_hash(cse_result)
+
+
+def test_counter_merge_different_hashes_no_merge() -> None:
+    """counter_merge does not merge delays with different structural hashes."""
+    d1 = _make_delay_checker(1, 2)
+    d2 = _make_delay_checker(3, 4)
+    top = _make_concat_top((d1, d2))
+    result = counter_merge(top)
+
+    # Different hashes → no merge
+    assert result.children[0].module_name == d1.module_name
+    assert result.children[1].module_name == d2.module_name
+
+
+def test_counter_merge_assigns_canonical_name_for_missed_duplicates() -> None:
+    """counter_merge renames same-hash delays that have different module_names."""
+    # Build two concat_delay nodes with identical params but different module_names
+    # (simulate a case where CSE somehow missed them, e.g., different module_name set manually)
+    d1 = _make_delay_checker(2, 5, name="sva_delay_2_5_alt1")
+    d2 = _make_delay_checker(2, 5, name="sva_delay_2_5_alt2")
+    top = _make_concat_top((d1, d2))
+
+    result = counter_merge(top)
+
+    # Both children should now have the same canonical name
+    assert result.children[0].module_name == "sva_cse_counter_2_5"
+    assert result.children[1].module_name == "sva_cse_counter_2_5"
+
+
+def test_counter_merge_after_cse_is_noop() -> None:
+    """Running counter_merge after cse() on a tree with duplicates is a no-op."""
+    d1 = _make_delay_checker(3, 3)
+    d2 = _make_delay_checker(3, 3)
+    top = _make_concat_top((d1, d2))
+
+    cse_result = cse(top)
+    after_counter = counter_merge(cse_result)
+
+    # The tree should be structurally unchanged after counter_merge
+    assert structural_hash(after_counter) == structural_hash(cse_result)
+
+
+# ── Full-pipeline integration tests ──────────────────────────────────────
+
+
+def test_optimize_pipeline_deduplicates_identical_delays() -> None:
+    """optimize() with two non-adjacent identical delays: CSE deduplicates them.
+
+    concat_merge only merges *adjacent* delays; bool_expr nodes between delays
+    prevent merging.  CSE then deduplicates the two identical delay subtrees.
+    """
+    d1 = _make_delay_checker(3, 3)
+    bool_mid = _make_bool_checker("a", "sva_mid")
+    d2 = _make_delay_checker(3, 3)
+    # [delay(3,3), bool, delay(3,3)] — delays NOT adjacent → concat_merge skips them
+    top = _make_concat_top((d1, bool_mid, d2))
+
+    result = optimize(top)
+
+    # After optimize(): both delay(3,3) children should share the same
+    # CSE-canonical module_name (concat_merge left them separate, CSE unified them)
+    delay_children = [c for c in result.children if c.template_name == "concat_delay"]
+    assert len(delay_children) == 2
+    assert delay_children[0].module_name == delay_children[1].module_name
+    assert delay_children[0].module_name.startswith("sva_cse_concat_delay_3_3")
+
+
+def test_optimize_cse_then_concat_merge_integration() -> None:
+    """concat_merge + cse interact correctly: merged delay then deduplication."""
+    # Two pairs of adjacent delays that each merge to (3,3)
+    d1a = _make_delay_checker(1, 1)
+    d1b = _make_delay_checker(2, 2)
+    bool_mid = _make_bool_checker("a", "sva_mid")
+    d2a = _make_delay_checker(1, 1)
+    d2b = _make_delay_checker(2, 2)
+    top = _make_concat_top((d1a, d1b, bool_mid, d2a, d2b))
+
+    result = optimize(top)
+
+    # After concat_merge: [delay(3,3), bool, delay(3,3)]
+    # After CSE: both delay(3,3) share a canonical module_name
+    delay_children = [c for c in result.children if c.template_name == "concat_delay"]
+    assert len(delay_children) == 2
+    # Both merged delays should have the same module_name (CSE)
+    assert delay_children[0].module_name == delay_children[1].module_name
+    # And same Python object identity
+    assert delay_children[0] is delay_children[1]
