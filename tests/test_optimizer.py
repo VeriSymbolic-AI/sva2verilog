@@ -12,14 +12,25 @@ Tests follow the normalizer.py test pattern:
 
 from __future__ import annotations
 
+import dataclasses
 import json
 from pathlib import Path
 from typing import cast
 
+import pytest
+
 from sva2rtl.composer import compose, structural_hash
 from sva2rtl.ir import CheckerNode, SourceLoc
 from sva2rtl.normalizer import normalize
-from sva2rtl.optimizer import concat_merge, constant_fold, counter_merge, cse, optimize
+from sva2rtl.optimizer import (
+    concat_merge,
+    constant_fold,
+    count_modules,
+    count_nodes,
+    counter_merge,
+    cse,
+    optimize,
+)
 
 # ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -589,3 +600,343 @@ def test_optimize_cse_then_concat_merge_integration() -> None:
     assert delay_children[0].module_name == delay_children[1].module_name
     # And same Python object identity
     assert delay_children[0] is delay_children[1]
+
+
+# ── count_nodes / count_modules utility tests ─────────────────────────────
+
+
+def test_count_nodes_single_node() -> None:
+    """A leaf node has exactly 1 node."""
+    node = _make_bool_checker("a", "sva_check")
+    assert count_nodes(node) == 1
+
+
+def test_count_nodes_parent_with_two_children() -> None:
+    """Parent + 2 children = 3 nodes total."""
+    d1 = _make_delay_checker(1, 1)
+    d2 = _make_delay_checker(2, 2)
+    top = _make_concat_top((d1, d2))
+    assert count_nodes(top) == 3
+
+
+def test_count_nodes_counts_shared_nodes_per_reference() -> None:
+    """After CSE, shared nodes are counted once per instantiation site."""
+    d1 = _make_delay_checker(3, 3)
+    d2 = _make_delay_checker(3, 3)
+    top = _make_concat_top((d1, d2))
+    # Before CSE: 3 nodes
+    assert count_nodes(top) == 3
+    # After CSE: still 3 instantiation sites (root + 2 children)
+    # even though the two children are the same Python object
+    result = cse(top)
+    assert count_nodes(result) == 3
+
+
+def test_count_modules_single_node() -> None:
+    """A leaf node has exactly 1 unique module."""
+    node = _make_bool_checker("a", "sva_check")
+    assert count_modules(node) == 1
+
+
+def test_count_modules_two_distinct_children() -> None:
+    """Parent with two distinct-module children = 3 unique modules."""
+    d1 = _make_delay_checker(1, 1)  # module_name=sva_delay_1_1
+    d2 = _make_delay_checker(2, 2)  # module_name=sva_delay_2_2
+    top = _make_concat_top((d1, d2))
+    assert count_modules(top) == 3
+
+
+def test_count_modules_shared_after_cse() -> None:
+    """After CSE, shared children count as one unique module."""
+    d1 = _make_delay_checker(3, 3)
+    d2 = _make_delay_checker(3, 3)
+    top = _make_concat_top((d1, d2))
+    # Before CSE: 2 children have same module_name already (same params) →
+    # parent + 1 unique child module = 2 unique modules
+    # (d1 and d2 both have module_name "sva_delay_3_3")
+    assert count_modules(top) == 2
+
+    # After CSE: canonical name, still 2 unique modules (root + 1 canonical)
+    result = cse(top)
+    assert count_modules(result) == 2
+
+
+def test_count_modules_never_exceeds_count_nodes() -> None:
+    """count_modules <= count_nodes always (modules deduplicate, nodes don't)."""
+    d1 = _make_delay_checker(2, 4)
+    d2 = _make_delay_checker(2, 4)
+    d3 = _make_delay_checker(1, 1)
+    top = _make_concat_top((d1, d2, d3))
+    assert count_modules(top) <= count_nodes(top)
+
+
+# ── Dead-node elimination tests ───────────────────────────────────────────
+
+
+def test_dead_node_removes_const_false_child() -> None:
+    """A child tagged _const_false=1 is pruned from the parent's children."""
+    from sva2rtl.optimizer import dead_node
+
+    false_node = _make_bool_checker("1'b0", "sva_false")
+    # Tag the child with _const_false (as constant_fold would do)
+    false_node = dataclasses.replace(
+        false_node, params={**false_node.params, "_const_false": "1"}
+    )
+    live_node = _make_bool_checker("req", "sva_live")
+    top = _make_concat_top((false_node, live_node))
+
+    result = dead_node(top)
+    assert len(result.children) == 1
+    assert result.children[0].module_name == "sva_live"
+
+
+def test_dead_node_removes_dead_marked_child() -> None:
+    """A child tagged _dead=true is pruned from the parent's children."""
+    from sva2rtl.optimizer import dead_node
+
+    dead = _make_bool_checker("x", "sva_dead")
+    dead = dataclasses.replace(dead, params={**dead.params, "_dead": "true"})
+    live = _make_bool_checker("y", "sva_live")
+    top = _make_concat_top((dead, live))
+
+    result = dead_node(top)
+    assert len(result.children) == 1
+    assert result.children[0].module_name == "sva_live"
+
+
+def test_dead_node_no_dead_children_unchanged() -> None:
+    """A tree with no dead children is returned unchanged."""
+    from sva2rtl.optimizer import dead_node
+
+    d1 = _make_delay_checker(1, 1)
+    d2 = _make_delay_checker(2, 2)
+    top = _make_concat_top((d1, d2))
+    result = dead_node(top)
+    assert result is top
+
+
+def test_constant_fold_then_dead_node_prunes_false() -> None:
+    """constant_fold tags 1'b0, dead_node then prunes it."""
+    from sva2rtl.optimizer import dead_node
+
+    false_node = _make_bool_checker("1'b0", "sva_false")
+    live_node = _make_bool_checker("req", "sva_live")
+    top = _make_concat_top((false_node, live_node))
+
+    folded = constant_fold(top)
+    pruned = dead_node(folded)
+
+    # The 1'b0 child was tagged _const_false=1 then pruned
+    assert len(pruned.children) == 1
+    assert pruned.children[0].module_name == "sva_live"
+
+
+# ── Structural parity tests (no simulation needed) ────────────────────────
+
+# 16 fixture names whose full pipeline must satisfy semantic-preservation
+# invariants: optimize() must never increase node/module count, and must
+# be idempotent after a single pass.
+_PARITY_FIXTURES: list[str] = [
+    "bool_simple",
+    "bool_complex",
+    "bool_labeled",
+    "delay_fixed",
+    "delay_range",
+    "delay_three_element",
+    "delay_zero",
+    "disable_iff",
+    "fell",
+    "implication_bitvec",
+    "implication_nonoverlap",
+    "implication_overlap",
+    "past",
+    "rep_fixed",
+    "rep_range",
+    "rose",
+]
+
+
+def _run_pipeline(fixture_name: str, *, no_optimize: bool = False) -> CheckerNode:
+    """Load fixture and run normalize -> compose -> (optionally optimize).
+
+    Parameters
+    ----------
+    fixture_name
+        JSON fixture stem (no extension) under ``tests/fixtures/``.
+    no_optimize
+        When ``True``, skip the optimize() pass (returns raw composed tree).
+
+    Returns
+    -------
+    CheckerNode
+        The (optionally optimized) CheckerNode tree.
+    """
+    from sva2rtl.ast_importer import import_assertion
+
+    ast = _load_fixture(f"{fixture_name}.json")
+    node, clock, original_text, label = import_assertion(ast)
+    node = normalize(node)
+    checker = compose(node, clock, label, original_text)
+    if not no_optimize:
+        checker = optimize(checker)
+    return checker
+
+
+@pytest.mark.parametrize("fixture_name", _PARITY_FIXTURES)
+def test_optimization_structural_parity(fixture_name: str) -> None:
+    """Optimizer never increases node/module count and is idempotent.
+
+    For each fixture in ``_PARITY_FIXTURES``:
+
+    1. ``count_nodes(optimized) <= count_nodes(unoptimized)``
+       — optimizer only removes or merges nodes, never adds
+    2. ``count_modules(optimized) <= count_modules(unoptimized)``
+       — optimizer only removes or deduplicates modules, never adds
+    3. ``optimize(optimize(x))`` has same structural_hash as ``optimize(x)``
+       — optimizer is idempotent after convergence (D-03)
+    """
+    unoptimized = _run_pipeline(fixture_name, no_optimize=True)
+    optimized = _run_pipeline(fixture_name, no_optimize=False)
+
+    # Rule 1: node count cannot grow
+    assert count_nodes(optimized) <= count_nodes(unoptimized), (
+        f"{fixture_name}: count_nodes grew after optimize: "
+        f"{count_nodes(unoptimized)} -> {count_nodes(optimized)}"
+    )
+
+    # Rule 2: module count cannot grow
+    assert count_modules(optimized) <= count_modules(unoptimized), (
+        f"{fixture_name}: count_modules grew after optimize: "
+        f"{count_modules(unoptimized)} -> {count_modules(optimized)}"
+    )
+
+    # Rule 3: idempotency
+    twice_hash = structural_hash(optimize(optimized))
+    once_hash = structural_hash(optimized)
+    assert once_hash == twice_hash, (
+        f"{fixture_name}: optimize is not idempotent: hash changed on 2nd pass"
+    )
+
+
+# ── Simulation parity tests ────────────────────────────────────────────────
+
+# Fixtures suitable for generic stimulus simulation parity checks.
+# These have simple observed_signals and predictable token-passing latency.
+_SIM_PARITY_FIXTURES: list[str] = [
+    "bool_simple",
+    "delay_fixed",
+    "delay_range",
+    "rep_fixed",
+]
+
+
+def _make_generic_stimulus(
+    extra_inputs: list[str], n_cycles: int = 20
+) -> list[dict[str, int]]:
+    """Generate a deterministic generic stimulus for any checker interface.
+
+    ``start`` is asserted every 3rd cycle.  Observed signals toggle on a
+    per-signal binary counter so all input combinations are exercised within
+    ``2^k`` cycles where ``k`` is the number of observed signals.
+
+    Parameters
+    ----------
+    extra_inputs
+        Port names as returned by ``extra_inputs_from_checker()``.
+    n_cycles
+        Number of stimulus cycles to generate.
+
+    Returns
+    -------
+    list[dict[str, int]]
+        Per-cycle stimulus dicts with int values 0 or 1.
+    """
+    stim = []
+    for i in range(n_cycles):
+        cycle: dict[str, int] = {}
+        for j, inp in enumerate(extra_inputs):
+            if inp == "start":
+                cycle[inp] = 1 if (i % 3 == 0) else 0
+            else:
+                cycle[inp] = (i >> j) & 1
+        stim.append(cycle)
+    return stim
+
+
+@pytest.mark.simulation
+@pytest.mark.parametrize("fixture_name", _SIM_PARITY_FIXTURES)
+def test_optimization_parity(fixture_name: str, tmp_path: Path) -> None:
+    """Optimized and unoptimized checkers produce identical simulation output.
+
+    For each fixture in ``_SIM_PARITY_FIXTURES``:
+
+    1. Build both optimized and unoptimized checkers.
+    2. Emit RTL for both.
+    3. Simulate both against the same generic stimulus.
+    4. Assert that the ``pass`` and ``fail`` output sequences are identical.
+
+    This validates the semantic-preserving contract of the optimizer: every
+    optimization transformation is hardware-equivalent.
+    """
+    import shutil
+
+    from sva2rtl.emitter import emit_all
+    from tests.simulation.tb_generator import (
+        TEMPLATES_WITH_OVERFLOW,
+        extra_inputs_from_checker,
+        generate_testbench,
+        run_simulation,
+    )
+
+    if shutil.which("iverilog") is None:
+        pytest.skip(
+            "iverilog not found — install Icarus Verilog to run simulation tests"
+        )
+
+    # Build both trees
+    unopt = _run_pipeline(fixture_name, no_optimize=True)
+    opt = _run_pipeline(fixture_name, no_optimize=False)
+
+    # Generate stimulus based on unoptimized checker ports (both have same interface)
+    extra_inputs = extra_inputs_from_checker(unopt)
+    stimulus = _make_generic_stimulus(extra_inputs, n_cycles=20)
+
+    def _simulate(checker: CheckerNode, work_subdir: str) -> list[dict[str, bool]]:
+        modules = emit_all(checker)
+        has_overflow = checker.template_name in TEMPLATES_WITH_OVERFLOW
+        tb = generate_testbench(
+            module_name=checker.module_name,
+            clock_signal=checker.params["clock_signal"],
+            extra_inputs=extra_inputs_from_checker(checker),
+            stimulus=stimulus,
+            has_overflow_flag=has_overflow,
+        )
+        return run_simulation(
+            module_name=checker.module_name,
+            sv_sources=list(modules.values()),
+            tb_code=tb,
+            work_dir=tmp_path / work_subdir,
+            has_overflow_flag=has_overflow,
+        )
+
+    (tmp_path / "unopt").mkdir()
+    (tmp_path / "opt").mkdir()
+    unopt_results = _simulate(unopt, "unopt")
+    opt_results = _simulate(opt, "opt")
+
+    # Verify both produce the same number of output cycles
+    assert len(unopt_results) == len(opt_results), (
+        f"{fixture_name}: simulation output cycle count mismatch: "
+        f"unoptimized={len(unopt_results)}, optimized={len(opt_results)}"
+    )
+
+    # Verify pass/fail sequences are identical cycle-by-cycle
+    for cycle_idx, (u, o) in enumerate(zip(unopt_results, opt_results)):
+        assert u["pass"] == o["pass"], (
+            f"{fixture_name}: pass mismatch at cycle {cycle_idx}: "
+            f"unopt={u['pass']}, opt={o['pass']}"
+        )
+        assert u["fail"] == o["fail"], (
+            f"{fixture_name}: fail mismatch at cycle {cycle_idx}: "
+            f"unopt={u['fail']}, opt={o['fail']}"
+        )

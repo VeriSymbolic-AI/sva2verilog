@@ -17,6 +17,7 @@ from sva2rtl.ir import (
     SignalFunc,
     SVANode,
 )
+from sva2rtl.optimizer import count_modules, count_nodes
 
 # Params excluded from dump display (positional/presentation metadata)
 _DISPLAY_EXCLUDE: frozenset[str] = frozenset(
@@ -28,6 +29,8 @@ def format_dump_tree(
     ir_node: SVANode,
     checker: CheckerNode,
     hash_map: dict[str, str],
+    *,
+    unoptimized_checker: CheckerNode | None = None,
 ) -> str:
     """Format a structured dump of the IR tree and composition tree.
 
@@ -48,6 +51,12 @@ def format_dump_tree(
     hash_map
         Mapping from module_name to 8-char hex structural hash (from
         ``compute_hash_map()``).
+    unoptimized_checker
+        The CheckerNode tree *before* optimization passes ran (i.e., the
+        output of ``compose()`` before ``optimize()``).  When provided, an
+        ``=== Optimization Summary ===`` section is appended showing before/
+        after node and module counts.  When ``None`` (optimization was
+        disabled via ``--no-optimize``), a minimal stats line is shown instead.
 
     Returns
     -------
@@ -60,6 +69,24 @@ def format_dump_tree(
     lines.append("")
     lines.append("=== Composition Tree ===")
     lines.append(_format_checker(checker, hash_map, indent=0))
+    lines.append("")
+    if unoptimized_checker is not None:
+        before_nodes = count_nodes(unoptimized_checker)
+        after_nodes = count_nodes(checker)
+        before_mods = count_modules(unoptimized_checker)
+        after_mods = count_modules(checker)
+        pct_nodes = (
+            round((1 - after_nodes / before_nodes) * 100) if before_nodes > 0 else 0
+        )
+        pct_mods = (
+            round((1 - after_mods / before_mods) * 100) if before_mods > 0 else 0
+        )
+        lines.append(
+            f"Optimization: Nodes: {before_nodes} -> {after_nodes} (-{pct_nodes}%), "
+            f"Modules: {before_mods} -> {after_mods} (-{pct_mods}%)"
+        )
+    else:
+        lines.append(f"Nodes: {count_nodes(checker)} (optimization disabled)")
     return "\n".join(lines)
 
 

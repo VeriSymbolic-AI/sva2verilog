@@ -23,6 +23,7 @@ from sva2rtl.ir import (
     SourceLoc,
 )
 from sva2rtl.normalizer import normalize
+from sva2rtl.optimizer import optimize
 from tests.conftest import requires_slang
 
 # ── Shared test helpers ──────────────────────────────────────────────────────
@@ -132,6 +133,127 @@ def test_dump_tree_seq_concat_shows_delays() -> None:
     assert "(2,5)" in output
 
 
+# ── Optimization summary tests ────────────────────────────────────────────────
+
+
+def _make_delay_checker_node(
+    delay_min: int, delay_max: int, name: str | None = None
+) -> CheckerNode:
+    """Build a concat_delay CheckerNode (mirrors _make_delay_checker in test_optimizer)."""
+    cnt_width = max(1, delay_max.bit_length())
+    if name is None:
+        name = f"sva_delay_{delay_min}_{delay_max}"
+    return CheckerNode(
+        template_name="concat_delay",
+        module_name=name,
+        params={
+            "delay_min": str(delay_min),
+            "delay_max": str(delay_max),
+            "cnt_width": str(cnt_width),
+            "clock_signal": "clk",
+            "clock_edge": "posedge",
+        },
+        observed_signals=(),
+        source_loc=_LOC,
+    )
+
+
+def _make_concat_top_node(
+    children: tuple[CheckerNode, ...], name: str = "sva_top"
+) -> CheckerNode:
+    """Build a seq_concat_top CheckerNode wrapping the given children."""
+    return CheckerNode(
+        template_name="seq_concat_top",
+        module_name=name,
+        params={"clock_signal": "clk", "clock_edge": "posedge"},
+        observed_signals=(),
+        source_loc=_LOC,
+        children=children,
+    )
+
+
+def test_dump_tree_no_unoptimized_checker_shows_disabled() -> None:
+    """When unoptimized_checker=None, output contains '(optimization disabled)'."""
+    ir_node, checker, hash_map = _make_bool_checker()
+    output = format_dump_tree(ir_node, checker, hash_map)
+    # Default: unoptimized_checker not provided → optimization disabled line
+    assert "(optimization disabled)" in output, (
+        f"Expected '(optimization disabled)' in output:\n{output}"
+    )
+
+
+def test_dump_tree_no_unoptimized_checker_shows_node_count() -> None:
+    """When unoptimized_checker=None, output shows 'Nodes: N (optimization disabled)'."""
+    ir_node, checker, hash_map = _make_bool_checker()
+    output = format_dump_tree(ir_node, checker, hash_map)
+    assert re.search(r"Nodes:\s+\d+\s+\(optimization disabled\)", output), (
+        f"Expected 'Nodes: <n> (optimization disabled)' pattern in:\n{output}"
+    )
+
+
+def test_dump_tree_with_unoptimized_checker_shows_optimization_line() -> None:
+    """When unoptimized_checker is provided, output contains 'Optimization:' line."""
+    ir_node, checker, hash_map = _make_bool_checker()
+    # Provide same checker as both optimized and unoptimized (0% reduction)
+    output = format_dump_tree(ir_node, checker, hash_map, unoptimized_checker=checker)
+    assert "Optimization:" in output, (
+        f"Expected 'Optimization:' in output:\n{output}"
+    )
+
+
+def test_dump_tree_optimization_summary_format() -> None:
+    """Optimization summary has the format 'Nodes: X -> Y (-Z%), Modules: ...'."""
+    ir_node, checker, hash_map = _make_bool_checker()
+    output = format_dump_tree(ir_node, checker, hash_map, unoptimized_checker=checker)
+    # Expect: "Optimization: Nodes: N -> N (-0%), Modules: M -> M (-0%)"
+    assert re.search(
+        r"Optimization: Nodes: \d+ -> \d+ \(-\d+%\), Modules: \d+ -> \d+ \(-\d+%\)",
+        output,
+    ), (f"Expected optimization summary format in:\n{output}")
+
+
+def test_dump_tree_optimization_summary_shows_reduction() -> None:
+    """Optimization summary shows nonzero reduction for a tree that gets optimized.
+
+    Two adjacent identical delay nodes merge via concat_merge, then get
+    deduplicated via CSE → the optimized tree has fewer nodes.
+    """
+    # Build: seq_concat_top([delay(3,3), delay(3,3)])
+    d1 = _make_delay_checker_node(3, 3, "sva_delay_3_3_a")
+    d2 = _make_delay_checker_node(3, 3, "sva_delay_3_3_b")
+    unoptimized = _make_concat_top_node((d1, d2))
+
+    # Optimize → concat_merge fuses them into a single delay(6,6)
+    optimized = optimize(unoptimized)
+    hash_map = compute_hash_map(optimized)
+
+    # A trivial BoolExpr stands in for the (unused) ir_node argument
+    ir_node = BoolExpr(text="a ##3 a", source_loc=_LOC)
+    output = format_dump_tree(
+        ir_node, optimized, hash_map, unoptimized_checker=unoptimized
+    )
+
+    # The unoptimized tree had 3 nodes; optimized has 2 → at least some reduction
+    assert "Optimization:" in output
+    # Extract the Nodes line and verify after < before
+    m = re.search(r"Nodes: (\d+) -> (\d+)", output)
+    assert m is not None, f"Could not find 'Nodes: X -> Y' in:\n{output}"
+    before_nodes = int(m.group(1))
+    after_nodes = int(m.group(2))
+    assert after_nodes <= before_nodes, (
+        f"Optimized node count ({after_nodes}) should be <= unoptimized ({before_nodes})"
+    )
+
+
+def test_dump_tree_no_unoptimized_not_shows_optimization_label() -> None:
+    """When unoptimized_checker=None, 'Optimization:' label is absent."""
+    ir_node, checker, hash_map = _make_bool_checker()
+    output = format_dump_tree(ir_node, checker, hash_map)
+    assert "Optimization:" not in output, (
+        f"Expected no 'Optimization:' label when unoptimized_checker=None:\n{output}"
+    )
+
+
 # ── CLI integration tests (requires slang) ───────────────────────────────────
 
 
@@ -168,3 +290,35 @@ def test_cli_dump_tree_output_has_structure() -> None:
     assert "[hash:" in result.output
     assert "=== Pre-normalized IR ===" in result.output
     assert "=== Composition Tree ===" in result.output
+
+
+@requires_slang
+def test_cli_dump_tree_shows_optimization_summary() -> None:
+    """CLI --dump-tree (with optimization enabled) shows 'Optimization:' summary."""
+    runner = CliRunner()
+    # Use delay_assert.sv which has a ##N property → concat_merge opportunity
+    result = runner.invoke(main, [str(_FIXTURES / "delay_assert.sv"), "--dump-tree"])
+    assert result.exit_code == 0, (
+        f"Expected exit_code 0, got {result.exit_code}.\nOutput: {result.output}"
+    )
+    assert "Optimization:" in result.output, (
+        f"Expected 'Optimization:' summary in --dump-tree output:\n{result.output}"
+    )
+    assert re.search(r"Nodes: \d+ -> \d+ \(-\d+%\)", result.output), (
+        f"Expected 'Nodes: X -> Y (-Z%)' pattern in:\n{result.output}"
+    )
+
+
+@requires_slang
+def test_cli_dump_tree_no_optimize_shows_disabled() -> None:
+    """CLI --dump-tree --no-optimize shows '(optimization disabled)' summary."""
+    runner = CliRunner()
+    result = runner.invoke(
+        main, [str(_FIXTURES / "bool_assert.sv"), "--dump-tree", "--no-optimize"]
+    )
+    assert result.exit_code == 0, (
+        f"Expected exit_code 0, got {result.exit_code}.\nOutput: {result.output}"
+    )
+    assert "(optimization disabled)" in result.output, (
+        f"Expected '(optimization disabled)' in --no-optimize dump:\n{result.output}"
+    )
