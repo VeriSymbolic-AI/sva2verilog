@@ -26,7 +26,7 @@ module {{ module_name }} (
     // ── Child module instantiations (token-passing chain) ────────────────────
 {% for child in children %}
 {% if loop.first %}
-    {{ child.module_name }} u_{{ child.module_name }} (
+    {{ child.module_name }} u_{{ child.module_name }}_{{ loop.index0 }} (
         .{{ clock_signal }}({{ clock_signal }}),
         .rst_n    (rst_n),
         .start    (start),
@@ -41,7 +41,7 @@ module {{ module_name }} (
         .disabled_o    ()
     );
 {% else %}
-    {{ child.module_name }} u_{{ child.module_name }} (
+    {{ child.module_name }} u_{{ child.module_name }}_{{ loop.index0 }} (
         .{{ clock_signal }}({{ clock_signal }}),
         .rst_n    (rst_n),
         .start    (w_pass_{{ loop.index0 - 1 }}),

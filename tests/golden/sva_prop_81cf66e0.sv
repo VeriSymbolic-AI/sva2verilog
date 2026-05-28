@@ -29,7 +29,7 @@ module sva_prop_81cf66e0 (
     logic w_afired_2;
 
     // ── Child module instantiations (token-passing chain) ────────────────────
-    sva_prop_81cf66e0_e0 u_sva_prop_81cf66e0_e0 (
+    sva_prop_81cf66e0_e0 u_sva_prop_81cf66e0_e0_0 (
         .clk(clk),
         .rst_n    (rst_n),
         .start    (start),
@@ -41,7 +41,7 @@ module sva_prop_81cf66e0 (
         .attempt_fired (w_afired_0),
         .disabled_o    ()
     );
-    sva_delay_3_3 u_sva_delay_3_3 (
+    sva_delay_3_3 u_sva_delay_3_3_1 (
         .clk(clk),
         .rst_n    (rst_n),
         .start    (w_pass_0),
@@ -52,7 +52,7 @@ module sva_prop_81cf66e0 (
         .attempt_fired (w_afired_1),
         .disabled_o    ()
     );
-    sva_prop_81cf66e0_e1 u_sva_prop_81cf66e0_e1 (
+    sva_prop_81cf66e0_e1 u_sva_prop_81cf66e0_e1_2 (
         .clk(clk),
         .rst_n    (rst_n),
         .start    (w_pass_1),
