@@ -12,9 +12,12 @@ Tests follow the normalizer.py test pattern:
 
 from __future__ import annotations
 
+import dataclasses
 import json
 from pathlib import Path
 from typing import cast
+
+import pytest
 
 from sva2rtl.composer import compose, structural_hash
 from sva2rtl.ir import CheckerNode, SourceLoc
@@ -676,7 +679,6 @@ def test_dead_node_removes_const_false_child() -> None:
 
     false_node = _make_bool_checker("1'b0", "sva_false")
     # Tag the child with _const_false (as constant_fold would do)
-    import dataclasses
     false_node = dataclasses.replace(
         false_node, params={**false_node.params, "_const_false": "1"}
     )
@@ -692,7 +694,6 @@ def test_dead_node_removes_dead_marked_child() -> None:
     """A child tagged _dead=true is pruned from the parent's children."""
     from sva2rtl.optimizer import dead_node
 
-    import dataclasses
     dead = _make_bool_checker("x", "sva_dead")
     dead = dataclasses.replace(dead, params={**dead.params, "_dead": "true"})
     live = _make_bool_checker("y", "sva_live")
@@ -779,9 +780,6 @@ def _run_pipeline(fixture_name: str, *, no_optimize: bool = False) -> CheckerNod
     if not no_optimize:
         checker = optimize(checker)
     return checker
-
-
-import pytest
 
 
 @pytest.mark.parametrize("fixture_name", _PARITY_FIXTURES)
@@ -882,10 +880,7 @@ def test_optimization_parity(fixture_name: str, tmp_path: Path) -> None:
     """
     import shutil
 
-    import pytest as _pytest
-
     from sva2rtl.emitter import emit_all
-
     from tests.simulation.tb_generator import (
         TEMPLATES_WITH_OVERFLOW,
         extra_inputs_from_checker,
@@ -894,7 +889,7 @@ def test_optimization_parity(fixture_name: str, tmp_path: Path) -> None:
     )
 
     if shutil.which("iverilog") is None:
-        _pytest.skip(
+        pytest.skip(
             "iverilog not found — install Icarus Verilog to run simulation tests"
         )
 
