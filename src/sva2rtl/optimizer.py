@@ -338,10 +338,26 @@ def counter_merge(root: CheckerNode) -> CheckerNode:
 
 
 def dead_node(root: CheckerNode) -> CheckerNode:
-    """Dead node elimination — stub (Phase 5.3).
+    """Dead node elimination — prune unreachable/dead branches from the tree.
 
-    Prunes unreachable nodes identified by ``constant_fold`` (nodes tagged
-    with ``_const_false``).  Not yet implemented; returns the tree unchanged.
+    Removes children that have been marked dead by upstream passes:
+
+    * ``params["_dead"] == "true"``  — explicit dead marker (set by any pass)
+    * ``params["_const_false"] == "1"``  — constant-false tag from
+      ``constant_fold``; a branch guarded by a constant-false condition can
+      never fire, so it is structurally unreachable at runtime
+
+    For the common case (no dead branches), the function returns the tree
+    unchanged in O(n) time.  When dead branches are found, the sub-tree
+    is rebuilt using ``dataclasses.replace()`` — the same immutable pattern
+    used by all other passes.
+
+    Role in the pipeline (D-03):
+    - Runs last: all other passes have already done their transformations
+    - ``constant_fold`` tags constant-false ``bool_expr`` nodes with
+      ``_const_false="1"``; dead_node removes those nodes from their parent
+    - The main value for Phase 5 MVP is the structural guarantee: any pass
+      can mark a node dead and dead_node will remove it
 
     Parameters
     ----------
@@ -351,9 +367,90 @@ def dead_node(root: CheckerNode) -> CheckerNode:
     Returns
     -------
     CheckerNode
-        Unchanged tree (stub implementation).
+        Tree with all dead-marked children removed.  Returned unchanged
+        (same object) if no dead nodes are found.
     """
-    return root
+
+    def _is_dead(node: CheckerNode) -> bool:
+        """Return True if node is marked dead by an upstream pass."""
+        return (
+            node.params.get("_dead") == "true"
+            or node.params.get("_const_false") == "1"
+        )
+
+    def _prune(node: CheckerNode) -> CheckerNode:
+        """Recursively prune dead children from node."""
+        if not node.children:
+            return node
+
+        # Filter out dead children first
+        live_children = tuple(c for c in node.children if not _is_dead(c))
+
+        # Recurse into surviving live children
+        new_children = tuple(_prune(c) for c in live_children)
+
+        if new_children == node.children:
+            return node  # Nothing changed — return same object
+
+        return dataclasses.replace(node, children=new_children)
+
+    return _prune(root)
+
+
+# ── Node counting utilities ───────────────────────────────────────────────
+
+
+def count_nodes(root: CheckerNode) -> int:
+    """Count all nodes in the ``CheckerNode`` tree.
+
+    Each traversal occurrence is counted independently, so a node shared by
+    multiple parents (e.g., via CSE Python-identity sharing) is counted once
+    per parent reference.  This reflects the number of *instantiation sites*
+    in the tree, not the number of unique module definitions.
+
+    Leaf nodes (no children) count as 1.  Parent nodes count as
+    ``1 + sum(count_nodes(child) for child in children)``.
+
+    Parameters
+    ----------
+    root
+        Root of the ``CheckerNode`` tree.
+
+    Returns
+    -------
+    int
+        Total node count.
+    """
+    return 1 + sum(count_nodes(c) for c in root.children)
+
+
+def count_modules(root: CheckerNode) -> int:
+    """Count the number of unique module names in the ``CheckerNode`` tree.
+
+    Corresponds to the number of distinct ``.sv`` files the emitter will
+    produce: ``emit_all()`` deduplicates by ``module_name``, so two CSE-shared
+    nodes with the same ``module_name`` count as one module here.
+
+    Parameters
+    ----------
+    root
+        Root of the ``CheckerNode`` tree.
+
+    Returns
+    -------
+    int
+        Number of unique ``module_name`` values in the tree.
+    """
+    seen: set[str] = set()
+    _collect_module_names(root, seen)
+    return len(seen)
+
+
+def _collect_module_names(node: CheckerNode, seen: set[str]) -> None:
+    """Recursively collect all unique ``module_name`` values into *seen*."""
+    seen.add(node.module_name)
+    for child in node.children:
+        _collect_module_names(child, seen)
 
 
 # ── Internal helpers ──────────────────────────────────────────────────────
