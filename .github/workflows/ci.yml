@@ -1,0 +1,66 @@
+name: CI
+
+on: [push, pull_request]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+      - name: Install Python
+        run: uv python install 3.12
+      - name: Install dependencies
+        run: uv sync --dev
+      - name: Lint (ruff)
+        run: uv run ruff check src/
+      - name: Type check (mypy)
+        run: uv run mypy --strict src/
+
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        python: ["3.12", "3.13"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+
+      - name: Install Python
+        run: uv python install ${{ matrix.python }}
+
+      - name: Install dependencies
+        run: uv sync --dev
+
+      - name: Install iverilog (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y iverilog
+
+      - name: Install iverilog (macOS)
+        if: runner.os == 'macOS'
+        run: brew install icarus-verilog
+
+      - name: Install slang (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          SLANG_VERSION="v7.0"
+          wget -q "https://github.com/MikePopoloski/slang/releases/download/${SLANG_VERSION}/slang-linux.tar.gz"
+          tar xzf slang-linux.tar.gz
+          sudo mv slang /usr/local/bin/slang
+          slang --version
+
+      - name: Install slang (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          SLANG_VERSION="v7.0"
+          wget -q "https://github.com/MikePopoloski/slang/releases/download/${SLANG_VERSION}/slang-macos.tar.gz"
+          tar xzf slang-macos.tar.gz
+          sudo mv slang /usr/local/bin/slang
+          slang --version
+
+      - name: Run tests
+        run: uv run pytest tests/ -v --timeout=120
+        env:
+          SLANG_PATH: /usr/local/bin/slang

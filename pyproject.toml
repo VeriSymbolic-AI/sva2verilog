@@ -1,12 +1,26 @@
 [project]
 name = "sva2rtl"
-version = "0.1.0"
+version = "1.0.0"
 description = "SVA to synthesizable RTL monitor compiler"
+license = {text = "BSL-1.1"}
 requires-python = ">=3.12"
+keywords = ["sva", "systemverilog", "assertion", "rtl", "formal", "eda", "monitor", "synthesis"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Topic :: Scientific/Engineering :: Electronic Design Automation (EDA)",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+]
 dependencies = [
     "click>=8.0",
     "jinja2>=3.1.6",
 ]
+
+[project.urls]
+Homepage = "https://github.com/YOUR_USER/sva2rtl"
+Repository = "https://github.com/YOUR_USER/sva2rtl"
+Issues = "https://github.com/YOUR_USER/sva2rtl/issues"
 
 [project.scripts]
 sva2rtl = "sva2rtl.cli:main"
@@ -23,6 +37,7 @@ dev = [
     "hypothesis>=6.100",
     "mypy>=1.10",
     "pytest>=9.0",
+    "pytest-timeout>=2.3",
     "ruff>=0.4",
 ]
 
@@ -42,4 +57,5 @@ python_version = "3.12"
 testpaths = ["tests"]
 markers = [
     "simulation: marks tests requiring iverilog (deselect with '-m not simulation')",
+    "integration: marks end-to-end integration tests",
 ]
