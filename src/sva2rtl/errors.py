@@ -83,3 +83,23 @@ class InternalError(SvaError):
     def __str__(self) -> str:
         base = super().__str__()
         return f"{base}\n  (this is a bug in sva2rtl — please file an issue)"
+
+
+@dataclass
+class PropertyNotFound(SvaError):
+    """Property name specified via --property not found in the AST (exit code 2).
+
+    Attributes:
+        property_name: The name the user specified with --property.
+        available:     List of property/assertion labels found in the AST.
+    """
+
+    property_name: str = ""
+    available: list[str] = field(default_factory=list)
+
+    def __str__(self) -> str:
+        avail_str = ", ".join(self.available) if self.available else "<none>"
+        return (
+            f"error SVA-E005: property '{self.property_name}' not found. "
+            f"Available: [{avail_str}]"
+        )

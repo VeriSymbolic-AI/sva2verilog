@@ -15,7 +15,7 @@ from click.testing import CliRunner
 
 from sva2rtl.cli import main
 from sva2rtl.errors import SlangNotFound, SvaCompileError, UnsupportedConstruct
-from sva2rtl.ir import SourceLoc
+from sva2rtl.ir import BoolExpr, SourceLoc
 
 # Minimal valid SV text returned by mocked emit()
 _MOCK_SV_TEXT = "module sva_my_check(input logic clk);\nendmodule\n"
@@ -95,7 +95,7 @@ def test_cli_unsupported_construct(runner: CliRunner, bool_assert_path: Path) ->
         source_loc=SourceLoc("f.sv", 3, 5),
     )
     with patch("sva2rtl.cli.invoke_slang", return_value=_MOCK_AST):
-        with patch("sva2rtl.cli.import_assertion", side_effect=exc):
+        with patch("sva2rtl.cli.import_all_assertions", side_effect=exc):
             result = runner.invoke(main, [str(bool_assert_path)])
 
     assert result.exit_code == 2
@@ -126,14 +126,15 @@ def test_cli_success_stdout(runner: CliRunner, bool_assert_path: Path) -> None:
 
     with patch("sva2rtl.cli.invoke_slang", return_value=_MOCK_AST):
         with patch(
-            "sva2rtl.cli.import_assertion",
-            return_value=(mock_node, mock_clock, "(a && b)", "my_check"),
+            "sva2rtl.cli.import_all_assertions",
+            return_value=[(mock_node, mock_clock, "(a && b)", "my_check")],
         ):
-            with patch("sva2rtl.cli.compose", return_value=mock_checker):
-                with patch("sva2rtl.cli.optimize", return_value=mock_checker):
-                    with patch("sva2rtl.cli.emit", return_value=_MOCK_SV_TEXT):
-                        with patch("sva2rtl.cli.write_output") as mock_write:
-                            result = runner.invoke(main, [str(bool_assert_path)])
+            with patch("sva2rtl.cli.normalize", return_value=mock_node):
+                with patch("sva2rtl.cli.compose", return_value=mock_checker):
+                    with patch("sva2rtl.cli.optimize", return_value=mock_checker):
+                        with patch("sva2rtl.cli.emit", return_value=_MOCK_SV_TEXT):
+                            with patch("sva2rtl.cli.write_output") as mock_write:
+                                result = runner.invoke(main, [str(bool_assert_path)])
 
     assert result.exit_code == 0
     # write_output is called with None as output_path (stdout) when -o not given
@@ -155,16 +156,17 @@ def test_cli_success_output_file(runner: CliRunner, bool_assert_path: Path) -> N
 
     with patch("sva2rtl.cli.invoke_slang", return_value=_MOCK_AST):
         with patch(
-            "sva2rtl.cli.import_assertion",
-            return_value=(mock_node, mock_clock, "(a && b)", "my_check"),
+            "sva2rtl.cli.import_all_assertions",
+            return_value=[(mock_node, mock_clock, "(a && b)", "my_check")],
         ):
-            with patch("sva2rtl.cli.compose", return_value=mock_checker):
-                with patch("sva2rtl.cli.optimize", return_value=mock_checker):
-                    with patch("sva2rtl.cli.emit", return_value=_MOCK_SV_TEXT):
-                        with patch("sva2rtl.cli.write_output") as mock_write:
-                            result = runner.invoke(
-                                main, [str(bool_assert_path), "--output", out_path]
-                            )
+            with patch("sva2rtl.cli.normalize", return_value=mock_node):
+                with patch("sva2rtl.cli.compose", return_value=mock_checker):
+                    with patch("sva2rtl.cli.optimize", return_value=mock_checker):
+                        with patch("sva2rtl.cli.emit", return_value=_MOCK_SV_TEXT):
+                            with patch("sva2rtl.cli.write_output") as mock_write:
+                                result = runner.invoke(
+                                    main, [str(bool_assert_path), "--output", out_path]
+                                )
 
     assert result.exit_code == 0
     # write_output should have been called with Path(out_path) as second arg
@@ -197,11 +199,18 @@ def test_cli_pipeline_call_order(runner: CliRunner, bool_assert_path: Path) -> N
         call_order.append("invoke_slang")
         return _MOCK_AST
 
-    def mock_import_assertion(
+    mock_node = BoolExpr(text="(a && b)", source_loc=_MOCK_SOURCE_LOC)
+    mock_clock = MagicMock()
+
+    def mock_import_all_assertions(
         *_args: object, **_kwargs: object
-    ) -> tuple[MagicMock, MagicMock, str, str]:
-        call_order.append("import_assertion")
-        return MagicMock(), MagicMock(), "(a && b)", "label"
+    ) -> list[tuple[object, object, str, str]]:
+        call_order.append("import_all_assertions")
+        return [(mock_node, mock_clock, "(a && b)", "label")]
+
+    def mock_normalize(*_args: object, **_kwargs: object) -> object:
+        call_order.append("normalize")
+        return mock_node
 
     def mock_compose(*_args: object, **_kwargs: object) -> MagicMock:
         call_order.append("compose")
@@ -223,17 +232,23 @@ def test_cli_pipeline_call_order(runner: CliRunner, bool_assert_path: Path) -> N
         call_order.append("write_output")
 
     with patch("sva2rtl.cli.invoke_slang", side_effect=mock_invoke_slang):
-        with patch("sva2rtl.cli.import_assertion", side_effect=mock_import_assertion):
-            with patch("sva2rtl.cli.compose", side_effect=mock_compose):
-                with patch("sva2rtl.cli.optimize", side_effect=mock_optimize):
-                    with patch("sva2rtl.cli.emit", side_effect=mock_emit):
-                        with patch("sva2rtl.cli.write_output", side_effect=mock_write_output):
-                            result = runner.invoke(main, [str(bool_assert_path)])
+        with patch(
+            "sva2rtl.cli.import_all_assertions", side_effect=mock_import_all_assertions
+        ):
+            with patch("sva2rtl.cli.normalize", side_effect=mock_normalize):
+                with patch("sva2rtl.cli.compose", side_effect=mock_compose):
+                    with patch("sva2rtl.cli.optimize", side_effect=mock_optimize):
+                        with patch("sva2rtl.cli.emit", side_effect=mock_emit):
+                            with patch(
+                                "sva2rtl.cli.write_output", side_effect=mock_write_output
+                            ):
+                                result = runner.invoke(main, [str(bool_assert_path)])
 
     assert result.exit_code == 0
     assert call_order == [
         "invoke_slang",
-        "import_assertion",
+        "import_all_assertions",
+        "normalize",
         "compose",
         "optimize",
         "emit",

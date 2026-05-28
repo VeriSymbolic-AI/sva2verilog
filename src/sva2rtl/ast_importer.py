@@ -130,6 +130,58 @@ def import_assertion(
     )
 
 
+def import_all_assertions(
+    ast: dict[str, Any],
+) -> list[tuple[SVANode, ClockSpec, str, str | None]]:
+    """Walk *ast* and return IR for ALL ConcurrentAssertions found.
+
+    Parameters
+    ----------
+    ast:
+        Parsed slang ``--ast-json`` dict (top-level key ``"design"``).
+
+    Returns
+    -------
+    list of (ir_node, clock_spec, original_sva_text, label)
+        One tuple per concurrent assertion found, in source order.
+
+    Raises
+    ------
+    SvaCompileError
+        When no ConcurrentAssertion is found in the AST (SVA-E001).
+    UnsupportedConstruct
+        When an unsupported SVA construct is encountered.
+    """
+    design = ast.get("design", {})
+    members: list[dict[str, Any]] = design.get("members", [])
+
+    # First pass: collect named sequence/property declarations.
+    global _DECLARATIONS
+    for member in members:
+        if member.get("kind") == "Instance":
+            body = member.get("body", {})
+            if body.get("kind") == "InstanceBody":
+                _DECLARATIONS = _collect_declarations(body.get("members", []))
+
+    # Second pass: collect ALL ConcurrentAssertions.
+    results: list[tuple[SVANode, ClockSpec, str, str | None]] = []
+    for member in members:
+        if member.get("kind") == "Instance":
+            body = member.get("body", {})
+            if body.get("kind") == "InstanceBody":
+                results.extend(
+                    _find_all_assertions_in_members(body.get("members", []))
+                )
+
+    if not results:
+        raise SvaCompileError(
+            message="No concurrent assertion found in the slang AST. "
+            "Ensure the input file contains an 'assert property (...)' statement."
+        )
+
+    return results
+
+
 def extract_dut_module(ast: dict[str, Any]) -> str:
     """Extract the top-level DUT module name from a slang ``--ast-json`` dict.
 
@@ -345,6 +397,32 @@ def _find_assertion_in_members(
                 return result
 
     return None
+
+
+def _find_all_assertions_in_members(
+    members: list[dict[str, Any]],
+) -> list[tuple[SVANode, ClockSpec, str, str | None]]:
+    """Recursively search *members* and return ALL ConcurrentAssertions found."""
+    results: list[tuple[SVANode, ClockSpec, str, str | None]] = []
+    for member in members:
+        kind = member.get("kind", "")
+
+        if kind == "ConcurrentAssertion":
+            results.append(_import_concurrent_assertion(member, label=None))
+
+        # Labeled block: { "kind": "Block", "block": "ADDRESS my_check", ... }
+        if kind == "Block":
+            label = _extract_label(member)
+            body = member.get("body", {})
+            stmts: list[dict[str, Any]] = body.get("statements", [])
+            for stmt in stmts:
+                if stmt.get("kind") == "ConcurrentAssertion":
+                    results.append(_import_concurrent_assertion(stmt, label=label))
+            # Recurse into nested members if present
+            sub = body.get("members", [])
+            results.extend(_find_all_assertions_in_members(sub))
+
+    return results
 
 
 def _extract_label(block: dict[str, Any]) -> str | None:
