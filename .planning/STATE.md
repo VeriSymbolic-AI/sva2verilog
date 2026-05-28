@@ -2,22 +2,21 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-current_phase: 5
+current_phase: 06
 status: ready_to_plan
-last_updated: 2026-05-28T10:07:09.212Z
+last_updated: "2026-05-28T12:13:59.024Z"
 progress:
   total_phases: 6
-  completed_phases: 4
+  completed_phases: 5
   total_plans: 18
   completed_plans: 18
-  percent: 67
-stopped_at: Phase 05 complete (3/3) — ready to discuss Phase 6
+  percent: 83
 ---
 
 # Project State: sva2rtl
 
 **Last updated:** 2026-05-28
-**Current phase:** 6
+**Current phase:** 06
 **Mode:** mvp
 
 ---
@@ -30,8 +29,8 @@ stopped_at: Phase 05 complete (3/3) — ready to discuss Phase 6
 | Requirements | ✅ Defined (40 v1 requirements, traceability updated) |
 | Research | ✅ Complete (HIGH confidence across all areas) |
 | Architecture | ✅ Documented (token-passing, 9-stage pipeline) |
-| Code | ✅ Phase 1 complete — all 5 plans done; sva2rtl bool_assert.sv works end-to-end; Phase 3 complete — all 4 plans done; Phase 4 complete — all 3 plans done; normalizer, structural hash, --dump-tree; 502 tests pass |
-| Tests | ✅ 502 tests collected (502 pass, 15 skip); mypy --strict + ruff clean |
+| Code | ✅ Phase 1-5 complete — full optimization pipeline; sva2rtl compiles SVA to optimized RTL; 577 tests pass |
+| Tests | ✅ 577 tests (577 pass, 17 skip); mypy --strict + ruff clean |
 | CI | ❌ Not configured |
 
 ---
@@ -41,10 +40,10 @@ stopped_at: Phase 05 complete (3/3) — ready to discuss Phase 6
 | Phase | Name | Status | Requirements |
 |-------|------|--------|-------------|
 | 1 | Foundation: IR + Slang + Boolean → SV Monitor | ✅ Complete (5/5 plans) | PARSE-01/02/04/05, OUT-01/02/03/07/08, CLI-05/06, TEST-01 |
-| 2 | Core Sequential Operators (##N, |->)  | 🔲 Not started | OP-01/02/03/04, OUT-06, TEST-02/05/06 |
+| 2 | Core Sequential Operators (##N, |->) | ✅ Complete (3/3 plans) | OP-01/02/03/04, OUT-06, TEST-02/05/06 |
 | 3 | Remaining Tier 1 + Sim Validation | ✅ Complete (4/4 plans) | OP-05–10, PARSE-03, OUT-04, TEST-03/04 |
 | 4 | Normalization + Composition Engine | ✅ Complete (3/3 plans) | PIPE-01/02 |
-| 5 | Optimization Passes | 📋 Planned (3 plans) | PIPE-03/04/05 |
+| 5 | Optimization Passes | ✅ Complete (3/3 plans) | PIPE-03/04/05 |
 | 6 | CLI Polish + Verilog-2001 + Integration | 🔲 Not started | CLI-01–04, OUT-05 |
 
 ---
