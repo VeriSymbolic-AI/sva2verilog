@@ -7,7 +7,7 @@ Exit code mapping (requirement CLI-05):
     3 — SlangNotFound (binary absent from PATH or --slang-path)
 
 Pipeline order (requirement CLI-06):
-    invoke_slang -> import_assertion -> normalize -> compose -> emit -> write_output
+    invoke_slang -> import_assertion -> normalize -> compose -> optimize -> emit -> write_output
 """
 
 from __future__ import annotations
@@ -23,6 +23,7 @@ from sva2rtl.emitter import emit, emit_all, write_output, write_output_dir
 from sva2rtl.errors import SlangNotFound, SvaError, UnsupportedConstruct
 from sva2rtl.frontend import invoke_slang
 from sva2rtl.normalizer import normalize
+from sva2rtl.optimizer import optimize
 
 
 @click.command()
@@ -47,7 +48,19 @@ from sva2rtl.normalizer import normalize
     default=False,
     help="Print CheckerNode composition tree and exit (no RTL emitted)",
 )
-def main(input_file: str, output: str | None, slang_path: str, dump_tree: bool) -> None:
+@click.option(
+    "--no-optimize",
+    is_flag=True,
+    default=False,
+    help="Skip optimization passes (emit unoptimized output)",
+)
+def main(
+    input_file: str,
+    output: str | None,
+    slang_path: str,
+    dump_tree: bool,
+    no_optimize: bool,
+) -> None:
     """Compile an SVA property file to a synthesizable SystemVerilog monitor.
 
     INPUT_FILE is a SystemVerilog file containing one or more concurrent
@@ -59,6 +72,9 @@ def main(input_file: str, output: str | None, slang_path: str, dump_tree: bool) 
         raw_node = node
         node = normalize(node)
         checker_node = compose(node, clock, label, original_text)
+
+        if not no_optimize:
+            checker_node = optimize(checker_node)
 
         if dump_tree:
             from sva2rtl.composer import compute_hash_map
