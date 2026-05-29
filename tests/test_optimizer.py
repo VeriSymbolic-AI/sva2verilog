@@ -827,6 +827,10 @@ _SIM_PARITY_FIXTURES: list[str] = [
     "delay_fixed",
     "delay_range",
     "rep_fixed",
+    "rose",                # edge-detect: CSE candidate for shared FFs
+    "fell",                # edge-detect variant
+    "implication_overlap", # bit-vector with children: complex composition
+    "disable_iff",         # disable gate wrapping: CSE interaction
 ]
 
 
