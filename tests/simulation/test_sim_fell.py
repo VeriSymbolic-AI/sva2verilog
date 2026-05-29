@@ -14,7 +14,7 @@ from sva2rtl.ast_importer import import_assertion
 from sva2rtl.behavioral_oracle import SVABehavioralSim
 from sva2rtl.composer import compose
 from sva2rtl.emitter import emit_all
-
+from sva2rtl.ir import CheckerNode
 from tests.simulation.tb_generator import (
     extra_inputs_from_checker,
     generate_testbench,
@@ -26,14 +26,14 @@ pytestmark = pytest.mark.simulation
 _FIXTURES = Path(__file__).parent.parent / "fixtures"
 
 
-def _build_checker():  # type: ignore[no-untyped-def]
+def _build_checker() -> CheckerNode:
     ast = json.loads((_FIXTURES / "fell.json").read_text(encoding="utf-8"))
     node, clock, text, label = import_assertion(ast)
     return compose(node, clock, label, text)
 
 
 def _run_both(
-    checker,  # type: ignore[no-untyped-def]
+    checker: CheckerNode,
     stimulus: list[dict],
     tmp_path: Path,
 ) -> tuple[list[dict], list[dict]]:

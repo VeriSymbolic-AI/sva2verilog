@@ -13,7 +13,7 @@ jobs:
       - name: Install dependencies
         run: uv sync --dev
       - name: Lint (ruff)
-        run: uv run ruff check src/
+        run: uv run ruff check src/ tests/
       - name: Type check (mypy)
         run: uv run mypy --strict src/
 
@@ -45,6 +45,8 @@ jobs:
       - name: Install slang (Linux)
         if: runner.os == 'Linux'
         run: |
+          # Pin to v7.0 — JSON AST fixtures were generated against this version.
+          # Update when migrating to newer slang AST schema.
           SLANG_VERSION="v7.0"
           wget -q "https://github.com/MikePopoloski/slang/releases/download/${SLANG_VERSION}/slang-linux.tar.gz"
           tar xzf slang-linux.tar.gz

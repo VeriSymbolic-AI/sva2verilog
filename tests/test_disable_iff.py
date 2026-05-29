@@ -7,10 +7,9 @@ from pathlib import Path
 
 import pytest
 
-from sva2rtl import __version__
 from sva2rtl.ast_importer import import_assertion
 from sva2rtl.composer import compose
-from sva2rtl.emitter import emit, emit_all
+from sva2rtl.emitter import emit_all
 from sva2rtl.ir import BoolExpr, CheckerNode, DisableIff, SourceLoc
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"

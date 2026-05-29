@@ -40,7 +40,7 @@ import pytest
 from sva2rtl.ast_importer import import_assertion
 from sva2rtl.composer import compose
 from sva2rtl.emitter import emit_all
-
+from sva2rtl.ir import CheckerNode
 from tests.simulation.tb_generator import (
     TEMPLATES_WITH_OVERFLOW,
     extra_inputs_from_checker,
@@ -56,7 +56,7 @@ _FIXTURES = Path(__file__).parent.parent / "fixtures"
 # ── Fixture loading ────────────────────────────────────────────────────────────
 
 
-def _build(fixture_name: str):  # type: ignore[no-untyped-def]
+def _build(fixture_name: str) -> CheckerNode:
     ast = json.loads((_FIXTURES / fixture_name).read_text(encoding="utf-8"))
     node, clock, text, label = import_assertion(ast)
     return compose(node, clock, label, text)
@@ -66,7 +66,7 @@ def _build(fixture_name: str):  # type: ignore[no-untyped-def]
 
 
 def _run_stimulus(
-    checker,  # type: ignore[no-untyped-def]
+    checker: CheckerNode,
     stimulus: list[dict[str, Any]],
     tmp_path: Path,
 ) -> list[dict]:

@@ -17,7 +17,6 @@ import pytest
 
 from sva2rtl.ir import BoolExpr, ClockSpec, SourceLoc
 
-
 # ── Custom marker registration ─────────────────────────────────────────────
 
 

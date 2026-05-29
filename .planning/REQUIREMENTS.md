@@ -34,25 +34,25 @@ Requirements for initial release. Each maps to roadmap phases.
 - [x] **OUT-02**: All monitor outputs are registered (no combinational glitches on pass/fail) ✅ Phase 1
 - [x] **OUT-03**: Every flip-flop has synchronous reset to idle state ✅ Phase 1
 - [x] **OUT-04**: bind statement file generated for non-invasive DUT attachment ✅ Phase 3
-- [ ] **OUT-05**: `--verilog` flag emits Verilog-2001 compatible output (wire/reg, always @(posedge))
+- [x] **OUT-05**: `--verilog` flag emits Verilog-2001 compatible output (wire/reg, always @(posedge)) ✅ Phase 6
 - [x] **OUT-06**: Debug outputs: `attempt_fired` (antecedent triggered at least once), `overflow_flag` (pending threads exceeded capacity) ✅ Phase 2
 - [x] **OUT-07**: Generated module names derived from property label (not generic monitor_0/1/2) ✅ Phase 1
 - [x] **OUT-08**: Original SVA property text emitted as comment at top of generated module ✅ Phase 1
 
 ### Internal Pipeline
 
-- [ ] **PIPE-01**: IR normalization pass rewrites exotic forms to canonical primitives (|=> to ##1 |->; flatten chains; range canonicalization)
-- [ ] **PIPE-02**: Composition engine walks normalized IR and builds CheckerNode tree with token-passing signal wiring
-- [ ] **PIPE-03**: CSE optimization: structural hash on CheckerNode, identical subtrees share hardware instances
-- [ ] **PIPE-04**: Counter merging: range counters with same parameters share single counter module
-- [ ] **PIPE-05**: Dead-state elimination: prune unreachable nodes from CheckerNode tree
+- [x] **PIPE-01**: IR normalization pass rewrites exotic forms to canonical primitives (|=> to ##1 |->; flatten chains; range canonicalization) ✅ Phase 4
+- [x] **PIPE-02**: Composition engine walks normalized IR and builds CheckerNode tree with token-passing signal wiring ✅ Phase 4
+- [x] **PIPE-03**: CSE optimization: structural hash on CheckerNode, identical subtrees share hardware instances ✅ Phase 5
+- [x] **PIPE-04**: Counter merging: range counters with same parameters share single counter module ✅ Phase 5
+- [x] **PIPE-05**: Dead-state elimination: prune unreachable nodes from CheckerNode tree ✅ Phase 5
 
 ### CLI & Developer Experience
 
-- [ ] **CLI-01**: Single entry point `sva2rtl <input.sv>` with --output, --property, --verilog, --slang-path flags
-- [ ] **CLI-02**: `--dump-ast` prints slang JSON AST and exits
-- [ ] **CLI-03**: `--dump-ir` prints normalized SVA IR tree and exits
-- [ ] **CLI-04**: `--dump-tree` prints CheckerNode tree and exits
+- [x] **CLI-01**: Single entry point `sva2rtl <input.sv>` with --output, --property, --verilog, --slang-path flags ✅ Phase 6
+- [x] **CLI-02**: `--dump-ast` prints slang JSON AST and exits ✅ Phase 6
+- [x] **CLI-03**: `--dump-ir` prints normalized SVA IR tree and exits ✅ Phase 6
+- [x] **CLI-04**: `--dump-tree` prints CheckerNode tree and exits ✅ Phase 6
 - [x] **CLI-05**: Exit code 0 (success), 1 (compile error), 2 (unsupported construct), 3 (slang not found) ✅ Phase 1
 - [x] **CLI-06**: Unsupported constructs produce clear named error with suggestion (never silent miscompile) ✅ Phase 1
 
@@ -108,46 +108,46 @@ Deferred to future release. Tracked but not in current roadmap.
 
 | Requirement | Phase | Phase Name | Status |
 |-------------|-------|------------|--------|
-| PARSE-01 | Phase 1 | Foundation | Pending |
-| PARSE-02 | Phase 1 | Foundation | Pending |
-| PARSE-03 | Phase 3 | Remaining Tier 1 + Sim Validation | Pending |
-| PARSE-04 | Phase 1 | Foundation | Pending |
-| PARSE-05 | Phase 1 | Foundation | Pending |
-| OP-01 | Phase 2 | Core Sequential Operators | Pending |
-| OP-02 | Phase 2 | Core Sequential Operators | Pending |
-| OP-03 | Phase 2 | Core Sequential Operators | Pending |
-| OP-04 | Phase 2 | Core Sequential Operators | Pending |
-| OP-05 | Phase 3 | Remaining Tier 1 + Sim Validation | Pending |
-| OP-06 | Phase 3 | Remaining Tier 1 + Sim Validation | Pending |
-| OP-07 | Phase 3 | Remaining Tier 1 + Sim Validation | Pending |
-| OP-08 | Phase 3 | Remaining Tier 1 + Sim Validation | Pending |
-| OP-09 | Phase 3 | Remaining Tier 1 + Sim Validation | Pending |
-| OP-10 | Phase 3 | Remaining Tier 1 + Sim Validation | Pending |
-| OUT-01 | Phase 1 | Foundation | Pending |
-| OUT-02 | Phase 1 | Foundation | Pending |
-| OUT-03 | Phase 1 | Foundation | Pending |
-| OUT-04 | Phase 3 | Remaining Tier 1 + Sim Validation | Pending |
-| OUT-05 | Phase 6 | CLI Polish + Verilog-2001 | Pending |
-| OUT-06 | Phase 2 | Core Sequential Operators | Pending |
-| OUT-07 | Phase 1 | Foundation | Pending |
-| OUT-08 | Phase 1 | Foundation | Pending |
-| PIPE-01 | Phase 4 | Normalization + Composition Engine | Pending |
-| PIPE-02 | Phase 4 | Normalization + Composition Engine | Pending |
-| PIPE-03 | Phase 5 | Optimization Passes | Pending |
-| PIPE-04 | Phase 5 | Optimization Passes | Pending |
-| PIPE-05 | Phase 5 | Optimization Passes | Pending |
-| CLI-01 | Phase 6 | CLI Polish + Verilog-2001 | Pending |
-| CLI-02 | Phase 6 | CLI Polish + Verilog-2001 | Pending |
-| CLI-03 | Phase 6 | CLI Polish + Verilog-2001 | Pending |
-| CLI-04 | Phase 6 | CLI Polish + Verilog-2001 | Pending |
-| CLI-05 | Phase 1 | Foundation | Pending |
-| CLI-06 | Phase 1 | Foundation | Pending |
-| TEST-01 | Phase 1 | Foundation | Pending |
-| TEST-02 | Phase 2 | Core Sequential Operators | Pending |
-| TEST-03 | Phase 3 | Remaining Tier 1 + Sim Validation | Pending |
-| TEST-04 | Phase 3 | Remaining Tier 1 + Sim Validation | Pending |
-| TEST-05 | Phase 2 | Core Sequential Operators | Pending |
-| TEST-06 | Phase 2 | Core Sequential Operators | Pending |
+| PARSE-01 | Phase 1 | Foundation | Complete ✅ |
+| PARSE-02 | Phase 1 | Foundation | Complete ✅ |
+| PARSE-03 | Phase 3 | Remaining Tier 1 + Sim Validation | Complete ✅ |
+| PARSE-04 | Phase 1 | Foundation | Complete ✅ |
+| PARSE-05 | Phase 1 | Foundation | Complete ✅ |
+| OP-01 | Phase 2 | Core Sequential Operators | Complete ✅ |
+| OP-02 | Phase 2 | Core Sequential Operators | Complete ✅ |
+| OP-03 | Phase 2 | Core Sequential Operators | Complete ✅ |
+| OP-04 | Phase 2 | Core Sequential Operators | Complete ✅ |
+| OP-05 | Phase 3 | Remaining Tier 1 + Sim Validation | Complete ✅ |
+| OP-06 | Phase 3 | Remaining Tier 1 + Sim Validation | Complete ✅ |
+| OP-07 | Phase 3 | Remaining Tier 1 + Sim Validation | Complete ✅ |
+| OP-08 | Phase 3 | Remaining Tier 1 + Sim Validation | Complete ✅ |
+| OP-09 | Phase 3 | Remaining Tier 1 + Sim Validation | Complete ✅ |
+| OP-10 | Phase 3 | Remaining Tier 1 + Sim Validation | Complete ✅ |
+| OUT-01 | Phase 1 | Foundation | Complete ✅ |
+| OUT-02 | Phase 1 | Foundation | Complete ✅ |
+| OUT-03 | Phase 1 | Foundation | Complete ✅ |
+| OUT-04 | Phase 3 | Remaining Tier 1 + Sim Validation | Complete ✅ |
+| OUT-05 | Phase 6 | CLI Polish + Verilog-2001 | Complete ✅ |
+| OUT-06 | Phase 2 | Core Sequential Operators | Complete ✅ |
+| OUT-07 | Phase 1 | Foundation | Complete ✅ |
+| OUT-08 | Phase 1 | Foundation | Complete ✅ |
+| PIPE-01 | Phase 4 | Normalization + Composition Engine | Complete ✅ |
+| PIPE-02 | Phase 4 | Normalization + Composition Engine | Complete ✅ |
+| PIPE-03 | Phase 5 | Optimization Passes | Complete ✅ |
+| PIPE-04 | Phase 5 | Optimization Passes | Complete ✅ |
+| PIPE-05 | Phase 5 | Optimization Passes | Complete ✅ |
+| CLI-01 | Phase 6 | CLI Polish + Verilog-2001 | Complete ✅ |
+| CLI-02 | Phase 6 | CLI Polish + Verilog-2001 | Complete ✅ |
+| CLI-03 | Phase 6 | CLI Polish + Verilog-2001 | Complete ✅ |
+| CLI-04 | Phase 6 | CLI Polish + Verilog-2001 | Complete ✅ |
+| CLI-05 | Phase 1 | Foundation | Complete ✅ |
+| CLI-06 | Phase 1 | Foundation | Complete ✅ |
+| TEST-01 | Phase 1 | Foundation | Complete ✅ |
+| TEST-02 | Phase 2 | Core Sequential Operators | Complete ✅ |
+| TEST-03 | Phase 3 | Remaining Tier 1 + Sim Validation | Complete ✅ |
+| TEST-04 | Phase 3 | Remaining Tier 1 + Sim Validation | Complete ✅ |
+| TEST-05 | Phase 2 | Core Sequential Operators | Complete ✅ |
+| TEST-06 | Phase 2 | Core Sequential Operators | Complete ✅ |
 
 **Coverage:**
 - v1 requirements: 40 total

@@ -40,7 +40,6 @@ from sva2rtl.ast_importer import import_assertion
 from sva2rtl.composer import compose
 from sva2rtl.emitter import emit_all
 from sva2rtl.ir import CheckerNode
-
 from tests.simulation.tb_generator import (
     extra_inputs_from_checker,
     generate_testbench,

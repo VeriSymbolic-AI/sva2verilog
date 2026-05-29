@@ -3,6 +3,7 @@ name = "sva2rtl"
 version = "1.0.0"
 description = "SVA to synthesizable RTL monitor compiler"
 license = {text = "BSL-1.1"}
+readme = "README.md"
 requires-python = ">=3.12"
 keywords = ["sva", "systemverilog", "assertion", "rtl", "formal", "eda", "monitor", "synthesis"]
 classifiers = [
@@ -18,9 +19,9 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/YOUR_USER/sva2rtl"
-Repository = "https://github.com/YOUR_USER/sva2rtl"
-Issues = "https://github.com/YOUR_USER/sva2rtl/issues"
+Homepage = "https://github.com/allenenli/sva2rtl"
+Repository = "https://github.com/allenenli/sva2rtl"
+Issues = "https://github.com/allenenli/sva2rtl/issues"
 
 [project.scripts]
 sva2rtl = "sva2rtl.cli:main"
