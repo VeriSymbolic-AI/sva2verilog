@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 current_phase: 06
-status: milestone_complete
-last_updated: 2026-06-01T16:13:26.631Z
+status: Awaiting next milestone
+last_updated: "2026-06-01T16:27:38.402Z"
+last_activity: 2026-06-01 — Milestone v1.0 completed and archived
 progress:
   total_phases: 6
-  completed_phases: 5
+  completed_phases: 6
   total_plans: 21
   completed_plans: 21
-  percent: 83
-stopped_at: Milestone complete (Phase 06 was final phase)
+  percent: 100
 ---
 
 # Project State: sva2rtl
@@ -147,3 +147,14 @@ stopped_at: Milestone complete (Phase 06 was final phase)
 
 *State file created: 2026-05-25*
 *Updated automatically at phase transitions and milestone boundaries*
+
+## Current Position
+
+Phase: Milestone v1.0 complete
+Plan: —
+Status: Awaiting next milestone
+Last activity: 2026-06-01 — Milestone v1.0 completed and archived
+
+## Operator Next Steps
+
+- Start the next milestone with /gsd-new-milestone
