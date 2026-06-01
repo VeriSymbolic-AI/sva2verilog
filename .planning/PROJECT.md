@@ -95,4 +95,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-25 after initialization*
+*Last updated: 2026-06-02 after Phase 6 (CLI Polish + Verilog-2001 + Integration Testing) complete — v1.0 milestone done; tool is releasable.*
