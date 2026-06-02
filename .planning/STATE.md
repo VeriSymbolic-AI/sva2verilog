@@ -2,9 +2,10 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Hardening Release
+current_phase: —
 status: planning
-last_updated: "2026-06-02T08:17:34.188Z"
-last_activity: 2026-06-02
+last_updated: "2026-06-02T13:07:09.696Z"
+last_activity: 2026-06-02 — Roadmap created
 progress:
   total_phases: 7
   completed_phases: 0
