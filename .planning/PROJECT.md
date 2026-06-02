@@ -8,6 +8,24 @@ An open-source SVA (SystemVerilog Assertion) to synthesizable RTL compiler. `sva
 
 Turn any SVA property into a correct, area-efficient synthesizable hardware monitor — something no open-source tool does today.
 
+## Current Milestone: v1.1 Hardening Release
+
+**Goal:** Close all carry-forward debt from v1.0, refactor Verilog-2001 template duplication at the root cause, add Verilator as a second simulation oracle, and ship `v1.1.0` as a publicly-tagged maintenance release.
+
+**Target features:**
+- Retroactive Nyquist VALIDATION.md sweep across all 6 v1.0 phases
+- Phase 03 HIGH defect fixes (H-01..H-04) — including `attempt_fired_q` / `disable_i` root-cause fix
+- Phase 06 HIGH defect fixes (5 issues — `--dump-tree`, `--property`, `--output`, `--verilog`/dump interaction)
+- Verilog-2001 always-block body deduplication via Jinja2 macros (22× → 1)
+- Phase 06 MEDIUM (10) + LOW (9) advisory cleanup
+- Version sync (`__init__.py` → 1.1.0, aligned with `pyproject.toml`)
+- Verilator parity: mirror the iverilog simulation oracle; CI matrix expands by simulator axis
+- Public tag `v1.1.0` with GitHub release notes
+
+**Validation strategy:** Co-sim only — every hardening fix must pass both iverilog and Verilator on the existing oracle suite. No new formal/equivalence-checking tooling.
+
+**Explicitly NOT in v1.1:** Tier 2 SVA operators (`[->N]`, `[=N]`, `$changed`, `throughout`, `within`, `intersect`, `first_match`, sequence `and`/`or`) — defer to v1.2. Formal equivalence checking (yosys/sby) — defer. C++ rewrite — defer to v2.
+
 ## Current State
 
 **Shipped: v1.0 MVP — 2026-06-01.** Tag: `v1.0`. ~4.0K LOC src + ~10.7K LOC tests + ~1.2K LOC Jinja2 templates across 6 phases / 21 plans. 736 tests pass on Ubuntu/macOS × Py 3.12/3.13 with iverilog and slang prebuilt binaries in CI. Tool is releasable but a hardening pass before public tagging is recommended (see Known Issues).
@@ -119,4 +137,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-06-02 after v1.0 milestone — v1.0 shipped; debt visible; v1.1 hardening pass on deck.*
+*Last updated: 2026-06-02 — v1.1 Hardening Release milestone started.*
