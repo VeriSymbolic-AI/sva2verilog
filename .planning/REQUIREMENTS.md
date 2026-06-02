@@ -93,35 +93,34 @@ Explicit exclusions, with reasoning:
 
 ## Traceability
 
-Phase mapping populated by `gsd-roadmapper` after roadmap approval.
-
 | REQ-ID | Phase | Plan | Status |
 |--------|-------|------|--------|
-| HARDEN-01 | TBD | TBD | not started |
-| HARDEN-02 | TBD | TBD | not started |
-| HARDEN-03 | TBD | TBD | not started |
-| HARDEN-04 | TBD | TBD | not started |
-| HARDEN-05 | TBD | TBD | not started |
-| HARDEN-06 | TBD | TBD | not started |
-| HARDEN-07 | TBD | TBD | not started |
-| HARDEN-08 | TBD | TBD | not started |
-| REFACTOR-01 | TBD | TBD | not started |
-| REFACTOR-02 | TBD | TBD | not started |
-| REFACTOR-03 | TBD | TBD | not started |
-| VALIDATE-01 | TBD | TBD | not started |
-| VALIDATE-02 | TBD | TBD | not started |
-| VALIDATE-03 | TBD | TBD | not started |
-| VALIDATE-04 | TBD | TBD | not started |
-| POLISH-01 | TBD | TBD | not started |
-| POLISH-02 | TBD | TBD | not started |
-| POLISH-03 | TBD | TBD | not started |
-| POLISH-04 | TBD | TBD | not started |
-| RELEASE-01 | TBD | TBD | not started |
-| RELEASE-02 | TBD | TBD | not started |
-| RELEASE-03 | TBD | TBD | not started |
+| VALIDATE-01 | 1 | TBD | not started |
+| VALIDATE-02 | 2 | TBD | not started |
+| VALIDATE-03 | 2 | TBD | not started |
+| VALIDATE-04 | 2 | TBD | not started |
+| REFACTOR-01 | 3 | TBD | not started |
+| REFACTOR-02 | 3 | TBD | not started |
+| REFACTOR-03 | 3 | TBD | not started |
+| HARDEN-01 | 3 | TBD | not started |
+| HARDEN-02 | 4 | TBD | not started |
+| HARDEN-03 | 4 | TBD | not started |
+| HARDEN-04 | 4 | TBD | not started |
+| HARDEN-05 | 5 | TBD | not started |
+| HARDEN-06 | 5 | TBD | not started |
+| HARDEN-07 | 5 | TBD | not started |
+| HARDEN-08 | 5 | TBD | not started |
+| POLISH-01 | 6 | TBD | not started |
+| POLISH-02 | 6 | TBD | not started |
+| POLISH-03 | 6 | TBD | not started |
+| POLISH-04 | 6 | TBD | not started |
+| RELEASE-01 | 7 | TBD | not started |
+| RELEASE-02 | 7 | TBD | not started |
+| RELEASE-03 | 7 | TBD | not started |
 
-**Total:** 22 v1.1 requirements across 5 categories.
+**Total:** 22 v1.1 requirements across 5 categories. Coverage: 22/22 mapped to phases 1–7. ✅
 
 ---
 
 *REQUIREMENTS.md created: 2026-06-02 — milestone v1.1 Hardening Release.*
+*Traceability table populated: 2026-06-02 — roadmap created (7 phases, reset numbering from Phase 1).*
