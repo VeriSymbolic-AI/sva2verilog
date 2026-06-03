@@ -50,6 +50,7 @@
 | Constant-false property: `0 |-> 1` — vacuous, attempt_fired stays low | `STATIC:S1.2` | — | BLOCKING |
 | Multi-bit boolean signal as condition (not just 1-bit) | `STATIC:S1.3` | — | ADVISORY |
 | Named signal with `$rose`/`$fell` not in this phase (would be an IR error) | `STATIC:S1.4` | — | ADVISORY |
+| Observable monitor state: `attempt_fired`, `pending_count`, `overflow_flag` exposed as debug outputs | `PITFALLS:P5.4` | — | BLOCKING |
 
 ---
 
