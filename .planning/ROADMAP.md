@@ -27,7 +27,7 @@ total_requirements: 22
 
 | Phase | Name | Requirements | Plan estimate |
 |-------|------|-------------|---------------|
-| 1 | 1/2 | In Progress|  |
+| 1 | 2/2 | Complete   | 2026-06-03 |
 | 2 | Verilator Parity + CI Expansion | VALIDATE-02, VALIDATE-03, VALIDATE-04 | 3 |
 | 3 | V2001 Template Dedup + HARDEN-01 Root Fix | REFACTOR-01, REFACTOR-02, REFACTOR-03, HARDEN-01 | 4 |
 | 4 | Phase 03 Remaining HIGH Fixes | HARDEN-02, HARDEN-03, HARDEN-04 | 3 |
