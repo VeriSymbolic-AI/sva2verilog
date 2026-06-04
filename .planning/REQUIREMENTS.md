@@ -50,6 +50,23 @@ last_updated: 2026-06-02
 - [ ] **POLISH-03**: All 9 Phase 06 LOW advisory findings are either closed or formally deferred — review board reaches zero open HIGH/MEDIUM
 - [ ] **POLISH-04**: Cross-phase code review of the v1.1 hardening diff produces zero new HIGH-severity findings
 
+### Validate — Nyquist Gap Remediation (Phase 1 Audit)
+
+The following BLOCKING Nyquist gaps were identified during the retroactive v1.0 audit (Phase 01 Plan 02). Each NYQ-XX maps to a hardening phase:
+
+- [ ] **NYQ-01**: User has confidence that a Boolean property with a never-firing antecedent reports `pass=0, fail=0` and `attempt_fired=0` (vacuous satisfaction — P1.1). Dedicated test needed.
+- [ ] **NYQ-02**: User compiling a property with `strong()` receives a compile error — never a silent weakening to safety semantics (P1.8).
+- [ ] **NYQ-10**: User compiling `##[M:N]` with `M>N` receives a compile error or correctly normalized bounds — never a silent miscompile with inverted range delay (STATIC:S3.3).
+- [ ] **NYQ-11**: User has confidence that fixed-delay `##N` handles concurrent attempts correctly (antecedent fires every cycle for 2×N cycles) — dedicated stress test needed (PITFALLS:P3.1).
+- [ ] **NYQ-20**: User compiling any SVA property using `disable iff` has `attempt_fired` correctly latched on every triggering attempt — `attempt_fired_q` is not spuriously cleared by `disable_i` (HARDEN-01 / H-03 root cause).
+- [ ] **NYQ-21**: User compiling `[*M:N]` with `M>N` receives a compile error — never a silent miscompile with inverted repetition bounds (STATIC:S6.5).
+- [ ] **NYQ-22**: User compiling `$past(sig, n)` with n exceeding practical pipeline depth receives a clear warning or error — not a silent shift-register exhaustion (STATIC:S8.3).
+- [ ] **NYQ-30**: User has confidence that the token-passing composition engine correctly duplicates tokens at `or` nodes — no branch is silently dropped (P8.2 / STATIC:S4.1g). Programmatic token-count invariant check needed.
+- [ ] **NYQ-50**: User running `--dump-tree` on a multi-property file sees an `unoptimized_checker` block for every property, not just the first (HARDEN-05).
+- [ ] **NYQ-51**: User can target an unlabeled assertion via `--property` (by source line or anonymous index) — the flag does not silently fail (HARDEN-06).
+- [ ] **NYQ-52**: User invoking `--output PATH` gets unambiguous behavior — file when single-property, directory when multi-property; mismatched modes produce a clear error (HARDEN-07).
+- [ ] **NYQ-53**: User combining `--verilog` with `--dump-ast` / `--dump-ir` / `--dump-tree` either applies the V2001 mode to dumps or receives an explicit "incompatible flags" error — no silent ignoring (HARDEN-08).
+
 ### Release — Public v1.1.0 tag
 
 - [ ] **RELEASE-01**: Repository carries an annotated git tag `v1.1.0` pointing at the merged hardening release
@@ -114,11 +131,23 @@ Explicit exclusions, with reasoning:
 | POLISH-02 | 6 | TBD | not started |
 | POLISH-03 | 6 | TBD | not started |
 | POLISH-04 | 6 | TBD | not started |
+| NYQ-01 | 3 | TBD | not started |
+| NYQ-02 | 4 | TBD | not started |
+| NYQ-10 | 4 | TBD | not started |
+| NYQ-11 | 3 | TBD | not started |
+| NYQ-20 | 3 | TBD | not started |
+| NYQ-21 | 4 | TBD | not started |
+| NYQ-22 | 3 | TBD | not started |
+| NYQ-30 | 4 | TBD | not started |
+| NYQ-50 | 5 | TBD | not started |
+| NYQ-51 | 5 | TBD | not started |
+| NYQ-52 | 5 | TBD | not started |
+| NYQ-53 | 5 | TBD | not started |
 | RELEASE-01 | 7 | TBD | not started |
 | RELEASE-02 | 7 | TBD | not started |
 | RELEASE-03 | 7 | TBD | not started |
 
-**Total:** 22 v1.1 requirements across 5 categories. Coverage: 22/22 mapped to phases 1–7. ✅
+**Total:** 34 v1.1 requirements (22 original + 12 Nyquist BLOCKING gaps). Coverage: 34/34 mapped to phases 1–7. ✅
 
 ---
 
