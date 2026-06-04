@@ -38,7 +38,7 @@ last_updated: 2026-06-02
 
 ### Validate — Retroactive Nyquist sweeps + Verilator parity
 
-- [ ] **VALIDATE-01**: User reviewing `.planning/milestones/v1.0-phases/0N-*/` finds a `*-VALIDATION.md` Nyquist coverage report for every v1.0 phase (Phases 1–6) — generated retroactively at the start of v1.1
+- [x] **VALIDATE-01**: User reviewing `.planning/milestones/v1.0-phases/0N-*/` finds a `*-VALIDATION.md` Nyquist coverage report for every v1.0 phase (Phases 1–6) — generated retroactively at the start of v1.1
 - [ ] **VALIDATE-02**: User running the simulation oracle suite under Verilator gets the same 65 pass/fail outcomes as iverilog (parity established on existing tests)
 - [ ] **VALIDATE-03**: CI matrix expands to include a Verilator axis — Ubuntu/macOS × Py 3.12/3.13 × {iverilog, Verilator} — and all jobs are green before merge
 - [ ] **VALIDATE-04**: User compiling any SVA property and simulating the result has confidence the monitor passes both iverilog and Verilator (documented in README and verified in CI)
@@ -112,7 +112,7 @@ Explicit exclusions, with reasoning:
 
 | REQ-ID | Phase | Plan | Status |
 |--------|-------|------|--------|
-| VALIDATE-01 | 1 | TBD | not started |
+| VALIDATE-01 | 1 | 02 | complete |
 | VALIDATE-02 | 2 | TBD | not started |
 | VALIDATE-03 | 2 | TBD | not started |
 | VALIDATE-04 | 2 | TBD | not started |

@@ -2,22 +2,22 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: — Hardening Release
-current_phase: 01
-status: executing
-last_updated: "2026-06-03T11:57:55.754Z"
-last_activity: 2026-06-03 -- Phase 01 execution started
+current_phase: 02
+status: ready
+last_updated: "2026-06-04T03:02:00.000Z"
+last_activity: 2026-06-04 -- Phase 01 completed
 progress:
-  total_phases: 1
-  completed_phases: 0
+  total_phases: 7
+  completed_phases: 1
   total_plans: 2
-  completed_plans: 1
-  percent: 0
+  completed_plans: 2
+  percent: 14
 ---
 
 # Project State: sva2rtl
 
-**Last updated:** 2026-06-02
-**Current phase:** 01
+**Last updated:** 2026-06-04
+**Current phase:** 02
 **Mode:** hardening
 
 ---
@@ -40,7 +40,7 @@ progress:
 
 | Phase | Name | Status | Requirements |
 |-------|------|--------|-------------|
-| 1 | Retroactive Nyquist Baseline | not started | VALIDATE-01 |
+| 1 | Retroactive Nyquist Baseline | ✅ complete | VALIDATE-01 |
 | 2 | Verilator Parity + CI Expansion | not started | VALIDATE-02, VALIDATE-03, VALIDATE-04 |
 | 3 | V2001 Template Dedup + HARDEN-01 Root Fix | not started | REFACTOR-01, REFACTOR-02, REFACTOR-03, HARDEN-01 |
 | 4 | Phase 03 Remaining HIGH Fixes | not started | HARDEN-02, HARDEN-03, HARDEN-04 |
@@ -52,7 +52,7 @@ progress:
 
 ## Active Phase
 
-**None** — roadmap created, awaiting Phase 1 start.
+**Phase 02: Verilator Parity + CI Expansion** — ready to start.
 
 ---
 
@@ -86,10 +86,10 @@ progress:
 
 ## Requirement Status Summary
 
-- **Total v1.1:** 22
-- **Completed:** 0
+- **Total v1.1:** 34 (22 original + 12 Nyquist BLOCKING gaps)
+- **Completed:** 1 (VALIDATE-01)
 - **In progress:** 0
-- **Not started:** 22
+- **Not started:** 33
 
 ---
 
@@ -99,16 +99,18 @@ progress:
 |------|-------|
 | 2026-06-02 | Milestone v1.1 started; REQUIREMENTS.md defined (22 requirements, 5 categories) |
 | 2026-06-02 | ROADMAP.md created — 7 phases, 22/22 requirements mapped, phase numbering reset to Phase 1 |
+| 2026-06-04 | Phase 01 completed — 2 plans executed, 6 VALIDATION.md files written, 12 NYQ-XX BLOCKING gaps identified |
 
 ---
 
 ## Current Position
 
-Phase: 01 (retroactive-nyquist-baseline) — EXECUTING
-Plan: 1 of 2
-Status: Executing Phase 01
-Last activity: 2026-06-03 -- Phase 01 execution started
+Phase: 02 (verilator-parity-ci-expansion) — READY
+Plan: not yet planned
+Status: Phase 01 complete; Phase 02 next
+Last activity: 2026-06-04 -- Phase 01 completed
 
 ## Operator Next Steps
 
-- Start Phase 1 with `/gsd-execute-phase 1`
+- Next: `/gsd:plan-phase 2` or `/gsd:discuss-phase 2`
+- `/gsd:verify-work 1` — manual acceptance testing of Phase 01 artifacts
