@@ -59,6 +59,7 @@ def _run_stimulus(
     checker: CheckerNode,
     stimulus: list[dict[str, Any]],
     tmp_path: Path,
+    simulator: str = "iverilog",
 ) -> list[dict]:
     """Compile and run stimulus through the disable_iff RTL, return outputs."""
     modules = emit_all(checker)
@@ -72,6 +73,7 @@ def _run_stimulus(
         stimulus=stimulus,
         has_overflow_flag=False,  # disable_iff_top has no overflow_flag port
     )
+    simulator=simulator,
     return run_simulation(
         module_name=checker.module_name,
         sv_sources=list(modules.values()),
@@ -112,7 +114,7 @@ def test_fail_fires_at_t2_when_b_false(tmp_path: Path) -> None:
     assert not rtl_out[3]["fail"], "t=3: thread already consumed"
 
 
-def test_no_outputs_when_start_false(tmp_path: Path) -> None:
+def test_no_outputs_when_start_false(tmp_path: Path, simulator: str) -> None:
     """disable_iff: when start=F, body never becomes active."""
     checker = _build_checker()
     stimulus = [
@@ -128,7 +130,7 @@ def test_no_outputs_when_start_false(tmp_path: Path) -> None:
         assert not row["fail"],   f"t={i}: start=F → fail=0"
 
 
-def test_multiple_starts_produce_multiple_fails(tmp_path: Path) -> None:
+def test_multiple_starts_produce_multiple_fails(tmp_path: Path, simulator: str) -> None:
     """disable_iff: consecutive antecedent triggers each produce a fail.
 
     With BV_WIDTH=1, overlap fires at overflow for back-to-back starts.
@@ -159,7 +161,7 @@ def test_multiple_starts_produce_multiple_fails(tmp_path: Path) -> None:
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-def test_external_disable_i_gates_outputs(tmp_path: Path) -> None:
+def test_external_disable_i_gates_outputs(tmp_path: Path, simulator: str) -> None:
     """disable_iff: disable_i=1 gates active/pass/fail to 0.
 
     Even though a=1 would normally trigger an antecedent, with disable_i=1
@@ -179,7 +181,7 @@ def test_external_disable_i_gates_outputs(tmp_path: Path) -> None:
         assert not row["fail"],   f"t={i}: disable_i=1 → fail=0"
 
 
-def test_disable_then_reenable(tmp_path: Path) -> None:
+def test_disable_then_reenable(tmp_path: Path, simulator: str) -> None:
     """disable_iff: after disable_i=0 is restored, body starts fresh (state cleared).
 
     t=0: start=1, a=1 → antecedent fires
@@ -210,7 +212,7 @@ def test_disable_then_reenable(tmp_path: Path) -> None:
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-def test_condition_disable_gates_body(tmp_path: Path) -> None:
+def test_condition_disable_gates_body(tmp_path: Path, simulator: str) -> None:
     """disable_iff: when the condition !rst_n fires (rst_n=0), body is disabled.
 
     This test uses a custom testbench that drives rst_n=0 mid-simulation.
@@ -229,6 +231,7 @@ def test_condition_disable_gates_body(tmp_path: Path) -> None:
     # Build a custom testbench that drives rst_n from inside the stimulus loop
     tb = _custom_tb_with_rst_control(checker.module_name)
 
+    simulator=simulator,
     rtl_out = run_simulation(
         module_name=checker.module_name,
         sv_sources=sv_sources,
@@ -253,7 +256,7 @@ def test_condition_disable_gates_body(tmp_path: Path) -> None:
     assert not rtl_out[2]["fail"], "t=2: thread was lost during rst_n=0 → no fail"
 
 
-def _custom_tb_with_rst_control(module_name: str) -> str:
+def _custom_tb_with_rst_control(module_name: str, simulator: str = "iverilog") -> str:
     """Generate a custom testbench that drives rst_n=0 mid-simulation.
 
     The standard :func:`generate_testbench` hard-codes rst_n=1 after reset;

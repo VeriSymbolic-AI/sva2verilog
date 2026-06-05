@@ -42,6 +42,7 @@ def _run_both(
     checker: CheckerNode,
     stimulus: list[dict],
     tmp_path: Path,
+    simulator: str = "iverilog",
 ) -> tuple[list[dict], list[dict]]:
     """Run stimulus through both oracle and RTL, return (oracle_outputs, rtl_outputs)."""
     modules = emit_all(checker)
@@ -61,6 +62,7 @@ def _run_both(
         has_overflow_flag=False,
     )
     rtl_out = run_simulation(
+        simulator=simulator,
         module_name=checker.module_name,
         sv_sources=list(modules.values()),
         tb_code=tb,
@@ -74,7 +76,7 @@ def _run_both(
 # ── Tests ─────────────────────────────────────────────────────────────────────
 
 
-def test_rtl_rose_vs_oracle_transition(tmp_path: Path) -> None:
+def test_rtl_rose_vs_oracle_transition(tmp_path: Path, simulator: str) -> None:
     """$rose(sig): RTL matches oracle across a 0→1 transition.
 
     tick 0: start=T, sig=0 → rose_detect=0 → pass=F
@@ -101,7 +103,7 @@ def test_rtl_rose_vs_oracle_transition(tmp_path: Path) -> None:
         assert rtl["active"] == oracle["active"], f"tick {i}: active mismatch"
 
 
-def test_rtl_rose_pass_fires_at_correct_tick(tmp_path: Path) -> None:
+def test_rtl_rose_pass_fires_at_correct_tick(tmp_path: Path, simulator: str) -> None:
     """$rose(sig): pass fires exactly on the 0→1 edge, not before or after."""
     checker = _build_checker("rose")
     stimulus = [
@@ -116,7 +118,7 @@ def test_rtl_rose_pass_fires_at_correct_tick(tmp_path: Path) -> None:
     assert not rtl_out[2]["pass"], "tick 2: sig=1→1, no rose event"
 
 
-def test_rtl_rose_no_start_no_output(tmp_path: Path) -> None:
+def test_rtl_rose_no_start_no_output(tmp_path: Path, simulator: str) -> None:
     """$rose(sig): when start=F, pass/fail/active are all 0 regardless of sig."""
     checker = _build_checker("rose")
     stimulus = [
@@ -132,7 +134,7 @@ def test_rtl_rose_no_start_no_output(tmp_path: Path) -> None:
         assert not rtl["active"], f"tick {i}: start=F → not active"
 
 
-def test_rtl_rose_disable_gates_output(tmp_path: Path) -> None:
+def test_rtl_rose_disable_gates_output(tmp_path: Path, simulator: str) -> None:
     """$rose(sig): disable_i=1 gates all outputs to 0."""
     checker = _build_checker("rose")
     # tick 0: normal pass should fire (0→1)
@@ -153,6 +155,7 @@ def test_rtl_rose_disable_gates_output(tmp_path: Path) -> None:
         has_overflow_flag=False,
     )
     rtl_out = run_simulation(
+        simulator=simulator,
         module_name=checker.module_name,
         sv_sources=list(modules.values()),
         tb_code=tb,
@@ -166,7 +169,7 @@ def test_rtl_rose_disable_gates_output(tmp_path: Path) -> None:
     assert not rtl_out[1]["active"], "disabled: active must be 0"
 
 
-def test_rtl_rose_full_oracle_compare(tmp_path: Path) -> None:
+def test_rtl_rose_full_oracle_compare(tmp_path: Path, simulator: str) -> None:
     """$rose(sig): long trace — every cycle matches oracle."""
     checker = _build_checker("rose")
     # Long mixed trace

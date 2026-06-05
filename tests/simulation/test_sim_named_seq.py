@@ -64,6 +64,7 @@ def _run_stimulus(
     checker: CheckerNode,
     stimulus: list[dict[str, Any]],
     tmp_path: Path,
+    simulator: str = "iverilog",
 ) -> list[dict[str, bool]]:
     modules = emit_all(checker)
     extra_inputs = extra_inputs_from_checker(checker)
@@ -77,6 +78,7 @@ def _run_stimulus(
         has_overflow_flag=False,
     )
     return run_simulation(
+        simulator=simulator,
         module_name=checker.module_name,
         sv_sources=list(modules.values()),
         tb_code=tb,
@@ -94,7 +96,7 @@ def _run_stimulus(
 class TestNamedSeqPass:
     """Tests for named sequence pass behavior — validates inline expansion correctness."""
 
-    def test_pass_fires_on_correct_cycle(self, tmp_path: Path) -> None:
+    def test_pass_fires_on_correct_cycle(self, tmp_path: Path, simulator: str) -> None:
         """Named seq ``a ##1 b``: pass fires at t=4 when a=1 at t=0, b=1 at t=3.
 
         Pipeline: bool_expr(a)[1cy] → concat_delay(##1)[2cy] → bool_expr(b)[1cy]
@@ -126,7 +128,7 @@ class TestNamedSeqPass:
         for t in [0, 1, 2, 3]:
             assert results[t]["pass"] is False, f"Unexpected pass at t={t}"
 
-    def test_fail_when_b_not_asserted(self, tmp_path: Path) -> None:
+    def test_fail_when_b_not_asserted(self, tmp_path: Path, simulator: str) -> None:
         """Named seq ``a ##1 b``: fail fires when b=0 at the check cycle.
 
         a=1 at t=0 triggers the sequence.
@@ -152,7 +154,7 @@ class TestNamedSeqPass:
         # pass should NOT fire
         assert results[4]["pass"] is False
 
-    def test_multiple_triggers_independent(self, tmp_path: Path) -> None:
+    def test_multiple_triggers_independent(self, tmp_path: Path, simulator: str) -> None:
         """Two independent triggers produce two independent pass events.
 
         Trigger 1: start=1, a=1 at t=0; b=1 at t=3 → pass at t=4
@@ -178,7 +180,7 @@ class TestNamedSeqPass:
         assert results[4]["pass"] is True, f"Expected pass at t=4: {results[4]}"
         assert results[10]["pass"] is True, f"Expected pass at t=10: {results[10]}"
 
-    def test_a_fail_at_trigger(self, tmp_path: Path) -> None:
+    def test_a_fail_at_trigger(self, tmp_path: Path, simulator: str) -> None:
         """When a=0 at the trigger cycle, the first bool_expr fails immediately.
 
         start=1, a=0 at t=0 → bool_expr(a) fail at t=1.

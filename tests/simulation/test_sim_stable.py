@@ -36,6 +36,7 @@ def _run_both(
     checker: CheckerNode,
     stimulus: list[dict],
     tmp_path: Path,
+    simulator: str = "iverilog",
 ) -> tuple[list[dict], list[dict]]:
     modules = emit_all(checker)
     extra_inputs = extra_inputs_from_checker(checker)
@@ -52,6 +53,7 @@ def _run_both(
         has_overflow_flag=False,
     )
     rtl_out = run_simulation(
+        simulator=simulator,
         module_name=checker.module_name,
         sv_sources=list(modules.values()),
         tb_code=tb,
@@ -64,7 +66,7 @@ def _run_both(
 # ── Tests ─────────────────────────────────────────────────────────────────────
 
 
-def test_rtl_stable_vs_oracle_basic(tmp_path: Path) -> None:
+def test_rtl_stable_vs_oracle_basic(tmp_path: Path, simulator: str) -> None:
     """$stable(sig): RTL matches oracle.
 
     sig_prev starts at 0 after reset.
@@ -89,7 +91,7 @@ def test_rtl_stable_vs_oracle_basic(tmp_path: Path) -> None:
         assert rtl["active"] == oracle["active"], f"tick {i}: active mismatch"
 
 
-def test_rtl_stable_pass_when_unchanged(tmp_path: Path) -> None:
+def test_rtl_stable_pass_when_unchanged(tmp_path: Path, simulator: str) -> None:
     """$stable(sig): pass when sig doesn't change; fail when it changes."""
     checker = _build_checker()
     stimulus = [
@@ -107,7 +109,7 @@ def test_rtl_stable_pass_when_unchanged(tmp_path: Path) -> None:
     assert     rtl_out[3]["pass"], "tick 3: stable at 1 → pass"
 
 
-def test_rtl_stable_no_start_no_output(tmp_path: Path) -> None:
+def test_rtl_stable_no_start_no_output(tmp_path: Path, simulator: str) -> None:
     """$stable: start=F suppresses all outputs even when sig is stable."""
     checker = _build_checker()
     stimulus = [
@@ -123,7 +125,7 @@ def test_rtl_stable_no_start_no_output(tmp_path: Path) -> None:
         assert not rtl["active"], f"tick {i}: not active without start"
 
 
-def test_rtl_stable_full_oracle_compare(tmp_path: Path) -> None:
+def test_rtl_stable_full_oracle_compare(tmp_path: Path, simulator: str) -> None:
     """$stable: long mixed trace fully matches oracle."""
     checker = _build_checker()
     stimulus = [

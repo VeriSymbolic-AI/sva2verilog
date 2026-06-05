@@ -36,6 +36,7 @@ def _run_both(
     checker: CheckerNode,
     stimulus: list[dict],
     tmp_path: Path,
+    simulator: str = "iverilog",
 ) -> tuple[list[dict], list[dict]]:
     modules = emit_all(checker)
     extra_inputs = extra_inputs_from_checker(checker)
@@ -52,6 +53,7 @@ def _run_both(
         has_overflow_flag=False,
     )
     rtl_out = run_simulation(
+        simulator=simulator,
         module_name=checker.module_name,
         sv_sources=list(modules.values()),
         tb_code=tb,
@@ -64,7 +66,7 @@ def _run_both(
 # ── Tests ─────────────────────────────────────────────────────────────────────
 
 
-def test_rtl_fell_vs_oracle_transition(tmp_path: Path) -> None:
+def test_rtl_fell_vs_oracle_transition(tmp_path: Path, simulator: str) -> None:
     """$fell(sig): RTL matches oracle across a 1→0 transition.
 
     tick 0: start=T, sig=1 → fell_detect=0 (sig_prev=0) → pass=F
@@ -88,7 +90,7 @@ def test_rtl_fell_vs_oracle_transition(tmp_path: Path) -> None:
         assert rtl["active"] == oracle["active"], f"tick {i}: active mismatch"
 
 
-def test_rtl_fell_pass_fires_at_correct_tick(tmp_path: Path) -> None:
+def test_rtl_fell_pass_fires_at_correct_tick(tmp_path: Path, simulator: str) -> None:
     """$fell(sig): pass fires exactly on the 1→0 edge."""
     checker = _build_checker()
     stimulus = [
@@ -103,7 +105,7 @@ def test_rtl_fell_pass_fires_at_correct_tick(tmp_path: Path) -> None:
     assert not rtl_out[2]["pass"], "tick 2: 0→0, no fell"
 
 
-def test_rtl_fell_no_start_no_output(tmp_path: Path) -> None:
+def test_rtl_fell_no_start_no_output(tmp_path: Path, simulator: str) -> None:
     """$fell(sig): start=F suppresses all outputs."""
     checker = _build_checker()
     stimulus = [
@@ -119,7 +121,7 @@ def test_rtl_fell_no_start_no_output(tmp_path: Path) -> None:
         assert not rtl["active"], f"tick {i}: no start → not active"
 
 
-def test_rtl_fell_full_oracle_compare(tmp_path: Path) -> None:
+def test_rtl_fell_full_oracle_compare(tmp_path: Path, simulator: str) -> None:
     """$fell(sig): long trace — every cycle matches oracle."""
     checker = _build_checker()
     stimulus = [

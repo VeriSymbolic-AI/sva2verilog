@@ -44,6 +44,7 @@ def _run_both(
     checker: CheckerNode,
     stimulus: list[dict],
     tmp_path: Path,
+    simulator: str = "iverilog",
 ) -> tuple[list[dict], list[dict]]:
     modules = emit_all(checker)
     extra_inputs = extra_inputs_from_checker(checker)
@@ -60,6 +61,7 @@ def _run_both(
         has_overflow_flag=False,
     )
     rtl_out = run_simulation(
+        simulator=simulator,
         module_name=checker.module_name,
         sv_sources=list(modules.values()),
         tb_code=tb,
@@ -72,7 +74,7 @@ def _run_both(
 # ── Tests ─────────────────────────────────────────────────────────────────────
 
 
-def test_rtl_past_pass_after_depth_cycles(tmp_path: Path) -> None:
+def test_rtl_past_pass_after_depth_cycles(tmp_path: Path, simulator: str) -> None:
     """$past(sig, 3): pass fires at tick 3 when sig was 1 at tick 0.
 
     Cycle semantics: pass = start & shift_q[DEPTH-1] where shift_q captures
@@ -107,7 +109,7 @@ def test_rtl_past_pass_after_depth_cycles(tmp_path: Path) -> None:
     assert     rtl_out[4]["fail"], "tick 4: past_value=0 → fail"
 
 
-def test_rtl_past_vs_oracle_full_trace(tmp_path: Path) -> None:
+def test_rtl_past_vs_oracle_full_trace(tmp_path: Path, simulator: str) -> None:
     """$past(sig, 3): RTL output matches oracle for a 10-cycle trace."""
     checker = _build_checker()
     stimulus = [
@@ -131,7 +133,7 @@ def test_rtl_past_vs_oracle_full_trace(tmp_path: Path) -> None:
         assert rtl["active"] == oracle["active"], f"tick {i}: active mismatch"
 
 
-def test_rtl_past_shift_warmup(tmp_path: Path) -> None:
+def test_rtl_past_shift_warmup(tmp_path: Path, simulator: str) -> None:
     """$past(sig, 3): first DEPTH ticks read zero from uninitialized shift register."""
     checker = _build_checker()
     # First 3 ticks with start=T: past_value = 0 (shift not yet filled)
@@ -155,7 +157,7 @@ def test_rtl_past_shift_warmup(tmp_path: Path) -> None:
     assert     rtl_out[3]["pass"], "tick 3: shift filled → past=sig@0=T → pass"
 
 
-def test_rtl_past_disable_clears_shift(tmp_path: Path) -> None:
+def test_rtl_past_disable_clears_shift(tmp_path: Path, simulator: str) -> None:
     """$past: disable_i clears the shift register; subsequent reads see 0."""
     checker = _build_checker()
     # Fill the shift with 1s, then disable, then assert past_value = 0
@@ -178,6 +180,7 @@ def test_rtl_past_disable_clears_shift(tmp_path: Path) -> None:
         has_overflow_flag=False,
     )
     rtl_out = run_simulation(
+        simulator=simulator,
         module_name=checker.module_name,
         sv_sources=list(modules.values()),
         tb_code=tb,

@@ -71,6 +71,7 @@ def _run_stimulus(
     checker: CheckerNode,
     stimulus: list[dict[str, Any]],
     tmp_path: Path,
+    simulator: str = "iverilog",
 ) -> list[dict]:
     modules = emit_all(checker)
     extra_inputs = extra_inputs_from_checker(checker)
@@ -84,6 +85,7 @@ def _run_stimulus(
         has_overflow_flag=False,
     )
     return run_simulation(
+        simulator=simulator,
         module_name=checker.module_name,
         sv_sources=list(modules.values()),
         tb_code=tb,
@@ -122,7 +124,7 @@ class TestDelayZero:
         assert     rtl_out[2]["pass"], "t=2: pass fires"
         assert not rtl_out[2]["fail"], "t=2: no fail"
 
-    def test_fail_when_a_false_at_start(self, tmp_path: Path) -> None:
+    def test_fail_when_a_false_at_start(self, tmp_path: Path, simulator: str) -> None:
         """a ##0 b: bool_expr(a) fails when start fires but a=0."""
         checker = _build_checker("delay_zero")
         stimulus = [
@@ -134,7 +136,7 @@ class TestDelayZero:
         assert not rtl_out[0]["fail"], "t=0: fail not yet registered"
         assert     rtl_out[1]["fail"], "t=1: a=0 at start → bool_expr_a fail"
 
-    def test_fail_when_b_false_at_fire(self, tmp_path: Path) -> None:
+    def test_fail_when_b_false_at_fire(self, tmp_path: Path, simulator: str) -> None:
         """a ##0 b: bool_expr(b) fails when ##0 fires but b=0."""
         checker = _build_checker("delay_zero")
         stimulus = [
@@ -149,7 +151,7 @@ class TestDelayZero:
         assert     rtl_out[2]["fail"], "t=2: b=0 when ##0 fires → bool_expr_b fail"
         assert not rtl_out[2]["pass"], "t=2: not pass"
 
-    def test_disable_gates_outputs(self, tmp_path: Path) -> None:
+    def test_disable_gates_outputs(self, tmp_path: Path, simulator: str) -> None:
         """a ##0 b: disable_i=1 gates all outputs to 0."""
         checker = _build_checker("delay_zero")
         stimulus = [
@@ -201,7 +203,7 @@ class TestDelayFixed:
         assert rtl_out[6]["pass"], "t=6: pass fires (a=1 at t=0, b=1 at t=5)"
         assert not rtl_out[6]["fail"], "t=6: not fail"
 
-    def test_no_pass_when_b_misses_window(self, tmp_path: Path) -> None:
+    def test_no_pass_when_b_misses_window(self, tmp_path: Path, simulator: str) -> None:
         """a ##3 b: pass does NOT fire when b=0 at t=5 (the only firing window)."""
         checker = _build_checker("delay_fixed")
         stimulus = [
@@ -220,7 +222,7 @@ class TestDelayFixed:
         assert     rtl_out[6]["fail"], "t=6: b=0 when delay fires → fail"
         assert not rtl_out[7]["pass"], "t=7: b=1 but window already closed"
 
-    def test_fail_when_a_false_at_start(self, tmp_path: Path) -> None:
+    def test_fail_when_a_false_at_start(self, tmp_path: Path, simulator: str) -> None:
         """a ##3 b: bool_expr_a fails immediately when start=1 but a=0."""
         checker = _build_checker("delay_fixed")
         stimulus = [
@@ -232,7 +234,7 @@ class TestDelayFixed:
         assert not rtl_out[0]["fail"], "t=0: not yet registered"
         assert     rtl_out[1]["fail"], "t=1: a=0 at start → immediate fail"
 
-    def test_active_during_delay_window(self, tmp_path: Path) -> None:
+    def test_active_during_delay_window(self, tmp_path: Path, simulator: str) -> None:
         """a ##3 b: active=1 during the delay counting period."""
         checker = _build_checker("delay_fixed")
         stimulus = [
@@ -252,7 +254,7 @@ class TestDelayFixed:
         assert rtl_out[4]["active"], "t=4: counting → active"
         assert rtl_out[5]["active"], "t=5: delay fires, b_expr pending → active"
 
-    def test_disable_mid_delay_clears_state(self, tmp_path: Path) -> None:
+    def test_disable_mid_delay_clears_state(self, tmp_path: Path, simulator: str) -> None:
         """a ##3 b: disable during counting clears the delay counter."""
         checker = _build_checker("delay_fixed")
         stimulus = [
@@ -280,7 +282,7 @@ class TestDelayFixed:
 class TestDelayRange:
     """Tests for ``a ##[2:5] b`` — range delay (window of b positions)."""
 
-    def test_pass_at_min_delay(self, tmp_path: Path) -> None:
+    def test_pass_at_min_delay(self, tmp_path: Path, simulator: str) -> None:
         """a ##[2:5] b: pass fires when b=1 at t=4 (min_delay=2 → t=2+2=4).
 
         Range window: delay_pass fires when count in [2,5].
@@ -303,7 +305,7 @@ class TestDelayRange:
             assert not rtl_out[i]["pass"], f"t={i}: pass too early"
         assert rtl_out[5]["pass"], "t=5: pass fires at min delay (b=1 at t=4)"
 
-    def test_pass_at_max_delay(self, tmp_path: Path) -> None:
+    def test_pass_at_max_delay(self, tmp_path: Path, simulator: str) -> None:
         """a ##[2:5] b: pass fires when b=1 at t=7 (max_delay=5 → t=5+2=7)."""
         checker = _build_checker("delay_range")
         stimulus = [
@@ -324,7 +326,7 @@ class TestDelayRange:
         for i in range(8):
             assert not rtl_out[i]["pass"], f"t={i}: no pass before t=8"
 
-    def test_pass_across_multiple_delay_cycles(self, tmp_path: Path) -> None:
+    def test_pass_across_multiple_delay_cycles(self, tmp_path: Path, simulator: str) -> None:
         """a ##[2:5] b: pass fires on each cycle within the window where b=1."""
         checker = _build_checker("delay_range")
         # b=1 on all cycles t=4..7 → pass on t=5..8
@@ -348,7 +350,7 @@ class TestDelayRange:
             assert rtl_out[i]["pass"], f"t={i}: pass fires (b=1 at t={i-1})"
         assert not rtl_out[9]["pass"], "t=9: window closed (delay stopped)"
 
-    def test_no_pass_when_b_missed_window(self, tmp_path: Path) -> None:
+    def test_no_pass_when_b_missed_window(self, tmp_path: Path, simulator: str) -> None:
         """a ##[2:5] b: no pass when b is always 0 in the window (t=4..7)."""
         checker = _build_checker("delay_range")
         stimulus = [
@@ -368,7 +370,7 @@ class TestDelayRange:
         for i in range(len(stimulus)):
             assert not rtl_out[i]["pass"], f"t={i}: b never in window → no pass"
 
-    def test_fail_when_a_false_at_start(self, tmp_path: Path) -> None:
+    def test_fail_when_a_false_at_start(self, tmp_path: Path, simulator: str) -> None:
         """a ##[2:5] b: bool_expr_a fails when start=1 but a=0."""
         checker = _build_checker("delay_range")
         stimulus = [
@@ -423,7 +425,7 @@ class TestDelayThreeElement:
         assert rtl_out[8]["pass"], "t=8: full chain completes → pass"
         assert not rtl_out[8]["fail"], "t=8: not fail"
 
-    def test_fail_at_middle_when_b_false(self, tmp_path: Path) -> None:
+    def test_fail_at_middle_when_b_false(self, tmp_path: Path, simulator: str) -> None:
         """a ##1 b ##2 c: chain fails at the bool_expr_b stage when b=0."""
         checker = _build_checker("delay_three_element")
         stimulus = [
@@ -439,7 +441,7 @@ class TestDelayThreeElement:
         assert     rtl_out[4]["fail"], "t=4: b=0 at t=3 → bool_expr_b fail"
         assert not rtl_out[4]["pass"], "t=4: no pass"
 
-    def test_fail_from_a(self, tmp_path: Path) -> None:
+    def test_fail_from_a(self, tmp_path: Path, simulator: str) -> None:
         """a ##1 b ##2 c: fails at bool_expr_a when start fires with a=0."""
         checker = _build_checker("delay_three_element")
         stimulus = [
@@ -450,7 +452,7 @@ class TestDelayThreeElement:
 
         assert rtl_out[1]["fail"], "t=1: a=0 at start → fail"
 
-    def test_active_across_full_chain(self, tmp_path: Path) -> None:
+    def test_active_across_full_chain(self, tmp_path: Path, simulator: str) -> None:
         """a ##1 b ##2 c: active=1 throughout the 8-cycle evaluation."""
         checker = _build_checker("delay_three_element")
         stimulus = [
@@ -473,7 +475,7 @@ class TestDelayThreeElement:
         # t=8: pass fires; both delays done
         assert rtl_out[8]["pass"], "t=8: pass fires"
 
-    def test_disable_mid_chain(self, tmp_path: Path) -> None:
+    def test_disable_mid_chain(self, tmp_path: Path, simulator: str) -> None:
         """a ##1 b ##2 c: disable_i=1 mid-chain clears state, no pass at end."""
         checker = _build_checker("delay_three_element")
         stimulus = [

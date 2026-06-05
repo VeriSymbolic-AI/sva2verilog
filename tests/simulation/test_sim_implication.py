@@ -69,6 +69,7 @@ def _run_stimulus(
     checker: CheckerNode,
     stimulus: list[dict[str, Any]],
     tmp_path: Path,
+    simulator: str = "iverilog",
 ) -> list[dict]:
     """Compile and run stimulus through an implication RTL checker."""
     modules = emit_all(checker)
@@ -84,6 +85,7 @@ def _run_stimulus(
         has_overflow_flag=has_overflow,
     )
     return run_simulation(
+        simulator=simulator,
         module_name=checker.module_name,
         sv_sources=list(modules.values()),
         tb_code=tb,
@@ -123,7 +125,7 @@ class TestImplicationOverlap:
         assert     out[2]["fail"], "t=2: bv matures, b=0 → fail"
         assert not out[3]["fail"], "t=3: thread consumed — idle"
 
-    def test_active_high_while_thread_in_pipeline(self, tmp_path: Path) -> None:
+    def test_active_high_while_thread_in_pipeline(self, tmp_path: Path, simulator: str) -> None:
         """Overlap: active is raised while a thread is live in the pipeline.
 
         t=0: start=1 → antecedent starts (active=0 until FF registers)
@@ -144,7 +146,7 @@ class TestImplicationOverlap:
         assert     out[1]["active"], "t=1: ant_active_w=1"
         assert     out[2]["active"], "t=2: bv_q=1 → thread active"
 
-    def test_no_start_no_output(self, tmp_path: Path) -> None:
+    def test_no_start_no_output(self, tmp_path: Path, simulator: str) -> None:
         """Overlap: when start=0, antecedent never triggers — all outputs remain 0."""
         checker = _build("implication_overlap.json")
         stimulus = [
@@ -177,7 +179,7 @@ class TestImplicationOverlap:
         for i, row in enumerate(out):
             assert not row["pass"], f"t={i}: pass never fires with BV_WIDTH=1"
 
-    def test_disable_i_gates_all_outputs(self, tmp_path: Path) -> None:
+    def test_disable_i_gates_all_outputs(self, tmp_path: Path, simulator: str) -> None:
         """Overlap: disable_i=1 clears state and gates all outputs to 0."""
         checker = _build("implication_overlap.json")
         stimulus = [
@@ -192,7 +194,7 @@ class TestImplicationOverlap:
             assert not row["pass"],   f"t={i}: disable_i=1 → pass=0"
             assert not row["fail"],   f"t={i}: disable_i=1 → fail=0"
 
-    def test_overflow_on_back_to_back_starts(self, tmp_path: Path) -> None:
+    def test_overflow_on_back_to_back_starts(self, tmp_path: Path, simulator: str) -> None:
         """Overlap: back-to-back antecedent fires overflow the BV_WIDTH=1 shift register.
 
         t=0: start=1, a=1 — first thread
@@ -251,7 +253,7 @@ class TestImplicationNonoverlap:
         assert     out[3]["fail"], "t=3: bv_q[0]=1, con_pass_w=0 → fail"
         assert not out[4]["fail"], "t=4: thread consumed"
 
-    def test_no_start_no_output(self, tmp_path: Path) -> None:
+    def test_no_start_no_output(self, tmp_path: Path, simulator: str) -> None:
         """Nonoverlap: start=0 → all outputs remain 0."""
         checker = _build("implication_nonoverlap.json")
         stimulus = [
@@ -266,7 +268,7 @@ class TestImplicationNonoverlap:
             assert not row["pass"],   f"t={i}: no start → pass=0"
             assert not row["fail"],   f"t={i}: no start → fail=0"
 
-    def test_disable_i_gates_all_outputs(self, tmp_path: Path) -> None:
+    def test_disable_i_gates_all_outputs(self, tmp_path: Path, simulator: str) -> None:
         """Nonoverlap: disable_i=1 prevents any activity."""
         checker = _build("implication_nonoverlap.json")
         stimulus = [
@@ -282,7 +284,7 @@ class TestImplicationNonoverlap:
             assert not row["pass"],   f"t={i}: disable_i=1 → pass=0"
             assert not row["fail"],   f"t={i}: disable_i=1 → fail=0"
 
-    def test_multiple_starts_produce_multiple_fails(self, tmp_path: Path) -> None:
+    def test_multiple_starts_produce_multiple_fails(self, tmp_path: Path, simulator: str) -> None:
         """Nonoverlap: two separated starts each produce a fail at t+3.
 
         start at t=0 → fail at t=3
@@ -307,7 +309,7 @@ class TestImplicationNonoverlap:
         assert not out[4]["fail"], "t=4: idle"
         assert     out[8]["fail"], "t=8: second fail"
 
-    def test_overflow_on_back_to_back_starts(self, tmp_path: Path) -> None:
+    def test_overflow_on_back_to_back_starts(self, tmp_path: Path, simulator: str) -> None:
         """Nonoverlap: back-to-back starts overflow the BV_WIDTH=1 bit-vector.
 
         The extra delay register shifts both threads into bv_q on adjacent cycles,

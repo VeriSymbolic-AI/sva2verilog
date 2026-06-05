@@ -76,6 +76,7 @@ def _run_both(
     stimulus: list[dict[str, Any]],
     tmp_path: Path,
     oracle_params: dict[str, Any],
+    simulator: str = "iverilog",
 ) -> tuple[list[dict], list[dict]]:
     """Run stimulus through both oracle and RTL; return (oracle_out, rtl_out)."""
     modules = emit_all(checker)
@@ -95,6 +96,7 @@ def _run_both(
         has_overflow_flag=False,
     )
     rtl_out = run_simulation(
+        simulator=simulator,
         module_name=checker.module_name,
         sv_sources=list(modules.values()),
         tb_code=tb,
@@ -115,7 +117,7 @@ class TestRepFixed:
 
     _PARAMS = {"rep_min": 3, "rep_max": 3}
 
-    def test_pass_fires_at_third_consecutive_cycle(self, tmp_path: Path) -> None:
+    def test_pass_fires_at_third_consecutive_cycle(self, tmp_path: Path, simulator: str) -> None:
         """a[*3]: pass first fires on the 3rd cycle where a=1 (after start).
 
         Timing (RTL outputs are combinational from REGISTERED state):
@@ -145,7 +147,7 @@ class TestRepFixed:
         assert not rtl_out[2]["pass"], "t=2: need one more cycle"
         assert     rtl_out[3]["pass"], "t=3: exactly 3 cycles → pass"
 
-    def test_fail_when_sequence_broken_before_rep_min(self, tmp_path: Path) -> None:
+    def test_fail_when_sequence_broken_before_rep_min(self, tmp_path: Path, simulator: str) -> None:
         """a[*3]: fail fires when a goes low while count < rep_min=3.
 
         t=0: start=1, a=1 → starts counting
@@ -172,7 +174,7 @@ class TestRepFixed:
         assert     rtl_out[2]["fail"], "t=2: a=0 while count < 3 → fail"
         assert not rtl_out[3]["fail"], "t=3: running already cleared"
 
-    def test_start_with_a_false_does_not_start_running(self, tmp_path: Path) -> None:
+    def test_start_with_a_false_does_not_start_running(self, tmp_path: Path, simulator: str) -> None:
         """a[*3]: start with a=0 fires attempt_fired but does NOT set running_q.
 
         Because the RTL condition is ``(start && sig_eval)`` to set running_q,
@@ -196,7 +198,7 @@ class TestRepFixed:
         for i, rtl in enumerate(rtl_out):
             assert not rtl["active"], f"tick {i}: should not be active"
 
-    def test_pass_continues_while_a_stays_high(self, tmp_path: Path) -> None:
+    def test_pass_continues_while_a_stays_high(self, tmp_path: Path, simulator: str) -> None:
         """a[*3]: pass keeps firing while a=1 and count is capped at rep_max=3."""
         checker = _build_checker("rep_fixed")
         stimulus = [
@@ -221,7 +223,7 @@ class TestRepFixed:
         assert rtl_out[4]["pass"], "t=4: pass (still high)"
         assert rtl_out[5]["pass"], "t=5: pass (still high)"
 
-    def test_full_oracle_compare_rep_fixed(self, tmp_path: Path) -> None:
+    def test_full_oracle_compare_rep_fixed(self, tmp_path: Path, simulator: str) -> None:
         """a[*3]: long mixed trace — every cycle matches oracle."""
         checker = _build_checker("rep_fixed")
         stimulus = [
@@ -245,7 +247,7 @@ class TestRepFixed:
             assert rtl["fail"]   == oracle["fail"],   f"tick {i}: fail mismatch"
             assert rtl["active"] == oracle["active"], f"tick {i}: active mismatch"
 
-    def test_disable_gates_output_rep_fixed(self, tmp_path: Path) -> None:
+    def test_disable_gates_output_rep_fixed(self, tmp_path: Path, simulator: str) -> None:
         """a[*3]: disable_i=1 gates all outputs to 0 and resets state."""
         checker = _build_checker("rep_fixed")
         stimulus = [
@@ -265,6 +267,8 @@ class TestRepFixed:
             has_overflow_flag=False,
         )
         rtl_out = run_simulation(
+        simulator=simulator,
+                
             module_name=checker.module_name,
             sv_sources=list(modules.values()),
             tb_code=tb,
@@ -291,7 +295,7 @@ class TestRepRange:
 
     _PARAMS = {"rep_min": 2, "rep_max": 5}
 
-    def test_pass_fires_at_rep_min(self, tmp_path: Path) -> None:
+    def test_pass_fires_at_rep_min(self, tmp_path: Path, simulator: str) -> None:
         """a[*2:5]: pass first fires at rep_min=2 consecutive cycles.
 
         t=0: start=1, a=1 → count=1 (active=0)
@@ -316,7 +320,7 @@ class TestRepRange:
         assert not rtl_out[1]["pass"], "t=1: count=1, need ≥2"
         assert     rtl_out[2]["pass"], "t=2: count=2, pass fires"
 
-    def test_pass_continues_through_rep_max(self, tmp_path: Path) -> None:
+    def test_pass_continues_through_rep_max(self, tmp_path: Path, simulator: str) -> None:
         """a[*2:5]: pass fires for 4 consecutive cycles (count 2..5), then stops."""
         checker = _build_checker("rep_range")
         # 6 cycles with a=1 after start: count reaches 5 (rep_max), then stays there
@@ -360,7 +364,7 @@ class TestRepRange:
         assert not rtl_out[0]["fail"], "t=0: start cycle"
         assert     rtl_out[1]["fail"], "t=1: broken at count=1 < rep_min=2"
 
-    def test_no_fail_when_broken_at_rep_min(self, tmp_path: Path) -> None:
+    def test_no_fail_when_broken_at_rep_min(self, tmp_path: Path, simulator: str) -> None:
         """a[*2:5]: breaking at count=rep_min=2 does NOT produce fail (it passed)."""
         checker = _build_checker("rep_range")
         stimulus = [
@@ -380,7 +384,7 @@ class TestRepRange:
         assert rtl_out[2]["pass"],  "t=2: pass (count=2 ≥ rep_min)"
         assert not rtl_out[3]["fail"], "t=3: count=2 ≥ rep_min → no fail"
 
-    def test_full_oracle_compare_rep_range(self, tmp_path: Path) -> None:
+    def test_full_oracle_compare_rep_range(self, tmp_path: Path, simulator: str) -> None:
         """a[*2:5]: long mixed trace — every cycle matches oracle."""
         checker = _build_checker("rep_range")
         stimulus = [
@@ -410,7 +414,7 @@ class TestRepRange:
             assert rtl["fail"]   == oracle["fail"],   f"tick {i}: fail mismatch"
             assert rtl["active"] == oracle["active"], f"tick {i}: active mismatch"
 
-    def test_disable_gates_output_rep_range(self, tmp_path: Path) -> None:
+    def test_disable_gates_output_rep_range(self, tmp_path: Path, simulator: str) -> None:
         """a[*2:5]: disable_i=1 gates active/pass/fail to 0."""
         checker = _build_checker("rep_range")
         stimulus = [
@@ -431,6 +435,7 @@ class TestRepRange:
             has_overflow_flag=False,
         )
         rtl_out = run_simulation(
+            simulator=simulator,
             module_name=checker.module_name,
             sv_sources=list(modules.values()),
             tb_code=tb,
