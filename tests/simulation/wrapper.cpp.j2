@@ -1,0 +1,61 @@
+{# Verilator C++ wrapper for sva2rtl-generated checker modules.
+   Rendered per-test with module name, signals, and stimulus data embedded.
+   Used by tb_generator._generate_verilator_wrapper(). #}
+#include "V{{ module_name }}.h"
+#include "verilated.h"
+#include <cstdio>
+
+int main(int argc, char** argv) {
+    VerilatedContext* contextp = new VerilatedContext;
+    contextp->commandArgs(argc, argv);
+    V{{ module_name }}* top = new V{{ module_name }}{contextp};
+
+    // Init all inputs to 0
+    top->{{ clock_signal }} = 0;
+    top->rst_n = 0;
+    top->start = 0;
+    top->disable_i = 0;
+{%- for sig in extra_inputs if sig != 'start' %}
+    top->{{ sig }} = 0;
+{%- endfor %}
+
+    // Reset: 2 full clock cycles with rst_n=0
+    for (int _r = 0; _r < 2; _r++) {
+        contextp->timeInc(1); top->{{ clock_signal }} = 1; top->eval();
+        contextp->timeInc(1); top->{{ clock_signal }} = 0; top->eval();
+    }
+
+    // Release reset (set before posedge)
+    top->rst_n = 1;
+
+{%- for stim in stimulus %}
+    // ── cycle {{ loop.index0 }} ──
+    // Drive inputs at negedge (clk=0)
+{%- for sig in extra_inputs %}
+    top->{{ sig }} = {{ 1 if stim.get(sig, False) else 0 }};
+{%- endfor %}
+    top->disable_i = {{ 1 if stim.get('disable_i', False) else 0 }};
+    top->eval();
+    // Posedge: toggle clock, evaluate, capture
+    contextp->timeInc(1); top->{{ clock_signal }} = 1; top->eval();
+{%- if has_overflow_flag %}
+    printf("%c %c %c %c\n",
+        top->active ? '1' : '0',
+        top->pass   ? '1' : '0',
+        top->fail   ? '1' : '0',
+        top->overflow_flag ? '1' : '0');
+{%- else %}
+    printf("%c %c %c\n",
+        top->active ? '1' : '0',
+        top->pass   ? '1' : '0',
+        top->fail   ? '1' : '0');
+{%- endif %}
+    // Negedge: toggle clock back
+    contextp->timeInc(1); top->{{ clock_signal }} = 0; top->eval();
+{%- endfor %}
+
+    top->final();
+    delete top;
+    delete contextp;
+    return 0;
+}

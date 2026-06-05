@@ -10,12 +10,27 @@ Provides:
 from __future__ import annotations
 
 import difflib
+import os
 import shutil
 from pathlib import Path
 
 import pytest
 
 from sva2rtl.ir import BoolExpr, ClockSpec, SourceLoc
+
+# ── CLI flag registration ──────────────────────────────────────────────────
+
+
+def pytest_addoption(parser: pytest.Parser) -> None:
+    """Register the --simulator CLI flag for dual-simulator selection."""
+    parser.addoption(
+        "--simulator",
+        action="store",
+        default="iverilog",
+        choices=("iverilog", "verilator"),
+        help="Simulator backend: iverilog (default) or verilator",
+    )
+
 
 # ── Custom marker registration ─────────────────────────────────────────────
 
@@ -24,8 +39,23 @@ def pytest_configure(config: pytest.Config) -> None:
     """Register project-specific pytest markers."""
     config.addinivalue_line(
         "markers",
-        "simulation: marks tests requiring iverilog (deselect with '-m not simulation')",
+        "simulation: marks tests requiring a simulator (deselect with '-m not simulation')",
     )
+
+
+# ── Simulator fixture ──────────────────────────────────────────────────────
+
+
+@pytest.fixture(scope="session")
+def simulator(request: pytest.FixtureRequest) -> str:
+    """Return the selected simulator backend.
+
+    Resolves from --simulator CLI flag, with optional override via
+    ``SVA2RTL_SIMULATOR`` environment variable.
+    """
+    sim = request.config.getoption("--simulator", default="iverilog")
+    env_sim = os.environ.get("SVA2RTL_SIMULATOR")
+    return env_sim if env_sim else str(sim)
 
 # ── Conditional skip marker ────────────────────────────────────────────────
 
