@@ -113,9 +113,9 @@ Explicit exclusions, with reasoning:
 | REQ-ID | Phase | Plan | Status |
 |--------|-------|------|--------|
 | VALIDATE-01 | 1 | 02 | complete |
-| VALIDATE-02 | 2 | TBD | not started |
-| VALIDATE-03 | 2 | TBD | not started |
-| VALIDATE-04 | 2 | TBD | not started |
+| VALIDATE-02 | 2 | 01, 02, 03 | not started |
+| VALIDATE-03 | 2 | 01, 04 | not started |
+| VALIDATE-04 | 2 | 05 | not started |
 | REFACTOR-01 | 3 | TBD | not started |
 | REFACTOR-02 | 3 | TBD | not started |
 | REFACTOR-03 | 3 | TBD | not started |

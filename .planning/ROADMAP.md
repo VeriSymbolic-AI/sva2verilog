@@ -28,14 +28,14 @@ total_requirements: 22
 | Phase | Name | Requirements | Plan estimate |
 |-------|------|-------------|---------------|
 | 1 | 2/2 | Complete   | 2026-06-03 |
-| 2 | Verilator Parity + CI Expansion | VALIDATE-02, VALIDATE-03, VALIDATE-04 | 3 |
+| 2 | Verilator Parity + CI Expansion | VALIDATE-02, VALIDATE-03, VALIDATE-04 | 5 |
 | 3 | V2001 Template Dedup + HARDEN-01 Root Fix | REFACTOR-01, REFACTOR-02, REFACTOR-03, HARDEN-01 | 4 |
 | 4 | Phase 03 Remaining HIGH Fixes | HARDEN-02, HARDEN-03, HARDEN-04 | 3 |
 | 5 | Phase 06 HIGH CLI Fixes | HARDEN-05, HARDEN-06, HARDEN-07, HARDEN-08 | 3 |
 | 6 | MEDIUM/LOW Cleanup + Version Sync + Final Review | POLISH-01, POLISH-02, POLISH-03, POLISH-04 | 3 |
 | 7 | Release — v1.1.0 Tag + Notes + Smoke | RELEASE-01, RELEASE-02, RELEASE-03 | 2 |
 
-**Totals:** 7 phases · 22 requirements · ~20 plans (estimated; exact counts set at phase-plan time)
+**Totals:** 7 phases · 22 requirements · ~25 plans (2 done, 5 planned, ~18 estimated)
 
 ---
 
@@ -72,6 +72,15 @@ total_requirements: 22
 2. CI matrix shows all 8 jobs (`2 OS × 2 Python × 2 simulators`) green on the main branch after this phase merges.
 3. README install/usage section explicitly documents Verilator as a supported simulator alongside iverilog, including install instructions.
 4. A property compiled and simulated after this phase is automatically verified under both simulators in CI without any extra user action.
+
+**Plans:** 5 plans
+
+Plans:
+- [ ] 02-01-PLAN.md — pytest --simulator infrastructure + C++ wrapper template
+- [ ] 02-02-PLAN.md — tb_generator.py refactor with Verilator backend
+- [ ] 02-03-PLAN.md — Wire simulator fixture into all test call sites
+- [ ] 02-04-PLAN.md — CI matrix expansion + test_verilator_lint_clean upgrade
+- [ ] 02-05-PLAN.md — README + CLAUDE.md dual-oracle documentation
 
 ---
 
@@ -229,8 +238,8 @@ POLISH-04 is a gate condition: "the v1.1 hardening diff produces zero new HIGH f
 
 | Phase | Name | Status | Plans |
 |-------|------|--------|-------|
-| 1 | Retroactive Nyquist Baseline | not started | — |
-| 2 | Verilator Parity + CI Expansion | not started | — |
+| 1 | Retroactive Nyquist Baseline | complete | 2 |
+| 2 | Verilator Parity + CI Expansion | planned | 5 |
 | 3 | V2001 Template Dedup + HARDEN-01 Root Fix | not started | — |
 | 4 | Phase 03 Remaining HIGH Fixes | not started | — |
 | 5 | Phase 06 HIGH CLI Fixes | not started | — |
