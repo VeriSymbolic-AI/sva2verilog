@@ -2,12 +2,14 @@
 
 This module provides utilities to:
 1. Generate a SystemVerilog testbench for a sva2rtl-compiled checker module.
-2. Compile and run the testbench with Icarus Verilog (iverilog + vvp).
+2. Compile and run the testbench with Icarus Verilog (iverilog + vvp) or
+   Verilator (native binary).
 3. Parse the simulation output into per-cycle output dicts.
 
 The generated testbench drives inputs at negedge (to satisfy setup time) and
-captures outputs at posedge using ``$fdisplay``.  This matches the cycle-exact
-semantics of the behavioral oracle in ``sva2rtl.behavioral_oracle``.
+captures outputs at posedge using ``$fdisplay`` (iverilog) or ``printf``
+(Verilator C++ wrapper).  This matches the cycle-exact semantics of the
+behavioral oracle in ``sva2rtl.behavioral_oracle``.
 
 Typical flow::
 
@@ -29,6 +31,9 @@ Typical flow::
         tb_code=tb,
         work_dir=tmp_path,
         has_overflow_flag=...,
+        simulator="iverilog",   # or "verilator"
+        stimulus=stim_list,      # required for Verilator
+        extra_inputs=inputs,     # required for Verilator
     )
 """
 
@@ -38,6 +43,8 @@ import shutil
 import subprocess
 from pathlib import Path
 from typing import Any
+
+from jinja2 import Environment, FileSystemLoader
 
 from sva2rtl.ir import CheckerNode
 
@@ -211,8 +218,12 @@ def run_simulation(
     *,
     work_dir: Path,
     has_overflow_flag: bool = False,
+    simulator: str = "iverilog",
+    stimulus: list[dict[str, Any]] | None = None,
+    extra_inputs: list[str] | None = None,
+    clock_signal: str = "clk",
 ) -> list[dict[str, bool]]:
-    """Compile and run a sva2rtl testbench with Icarus Verilog.
+    """Compile and run a sva2rtl testbench with the selected simulator.
 
     Parameters
     ----------
@@ -223,10 +234,20 @@ def run_simulation(
         Must include the top-level module and all its children.
     tb_code:
         Testbench SV source string from ``generate_testbench()``.
+        Used by the iverilog backend; ignored by the Verilator backend.
     work_dir:
         Temporary directory for compilation artefacts.
     has_overflow_flag:
         Passed to ``_parse_output`` to determine column count.
+    simulator:
+        Backend selector: ``"iverilog"`` (default) or ``"verilator"``.
+    stimulus:
+        Per-cycle input dicts (required when ``simulator="verilator"``).
+    extra_inputs:
+        Non-clock/non-rst_n/non-disable_i port names in order
+        (required when ``simulator="verilator"``).
+    clock_signal:
+        Name of the clock port on the DUT (default ``"clk"``).
 
     Returns
     -------
@@ -237,10 +258,44 @@ def run_simulation(
     Raises
     ------
     RuntimeError
-        When ``iverilog`` is not found, compilation fails, or simulation fails.
-    AssertionError
-        When the parsed output row count doesn't match ``len(sv_sources)``.
+        When the requested simulator is not found, compilation fails, or
+        simulation fails.
+    ValueError
+        When ``simulator`` is unknown or required parameters are missing.
     """
+    if simulator == "iverilog":
+        return _run_simulation_iverilog(
+            module_name, sv_sources, tb_code, work_dir=work_dir,
+            has_overflow_flag=has_overflow_flag,
+        )
+    elif simulator == "verilator":
+        if stimulus is None:
+            raise ValueError(
+                "stimulus is required when simulator='verilator'"
+            )
+        if extra_inputs is None:
+            raise ValueError(
+                "extra_inputs is required when simulator='verilator'"
+            )
+        return _run_simulation_verilator(
+            module_name, sv_sources, tb_code, work_dir=work_dir,
+            has_overflow_flag=has_overflow_flag,
+            stimulus=stimulus, extra_inputs=extra_inputs,
+            clock_signal=clock_signal,
+        )
+    else:
+        raise ValueError(f"Unknown simulator: {simulator}")
+
+
+def _run_simulation_iverilog(
+    module_name: str,
+    sv_sources: list[str],
+    tb_code: str,
+    *,
+    work_dir: Path,
+    has_overflow_flag: bool = False,
+) -> list[dict[str, bool]]:
+    """Compile and run a sva2rtl testbench with Icarus Verilog."""
     iverilog = shutil.which("iverilog")
     if iverilog is None:
         raise RuntimeError(
@@ -282,6 +337,106 @@ def run_simulation(
     if sim_result.returncode != 0:
         raise RuntimeError(
             f"vvp simulation failed for {module_name}:\n"
+            f"STDOUT:\n{sim_result.stdout}\n"
+            f"STDERR:\n{sim_result.stderr}"
+        )
+
+    return _parse_output(sim_result.stdout, has_overflow_flag=has_overflow_flag)
+
+
+def _generate_verilator_wrapper(
+    module_name: str,
+    clock_signal: str,
+    extra_inputs: list[str],
+    stimulus: list[dict[str, Any]],
+    has_overflow_flag: bool,
+) -> str:
+    """Render the Verilator C++ wrapper for a given module and stimulus.
+
+    Uses the Jinja2 template at ``wrapper.cpp.j2`` in the same directory.
+    """
+    template_dir = Path(__file__).parent
+    env = Environment(loader=FileSystemLoader(str(template_dir)))
+    template = env.get_template("wrapper.cpp.j2")
+    return template.render(
+        module_name=module_name,
+        clock_signal=clock_signal,
+        extra_inputs=extra_inputs,
+        stimulus=stimulus,
+        has_overflow_flag=has_overflow_flag,
+    )
+
+
+def _run_simulation_verilator(
+    module_name: str,
+    sv_sources: list[str],
+    tb_code: str,  # ignored — Verilator uses C++ wrapper, not SV testbench
+    *,
+    work_dir: Path,
+    has_overflow_flag: bool,
+    stimulus: list[dict[str, Any]],
+    extra_inputs: list[str],
+    clock_signal: str,
+) -> list[dict[str, bool]]:
+    """Compile and run a sva2rtl checker with Verilator via C++ wrapper.
+
+    Per RESEARCH.md, uses ``verilator --exe --build --timing`` (NOT
+    ``--binary``, which includes ``--main`` and conflicts with our wrapper's
+    ``main()``).
+    """
+    verilator = shutil.which("verilator")
+    if verilator is None:
+        raise RuntimeError(
+            "verilator not found on PATH — install Verilator to run simulation tests"
+        )
+
+    # Write DUT source
+    dut_path = work_dir / "dut.sv"
+    dut_path.write_text("\n\n".join(sv_sources), encoding="utf-8")
+
+    # Generate C++ wrapper
+    wrapper_code = _generate_verilator_wrapper(
+        module_name=module_name,
+        clock_signal=clock_signal,
+        extra_inputs=extra_inputs,
+        stimulus=stimulus,
+        has_overflow_flag=has_overflow_flag,
+    )
+    wrapper_path = work_dir / "wrapper.cpp"
+    wrapper_path.write_text(wrapper_code, encoding="utf-8")
+
+    # Compile with Verilator
+    sim_path = work_dir / "Vdut"
+    compile_result = subprocess.run(
+        [
+            verilator,
+            "--exe", "--build", "--timing",
+            "-Wall",
+            "--top-module", module_name,
+            "-o", str(sim_path),
+            str(dut_path),
+            str(wrapper_path),
+        ],
+        cwd=str(work_dir),
+        capture_output=True,
+        text=True,
+    )
+    if compile_result.returncode != 0:
+        raise RuntimeError(
+            f"Verilator compilation failed for {module_name}:\n"
+            f"STDOUT:\n{compile_result.stdout}\n"
+            f"STDERR:\n{compile_result.stderr}"
+        )
+
+    # Run simulation
+    sim_result = subprocess.run(
+        [str(sim_path)],
+        capture_output=True,
+        text=True,
+    )
+    if sim_result.returncode != 0:
+        raise RuntimeError(
+            f"Verilator simulation failed for {module_name}:\n"
             f"STDOUT:\n{sim_result.stdout}\n"
             f"STDERR:\n{sim_result.stderr}"
         )
