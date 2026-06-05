@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: — Hardening Release
-current_phase: 02
+current_phase: 03
 status: ready
-last_updated: "2026-06-04T03:02:00.000Z"
-last_activity: 2026-06-04 -- Phase 01 completed
+last_updated: "2026-06-05T05:10:00.000Z"
+last_activity: 2026-06-05 -- Phase 02 completed
 progress:
   total_phases: 7
-  completed_phases: 1
-  total_plans: 2
-  completed_plans: 2
-  percent: 14
+  completed_phases: 2
+  total_plans: 7
+  completed_plans: 7
+  percent: 29
 ---
 
 # Project State: sva2rtl
@@ -41,7 +41,7 @@ progress:
 | Phase | Name | Status | Requirements |
 |-------|------|--------|-------------|
 | 1 | Retroactive Nyquist Baseline | ✅ complete | VALIDATE-01 |
-| 2 | Verilator Parity + CI Expansion | not started | VALIDATE-02, VALIDATE-03, VALIDATE-04 |
+| 2 | Verilator Parity + CI Expansion | ✅ complete | VALIDATE-02, VALIDATE-03, VALIDATE-04 |
 | 3 | V2001 Template Dedup + HARDEN-01 Root Fix | not started | REFACTOR-01, REFACTOR-02, REFACTOR-03, HARDEN-01 |
 | 4 | Phase 03 Remaining HIGH Fixes | not started | HARDEN-02, HARDEN-03, HARDEN-04 |
 | 5 | Phase 06 HIGH CLI Fixes | not started | HARDEN-05, HARDEN-06, HARDEN-07, HARDEN-08 |
@@ -52,7 +52,7 @@ progress:
 
 ## Active Phase
 
-**Phase 02: Verilator Parity + CI Expansion** — ready to start.
+**Phase 03: V2001 Template Dedup + HARDEN-01 Root Fix** — ready to start.
 
 ---
 
@@ -87,9 +87,9 @@ progress:
 ## Requirement Status Summary
 
 - **Total v1.1:** 34 (22 original + 12 Nyquist BLOCKING gaps)
-- **Completed:** 1 (VALIDATE-01)
+- **Completed:** 4 (VALIDATE-01..04)
 - **In progress:** 0
-- **Not started:** 33
+- **Not started:** 30
 
 ---
 
@@ -100,17 +100,18 @@ progress:
 | 2026-06-02 | Milestone v1.1 started; REQUIREMENTS.md defined (22 requirements, 5 categories) |
 | 2026-06-02 | ROADMAP.md created — 7 phases, 22/22 requirements mapped, phase numbering reset to Phase 1 |
 | 2026-06-04 | Phase 01 completed — 2 plans executed, 6 VALIDATION.md files written, 12 NYQ-XX BLOCKING gaps identified |
+| 2026-06-05 | Phase 02 completed — 5 plans executed, pytest --simulator infra + tb_generator refactor + CI 2×2×2 + CLAUDE.md dual-oracle |
 
 ---
 
 ## Current Position
 
-Phase: 02 (verilator-parity-ci-expansion) — READY
+Phase: 03 (v2001-template-dedup-harden-01-root-fix) — READY
 Plan: not yet planned
-Status: Phase 01 complete; Phase 02 next
-Last activity: 2026-06-04 -- Phase 01 completed
+Status: Phase 02 complete; Phase 03 next
+Last activity: 2026-06-05 — Phase 02 completed
 
 ## Operator Next Steps
 
-- Next: `/gsd:plan-phase 2` or `/gsd:discuss-phase 2`
-- `/gsd:verify-work 1` — manual acceptance testing of Phase 01 artifacts
+- Next: `/gsd:discuss-phase 3` or `/gsd:plan-phase 3`
+- `/gsd:verify-work 2` — manual acceptance testing of Phase 02 artifacts
