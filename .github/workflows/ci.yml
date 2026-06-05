@@ -23,6 +23,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest]
         python: ["3.12", "3.13"]
+        simulator: [iverilog, verilator]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -35,12 +36,20 @@ jobs:
         run: uv sync --dev
 
       - name: Install iverilog (Linux)
-        if: runner.os == 'Linux'
+        if: matrix.simulator == 'iverilog' && runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y iverilog
 
       - name: Install iverilog (macOS)
-        if: runner.os == 'macOS'
+        if: matrix.simulator == 'iverilog' && runner.os == 'macOS'
         run: brew install icarus-verilog
+
+      - name: Install Verilator (Linux)
+        if: matrix.simulator == 'verilator' && runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y verilator
+
+      - name: Install Verilator (macOS)
+        if: matrix.simulator == 'verilator' && runner.os == 'macOS'
+        run: brew install verilator
 
       - name: Install slang (Linux)
         if: runner.os == 'Linux'
@@ -62,7 +71,14 @@ jobs:
           sudo mv slang /usr/local/bin/slang
           slang --version
 
-      - name: Run tests
+      - name: Run tests (iverilog — full suite)
+        if: matrix.simulator == 'iverilog'
         run: uv run pytest tests/ -v --timeout=120
+        env:
+          SLANG_PATH: /usr/local/bin/slang
+
+      - name: Run tests (Verilator — simulation only)
+        if: matrix.simulator == 'verilator'
+        run: uv run pytest tests/ -m simulation --simulator=verilator -v --timeout=120
         env:
           SLANG_PATH: /usr/local/bin/slang

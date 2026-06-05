@@ -12,10 +12,18 @@ An open-source SVA (SystemVerilog Assertion) to synthesizable RTL compiler. It t
 - **Parsing**: Must use slang library (not re-implement parser) — slang is MIT, IEEE 1800-2017+ complete
 - **Language**: Python for v1 (rapid iteration), potential C++ rewrite for v2 performance
 - **Output**: SystemVerilog default, Verilog-2001 via --verilog flag
-- **Validation**: All generated monitors must pass equivalence checking against behavioral simulation (Icarus/Verilator)
+- **Validation**: All generated monitors must pass equivalence checking against behavioral simulation (Icarus/Verilator). Dual-oracle contract enforced: every simulation test passes under both iverilog and Verilator in CI.
 - **License**: BSL (Business Source License) — free for individual/academic/evaluation, commercial use by large companies requires license
 - **Architecture**: Token-passing composition model (TIMA Lab) with operator-aware templates (counter encoding for ranges)
 - **Interface standard**: Every generated checker exposes (clk, rst_n, start, pass, fail, active) ports
+
+### Dual-Oracle Validation Contract
+
+- A test passing under iverilog but failing under Verilator is a defect that MUST be fixed — never waived or marked as xfail.
+- The `--simulator` pytest flag controls which backend is used: `--simulator=iverilog` (default) or `--simulator=verilator`.
+- Simulation tests live in `tests/simulation/` and are marked `@pytest.mark.simulation`.
+- The Verilator backend uses a C++ wrapper (`tests/simulation/wrapper.cpp.j2`) compiled with `verilator --exe --build --timing` (NOT `--binary`).
+- CI enforces parity: iverilog axis runs full test suite, Verilator axis runs `-m simulation`. 8 total jobs: `{ubuntu,macos} × {3.12,3.13} × {iverilog,verilator}`.
 <!-- GSD:project-end -->
 
 <!-- GSD:stack-start source:research/STACK.md -->
