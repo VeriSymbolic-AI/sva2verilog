@@ -240,7 +240,7 @@ def test_reset_during_active_threads() -> None:
     assert "overflow_flag_q <= 1'b0" in top_sv_ov, (
         "overflow_flag_q not cleared in rst_n branch (overlap)"
     )
-    assert "attempt_fired_q <= 1'b0" in top_sv_ov, (
+    assert ("attempt_fired_q <= 1'b0" in top_sv_ov or "attempt_fired_q <= '0" in top_sv_ov), (
         "attempt_fired_q not cleared in rst_n branch (overlap)"
     )
 

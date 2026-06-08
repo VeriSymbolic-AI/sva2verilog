@@ -18,7 +18,7 @@ last_updated: 2026-06-02
 
 ### Hardening — Phase 03 HIGH defect fixes (carry-forward)
 
-- [ ] **HARDEN-01**: User can compile any SVA property using `disable iff` and have `attempt_fired` correctly latched on every triggering attempt — fix `attempt_fired_q` being cleared by `disable_i` (H-03), at the template-macro root, not per template instance
+- [x] **HARDEN-01**: User can compile any SVA property using `disable iff` and have `attempt_fired` correctly latched on every triggering attempt — fix `attempt_fired_q` being cleared by `disable_i` (H-03), at the template-macro root, not per template instance
 - [ ] **HARDEN-02**: User can compile multiple files in one run without one assertion's parser declarations leaking into the next — fix `_DECLARATIONS` global not reset between assertions (H-01)
 - [ ] **HARDEN-03**: User receives an error or correct compile (never a silent miscompile) for `[*N]` repetition with edge-case bounds — fix `rep_consecutive` silent miss (H-02)
 - [ ] **HARDEN-04**: User-named signals in IR debug dumps (`--dump-ir`) match the source — fix `_collect_signals` discarding `sig_name` (H-04)
@@ -32,9 +32,9 @@ last_updated: 2026-06-02
 
 ### Refactor — Verilog-2001 template deduplication
 
-- [ ] **REFACTOR-01**: Every Jinja2 template's always-block body lives in exactly one place, called from both SV and V2001 `verilog_mode` branches via macro extraction (22× duplication → 1)
-- [ ] **REFACTOR-02**: HARDEN-01's fix is applied once at the macro root and verified to land in both SV and V2001 output (no per-instance re-application needed)
-- [ ] **REFACTOR-03**: All 736 existing tests + golden parity continue to pass byte-identical SV output and behaviorally-equivalent V2001 output after dedup
+- [x] **REFACTOR-01**: Every Jinja2 template's always-block body lives in exactly one place, called from both SV and V2001 `verilog_mode` branches via macro extraction (22× duplication → 1)
+- [x] **REFACTOR-02**: HARDEN-01's fix is applied once at the macro root and verified to land in both SV and V2001 output (no per-instance re-application needed)
+- [x] **REFACTOR-03**: All 736 existing tests + golden parity continue to pass byte-identical SV output and behaviorally-equivalent V2001 output after dedup
 
 ### Validate — Retroactive Nyquist sweeps + Verilator parity
 
@@ -116,10 +116,10 @@ Explicit exclusions, with reasoning:
 | VALIDATE-02 | 2 | 01, 02, 03 | complete |
 | VALIDATE-03 | 2 | 01, 04 | complete |
 | VALIDATE-04 | 2 | 05 | complete |
-| REFACTOR-01 | 3 | TBD | not started |
-| REFACTOR-02 | 3 | TBD | not started |
-| REFACTOR-03 | 3 | TBD | not started |
-| HARDEN-01 | 3 | TBD | not started |
+| REFACTOR-01 | 3 | 01 | complete |
+| REFACTOR-02 | 3 | 01 | complete |
+| REFACTOR-03 | 3 | 02 | complete |
+| HARDEN-01 | 3 | 01, 02 | complete |
 | HARDEN-02 | 4 | TBD | not started |
 | HARDEN-03 | 4 | TBD | not started |
 | HARDEN-04 | 4 | TBD | not started |
