@@ -2,16 +2,16 @@
 // Source: delay_fixed.sv:2:32
 // Original property: @(posedge clk) a ##3 b
 module sva_prop_81cf66e0_e0 (
-    input  logic clk,
-    input  logic rst_n,
-    input  logic start,
-    input  logic a,
-    input  logic disable_i,
-    output logic active,
-    output logic pass,
-    output logic fail,
-    output logic attempt_fired,
-    output logic disabled_o
+input  logic clk,
+input  logic rst_n,
+input  logic start,
+input  logic a,
+input  logic disable_i,
+output  logic active,
+output  logic pass,
+output  logic fail,
+output  logic attempt_fired,
+output  logic disabled_o
 );
 
     // ── Combinational evaluation ───────────────────────────────────────
@@ -19,18 +19,28 @@ module sva_prop_81cf66e0_e0 (
     assign bool_result = (a);
 
     // ── Registered outputs (OUT-02: no combinational glitches) ─────────
-    logic active_q, pass_q, fail_q, attempt_fired_q;
-    always_ff @(posedge clk) begin
+    logic active_q, pass_q, fail_q;
+
+always_ff @(posedge clk) begin
         if (!rst_n || disable_i) begin
-            active_q        <= 1'b0;
-            pass_q          <= 1'b0;
-            fail_q          <= 1'b0;
-            attempt_fired_q <= 1'b0;
+            active_q <= 1'b0;
+            pass_q   <= 1'b0;
+            fail_q   <= 1'b0;
         end else begin
-            active_q        <= start;
-            pass_q          <= start &  bool_result;
-            fail_q          <= start & ~bool_result;
-            attempt_fired_q <= attempt_fired_q | start;  // sticky
+            active_q <= start;
+            pass_q   <= start &  bool_result;
+            fail_q   <= start & ~bool_result;
+        end
+    end
+
+    // ── HARDEN-01: attempt_fired_q never cleared by disable_i ──────────
+    logic attempt_fired_q;
+
+always_ff @(posedge clk) begin
+        if (!rst_n) begin
+            attempt_fired_q <= '0;
+        end else if (start) begin
+            attempt_fired_q <= 1'b1;  // sticky — never cleared by disable_i (HARDEN-01)
         end
     end
 

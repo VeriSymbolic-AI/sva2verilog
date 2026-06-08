@@ -1,0 +1,39 @@
+{# ── Shared macros for SV/V2001 mode-agnostic code generation ── #}
+{#
+   Usage in templates:
+     {% from '_macros.sv.j2' import signal_type, port_decl, always_block_header, zero_literal with context %}
+
+   All macros expect the caller to have 'verilog_mode' in the template context.
+#}
+
+{%- macro signal_type(verilog_mode) -%}
+{%- if verilog_mode %}reg{% else %}logic{% endif -%}
+{%- endmacro -%}
+
+
+{%- macro wire_type(verilog_mode) -%}
+{%- if verilog_mode %}wire{% else %}logic{% endif -%}
+{%- endmacro -%}
+
+
+{%- macro port_decl(verilog_mode, direction, signal_name) -%}
+{%- if verilog_mode -%}
+    {{ direction }}  {{ signal_name }}
+{%- else -%}
+    {{ direction }}  logic {{ signal_name }}
+{%- endif -%}
+{%- endmacro -%}
+
+
+{%- macro always_block_header(verilog_mode, clock_edge, clock_signal) -%}
+{%- if verilog_mode -%}
+    always @({{ clock_edge }} {{ clock_signal }}) begin
+{%- else -%}
+    always_ff @({{ clock_edge }} {{ clock_signal }}) begin
+{%- endif -%}
+{%- endmacro -%}
+
+
+{%- macro zero_literal(verilog_mode) -%}
+{%- if verilog_mode %}0{% else %}'0{% endif -%}
+{%- endmacro -%}

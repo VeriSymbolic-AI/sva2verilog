@@ -1,0 +1,29 @@
+{# ── HARDEN-01 fix: attempt_fired_q never cleared by disable_i ── #}
+{#
+   Usage in templates:
+     {% from '_attempt_fired_macro.sv.j2' import attempt_fired_logic with context %}
+
+   Template must declare: {{ signal_type(verilog_mode) }} attempt_fired_q;
+   before calling this macro.
+
+   Parameters:
+     verilog_mode   - boolean, True for V2001
+     clock_edge     - e.g. "posedge"
+     clock_signal   - e.g. "clk"
+     trigger_signal - "start" for simple templates, "ant_pass_w" for bit-vector
+
+   Emits a standalone always block for attempt_fired_q.
+   Only cleared by rst_n — NOT by disable_i (HARDEN-01 fix).
+#}
+
+{%- macro attempt_fired_logic(verilog_mode, clock_edge, clock_signal, trigger_signal) -%}
+{%- from '_macros.sv.j2' import always_block_header, zero_literal with context -%}
+
+{{ always_block_header(verilog_mode, clock_edge, clock_signal) }}
+        if (!rst_n) begin
+            attempt_fired_q <= {{ zero_literal(verilog_mode) }};
+        end else if ({{ trigger_signal }}) begin
+            attempt_fired_q <= 1'b1;  // sticky — never cleared by disable_i (HARDEN-01)
+        end
+    end
+{%- endmacro -%}
