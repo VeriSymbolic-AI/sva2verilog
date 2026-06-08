@@ -4,34 +4,30 @@
 module sva_prop_ed6835ae #(
     parameter CNT_WIDTH = 2
 ) (
-    input  logic clk,
-    input  logic rst_n,
-    input  logic start,
-    input  logic a,
-    input  logic disable_i,
-    output logic active,
-    output logic pass,
-    output logic fail,
-    output logic attempt_fired,
-    output logic disabled_o
+input  logic clk,
+input  logic rst_n,
+input  logic start,
+input  logic a,
+input  logic disable_i,
+output  logic active,
+output  logic pass,
+output  logic fail,
+output  logic attempt_fired,
+output  logic disabled_o
 );
-
     // ── Signal evaluation ────────────────────────────────────────────────────
     logic sig_eval;
     assign sig_eval = (a);
 
     // ── Counter-based consecutive repetition FSM ─────────────────────────────
     logic [CNT_WIDTH-1:0] count_q;
-    logic                 running_q;
-    logic                 attempt_fired_q;
+    logic running_q;
 
-    always_ff @(posedge clk) begin
+always_ff @(posedge clk) begin
         if (!rst_n || disable_i) begin
-            count_q         <= '0;
-            running_q       <= 1'b0;
-            attempt_fired_q <= 1'b0;
+            count_q   <= '0;
+            running_q <= 1'b0;
         end else begin
-            attempt_fired_q <= attempt_fired_q | start;  // sticky
             if (start && sig_eval) begin
                 running_q <= 1'b1;
                 count_q   <= 2'd1;
@@ -42,6 +38,16 @@ module sva_prop_ed6835ae #(
                 running_q <= 1'b0;
                 count_q   <= '0;
             end
+        end
+    end
+
+    // ── HARDEN-01: attempt_fired_q never cleared by disable_i ──────────
+    logic attempt_fired_q;
+always_ff @(posedge clk) begin
+        if (!rst_n) begin
+            attempt_fired_q <= '0;
+        end else if (start) begin
+            attempt_fired_q <= 1'b1;  // sticky — never cleared by disable_i (HARDEN-01)
         end
     end
 
@@ -62,5 +68,4 @@ module sva_prop_ed6835ae #(
     assign fail          = disable_i ? 1'b0 : fail_internal;
     assign attempt_fired = attempt_fired_q;
     assign disabled_o    = disable_i;
-
 endmodule

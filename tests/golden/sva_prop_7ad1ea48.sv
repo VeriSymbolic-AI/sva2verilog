@@ -2,17 +2,17 @@
 // Source: disable_iff_test.sv:2:3
 // Original property: @(posedge clk) disable iff ((!rst_n)) a |-> b
 module sva_prop_7ad1ea48 (
-    input  logic clk,
-    input  logic rst_n,
-    input  logic start,
-    input  logic a,
-    input  logic b,
-    input  logic disable_i,
-    output logic active,
-    output logic pass,
-    output logic fail,
-    output logic attempt_fired,
-    output logic disabled_o
+input  logic clk,
+input  logic rst_n,
+input  logic start,
+input  logic a,
+input  logic b,
+input  logic disable_i,
+output  logic active,
+output  logic pass,
+output  logic fail,
+output  logic attempt_fired,
+output  logic disabled_o
 );
     // ── Combinational disable condition ───────────────────────────────────────
     logic cond_result;

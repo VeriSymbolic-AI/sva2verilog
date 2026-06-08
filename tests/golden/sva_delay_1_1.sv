@@ -4,28 +4,25 @@
 module sva_delay_1_1 #(
     parameter CNT_WIDTH = 1
 ) (
-    input  logic clk,
-    input  logic rst_n,
-    input  logic start,
-    input  logic disable_i,
-    output logic active,
-    output logic pass,
-    output logic fail,
-    output logic attempt_fired,
-    output logic disabled_o
+input  logic clk,
+input  logic rst_n,
+input  logic start,
+input  logic disable_i,
+output  logic active,
+output  logic pass,
+output  logic fail,
+output  logic attempt_fired,
+output  logic disabled_o
 );
     // ── Counter-based delay ──────────────────────────────────────────────────
     logic [CNT_WIDTH-1:0] count_q;
     logic                 running_q;
-    logic                 attempt_fired_q;
 
-    always_ff @(posedge clk) begin
+always_ff @(posedge clk) begin
         if (!rst_n || disable_i) begin
             count_q         <= '0;
             running_q       <= 1'b0;
-            attempt_fired_q <= 1'b0;
         end else begin
-            attempt_fired_q <= attempt_fired_q | start;  // sticky
             if (start) begin
                 count_q   <= '0;
                 running_q <= 1'b1;
@@ -36,6 +33,17 @@ module sva_delay_1_1 #(
                     count_q <= count_q + 1'b1;
                 end
             end
+        end
+    end
+
+    // ── HARDEN-01: attempt_fired_q never cleared by disable_i ──────────
+    logic attempt_fired_q;
+
+always_ff @(posedge clk) begin
+        if (!rst_n) begin
+            attempt_fired_q <= '0;
+        end else if (start) begin
+            attempt_fired_q <= 1'b1;  // sticky — never cleared by disable_i (HARDEN-01)
         end
     end
 

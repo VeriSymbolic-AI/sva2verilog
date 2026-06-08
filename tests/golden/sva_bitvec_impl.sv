@@ -4,18 +4,18 @@
 module sva_bitvec_impl #(
     parameter BV_WIDTH = 6
 ) (
-    input  logic clk,
-    input  logic rst_n,
-    input  logic start,
-    input  logic a,
-    input  logic b,
-    input  logic disable_i,
-    output logic active,
-    output logic pass,
-    output logic fail,
-    output logic attempt_fired,
-    output logic overflow_flag,
-    output logic disabled_o
+input  logic clk,
+input  logic rst_n,
+input  logic start,
+input  logic a,
+input  logic b,
+input  logic disable_i,
+output  logic active,
+output  logic pass,
+output  logic fail,
+output  logic attempt_fired,
+output  logic overflow_flag,
+output  logic disabled_o
 );
     // ── Internal wires from child modules ────────────────────────────────────
     logic ant_pass_w;
@@ -61,37 +61,39 @@ module sva_bitvec_impl #(
     );
 
     // ── Bit-vector shift register (thread tracker) ────────────────────────────
-    // Each bit position represents a thread started N cycles ago.
-    // bit[0] = thread started this cycle; shift right = all threads age.
     logic [BV_WIDTH-1:0] bv_q;
     logic                overflow_flag_q;
-    logic                attempt_fired_q;
 
-    // Overflow: antecedent fires while all bit positions occupied
     logic overflow_event;
     assign overflow_event = ant_pass_w && (&bv_q) && !overflow_flag_q;
 
-    always_ff @(posedge clk) begin
+always_ff @(posedge clk) begin
         if (!rst_n || disable_i) begin
             bv_q            <= '0;
             overflow_flag_q <= 1'b0;
-            attempt_fired_q <= 1'b0;
         end else begin
-            attempt_fired_q <= attempt_fired_q | ant_pass_w;  // sticky
             if (overflow_flag_q) begin
-                // HARD HALT: freeze bv_q, only rst_n clears
                 bv_q            <= bv_q;
                 overflow_flag_q <= 1'b1;
             end else begin
                 overflow_flag_q <= overflow_flag_q | overflow_event;
-                // Shift right (all threads age by 1), insert new thread at MSB
                 bv_q <= {ant_pass_w, bv_q[BV_WIDTH-1:1]};
             end
         end
     end
 
+    // ── HARDEN-01: attempt_fired_q never cleared by disable_i ──────────
+    logic attempt_fired_q;
+
+always_ff @(posedge clk) begin
+        if (!rst_n) begin
+            attempt_fired_q <= '0;
+        end else if (ant_pass_w) begin
+            attempt_fired_q <= 1'b1;  // sticky — never cleared by disable_i (HARDEN-01)
+        end
+    end
+
     // ── Output assignments ────────────────────────────────────────────────────
-    // When disabled, gate active/pass/fail to 0; overflow_flag remains sticky
     assign active        = disable_i ? 1'b0 : (overflow_flag_q ? 1'b0 : (ant_active_w | con_active_w | (|bv_q)));
     assign pass          = disable_i ? 1'b0 : (overflow_flag_q ? 1'b0 : (bv_q[BV_WIDTH-1] & con_pass_w));
     assign fail          = disable_i ? 1'b0 : (overflow_event  ? 1'b1 :

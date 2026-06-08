@@ -2,18 +2,18 @@
 // Source: delay_three.sv:2:3
 // Original property: @(posedge clk) a ##1 b ##2 c
 module sva_prop_5c9caf75 (
-    input  logic clk,
-    input  logic rst_n,
-    input  logic start,
-    input  logic a,
-    input  logic b,
-    input  logic c,
-    input  logic disable_i,
-    output logic active,
-    output logic pass,
-    output logic fail,
-    output logic attempt_fired,
-    output logic disabled_o
+input  logic clk,
+input  logic rst_n,
+input  logic start,
+input  logic a,
+input  logic b,
+input  logic c,
+input  logic disable_i,
+output  logic active,
+output  logic pass,
+output  logic fail,
+output  logic attempt_fired,
+output  logic disabled_o
 );
     // ── Internal token wires (N+1 wires for N children) ─────────────────────
     logic w_pass_0;
@@ -98,13 +98,9 @@ module sva_prop_5c9caf75 (
     );
 
     // ── Top-level output aggregation ─────────────────────────────────────────
-    // active: any child is active
     assign active = disable_i ? 1'b0 : (w_active_0 | w_active_1 | w_active_2 | w_active_3 | w_active_4);
-    // pass: final child's pass output
     assign pass   = disable_i ? 1'b0 : w_pass_4;
-    // fail: any child signals fail
     assign fail   = disable_i ? 1'b0 : (w_fail_0 | w_fail_1 | w_fail_2 | w_fail_3 | w_fail_4);
-    // attempt_fired: first child's attempt_fired (start of sequence)
     assign attempt_fired = w_afired_0;
     assign disabled_o    = disable_i;
 

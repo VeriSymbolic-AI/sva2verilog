@@ -4,28 +4,30 @@
 module sva_delay_0_0 #(
     parameter CNT_WIDTH = 1
 ) (
-    input  logic clk,
-    input  logic rst_n,
-    input  logic start,
-    input  logic disable_i,
-    output logic active,
-    output logic pass,
-    output logic fail,
-    output logic attempt_fired,
-    output logic disabled_o
+input  logic clk,
+input  logic rst_n,
+input  logic start,
+input  logic disable_i,
+output  logic active,
+output  logic pass,
+output  logic fail,
+output  logic attempt_fired,
+output  logic disabled_o
 );
     // ── ##0 combinational pass-through ──────────────────────────────────────
     assign pass   = disable_i ? 1'b0 : start;
     assign active = disable_i ? 1'b0 : start;
     assign fail   = 1'b0;
 
-    // ── attempt_fired: sticky, cleared only by rst_n / disable_i ───────────
+    // ── HARDEN-01: attempt_fired_q never cleared by disable_i ──────────
     logic attempt_fired_q;
-    always_ff @(posedge clk) begin
-        if (!rst_n || disable_i)
-            attempt_fired_q <= 1'b0;
-        else
-            attempt_fired_q <= attempt_fired_q | start;  // sticky
+
+always_ff @(posedge clk) begin
+        if (!rst_n) begin
+            attempt_fired_q <= '0;
+        end else if (start) begin
+            attempt_fired_q <= 1'b1;  // sticky — never cleared by disable_i (HARDEN-01)
+        end
     end
     assign attempt_fired = attempt_fired_q;
     assign disabled_o    = disable_i;
