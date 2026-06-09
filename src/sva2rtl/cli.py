@@ -30,9 +30,34 @@ from sva2rtl.errors import (
     UnsupportedConstruct,
 )
 from sva2rtl.frontend import invoke_slang
-from sva2rtl.ir import ClockSpec, SVANode
 from sva2rtl.normalizer import normalize
 from sva2rtl.optimizer import optimize
+
+_KNOWN_SV_EXTENSIONS = frozenset({".sv", ".v", ".svh"})
+
+def _resolve_output_mode(
+    output: str | None,
+    *,
+    multi_prop: bool,
+) -> str | None:
+    """Resolve --output path as file or directory mode.
+
+    Returns the resolved output path or None.
+    Incompatible combinations raise click.UsageError.
+    """
+    if output is None:
+        return None
+    if output.endswith("/"):
+        return output
+    p = Path(output)
+    if p.suffix in _KNOWN_SV_EXTENSIONS:
+        if multi_prop:
+            raise click.UsageError(
+                f"--output looks like a file path ('{output}') but input has "
+                "multiple assertions. Use a directory instead."
+            )
+        return output
+    return output
 
 
 @click.command()
@@ -106,6 +131,21 @@ def main(
     assertion statements (``assert property (...)``).
     """
     try:
+        # HARDEN-08: --verilog is incompatible with --dump-* flags
+        if verilog and (dump_ast or dump_ir or dump_tree):
+            dump_flags = []
+            if dump_ast:
+                dump_flags.append("--dump-ast")
+            if dump_ir:
+                dump_flags.append("--dump-ir")
+            if dump_tree:
+                dump_flags.append("--dump-tree")
+            raise click.UsageError(
+                f"--verilog cannot be combined with {'/'.join(dump_flags)}. "
+                "Dump output is always in SystemVerilog mode. "
+                "Run --verilog separately without dump flags for V2001-style RTL."
+            )
+
         ast = invoke_slang(Path(input_file), slang_path)
 
         # --dump-ast: print raw JSON AST and exit
@@ -118,21 +158,55 @@ def main(
 
         # --property filter: select matching assertion
         if property_name is not None:
-            matched: list[tuple[SVANode, ClockSpec, str, str | None]] = [
-                (node, clock, text, label)
-                for node, clock, text, label in assertions
-                if label == property_name
-            ]
-            if not matched:
-                available_labels = [
-                    label for _, _, _, label in assertions if label is not None
+            # HARDEN-06: three match modes — index, source-line, label
+            if property_name.isdigit():
+                # Mode 1: numeric → 1-based index
+                idx = int(property_name)
+                if 1 <= idx <= len(assertions):
+                    assertions = [assertions[idx - 1]]
+                else:
+                    raise PropertyNotFound(
+                        message=f"property index {idx} out of range (1..{len(assertions)})",
+                        property_name=property_name,
+                        available=[str(i) for i in range(1, len(assertions) + 1)],
+                    )
+            elif property_name.startswith("@") and property_name[1:].isdigit():
+                # Mode 2: @N → source line
+                line_num = int(property_name[1:])
+                matched = []
+                for node, clock, text, label in assertions:
+                    sl = getattr(node, "source_loc", None)
+                    if sl is not None and sl.line == line_num:
+                        matched.append((node, clock, text, label))
+                if not matched:
+                    available_lines = sorted(set(
+                        str(getattr(n, "source_loc").line)
+                        for n, _, _, _ in assertions
+                        if getattr(n, "source_loc", None) is not None
+                    ))
+                    raise PropertyNotFound(
+                        message=f"no assertion found at line {line_num}",
+                        property_name=property_name,
+                        available=available_lines,
+                    )
+                assertions = matched
+            else:
+                # Mode 3: label name exact match
+                matched = [
+                    (node, clock, text, label)
+                    for node, clock, text, label in assertions
+                    if label == property_name
                 ]
-                raise PropertyNotFound(
-                    message=f"property '{property_name}' not found",
-                    property_name=property_name,
-                    available=available_labels,
-                )
-            assertions = matched
+                if not matched:
+                    available_labels = [
+                        label for _, _, _, label in assertions if label is not None
+                    ]
+                    raise PropertyNotFound(
+                        message=f"property '{property_name}' not found",
+                        property_name=property_name,
+                        available=available_labels,
+                    )
+                assertions = matched
 
         # Process single or multiple assertions
         if len(assertions) == 1:
@@ -168,13 +242,16 @@ def main(
                 )
                 sys.exit(0)
 
+            # HARDEN-07: resolve output mode
+            out_path_str = _resolve_output_mode(output, multi_prop=False)
             if checker_node.children:
                 modules = emit_all(checker_node, verilog_mode=verilog)
-                out_dir = Path(output) if output else Path(".")
+                out_dir = Path(out_path_str) if out_path_str else Path(".")
                 write_output_dir(modules, out_dir)
             else:
                 sv_text = emit(checker_node, verilog_mode=verilog)
-                write_output(sv_text, Path(output) if output else None)
+                out_path = Path(out_path_str) if out_path_str else None
+                write_output(sv_text, out_path)
         else:
             # Multi-property: normalize all, optionally dump-ir for first
             normalized_assertions = []
@@ -195,6 +272,8 @@ def main(
             all_modules: dict[str, str] = {}
             for norm_node, clock, text, label, raw_node in normalized_assertions:
                 checker_node = compose(norm_node, clock, label, text)
+                # HARDEN-05: compute unoptimized_checker per-assertion
+                unopt = checker_node
                 if not no_optimize:
                     checker_node = optimize(checker_node)
 
@@ -208,7 +287,7 @@ def main(
                             raw_node,
                             checker_node,
                             hash_map,
-                            unoptimized_checker=None,
+                            unoptimized_checker=unopt if not no_optimize else None,
                         )
                     )
                     continue
@@ -220,7 +299,9 @@ def main(
                 sys.exit(0)
 
             if all_modules:
-                out_dir = Path(output) if output else Path(".")
+                # HARDEN-07: resolve output mode
+                out_path_str = _resolve_output_mode(output, multi_prop=True)
+                out_dir = Path(out_path_str) if out_path_str else Path(".")
                 write_output_dir(all_modules, out_dir)
 
         sys.exit(0)
