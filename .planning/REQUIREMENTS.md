@@ -19,9 +19,9 @@ last_updated: 2026-06-02
 ### Hardening — Phase 03 HIGH defect fixes (carry-forward)
 
 - [x] **HARDEN-01**: User can compile any SVA property using `disable iff` and have `attempt_fired` correctly latched on every triggering attempt — fix `attempt_fired_q` being cleared by `disable_i` (H-03), at the template-macro root, not per template instance
-- [ ] **HARDEN-02**: User can compile multiple files in one run without one assertion's parser declarations leaking into the next — fix `_DECLARATIONS` global not reset between assertions (H-01)
-- [ ] **HARDEN-03**: User receives an error or correct compile (never a silent miscompile) for `[*N]` repetition with edge-case bounds — fix `rep_consecutive` silent miss (H-02)
-- [ ] **HARDEN-04**: User-named signals in IR debug dumps (`--dump-ir`) match the source — fix `_collect_signals` discarding `sig_name` (H-04)
+- [x] **HARDEN-02**: User can compile multiple files in one run without one assertion's parser declarations leaking into the next — fix `_DECLARATIONS` global not reset between assertions (H-01)
+- [x] **HARDEN-03**: User receives an error or correct compile (never a silent miscompile) for `[*N]` repetition with edge-case bounds — fix `rep_consecutive` silent miss (H-02)
+- [x] **HARDEN-04**: User-named signals in IR debug dumps (`--dump-ir`) match the source — fix `_collect_signals` discarding `sig_name` (H-04)
 
 ### Hardening — Phase 06 HIGH defect fixes (carry-forward)
 
@@ -120,9 +120,9 @@ Explicit exclusions, with reasoning:
 | REFACTOR-02 | 3 | 01 | complete |
 | REFACTOR-03 | 3 | 02 | complete |
 | HARDEN-01 | 3 | 01, 02 | complete |
-| HARDEN-02 | 4 | TBD | not started |
-| HARDEN-03 | 4 | TBD | not started |
-| HARDEN-04 | 4 | TBD | not started |
+| HARDEN-02 | 4 | 01 | complete |
+| HARDEN-03 | 4 | 01 | complete |
+| HARDEN-04 | 4 | 01 | complete |
 | HARDEN-05 | 5 | TBD | not started |
 | HARDEN-06 | 5 | TBD | not started |
 | HARDEN-07 | 5 | TBD | not started |

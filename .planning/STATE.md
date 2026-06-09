@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: — Hardening Release
-current_phase: 04
+current_phase: 05
 status: ready
 last_updated: "2026-06-05T05:10:00.000Z"
 last_activity: 2026-06-05 -- Phase 02 completed
 progress:
   total_phases: 7
-  completed_phases: 3
-  total_plans: 9
-  completed_plans: 9
-  percent: 43
+  completed_phases: 4
+  total_plans: 10
+  completed_plans: 10
+  percent: 57
 ---
 
 # Project State: sva2rtl
@@ -43,7 +43,7 @@ progress:
 | 1 | Retroactive Nyquist Baseline | ✅ complete | VALIDATE-01 |
 | 2 | Verilator Parity + CI Expansion | ✅ complete | VALIDATE-02, VALIDATE-03, VALIDATE-04 |
 | 3 | V2001 Template Dedup + HARDEN-01 Root Fix | ✅ complete | REFACTOR-01, REFACTOR-02, REFACTOR-03, HARDEN-01 |
-| 4 | Phase 03 Remaining HIGH Fixes | not started | HARDEN-02, HARDEN-03, HARDEN-04 |
+| 4 | Remaining HIGH Fixes | ✅ complete | HARDEN-02, HARDEN-03, HARDEN-04 |
 | 5 | Phase 06 HIGH CLI Fixes | not started | HARDEN-05, HARDEN-06, HARDEN-07, HARDEN-08 |
 | 6 | MEDIUM/LOW Cleanup + Version Sync + Final Review | not started | POLISH-01, POLISH-02, POLISH-03, POLISH-04 |
 | 7 | Release — v1.1.0 Tag + Notes + Smoke | not started | RELEASE-01, RELEASE-02, RELEASE-03 |
