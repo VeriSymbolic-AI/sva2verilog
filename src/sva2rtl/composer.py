@@ -743,12 +743,13 @@ def _collect_signals(
     children: list[CheckerNode],
 ) -> tuple[tuple[str, str], ...]:
     """Collect all unique observed signals from a list of child CheckerNodes."""
-    seen: dict[str, None] = {}
+    # HARDEN-04: preserve original (port_name, sig_name) pairs
+    result: dict[str, str] = {}
     for child in children:
         for port_name, sig_name in child.observed_signals:
-            if port_name not in seen:
-                seen[port_name] = None
-    return tuple((name, name) for name in seen)
+            if port_name not in result:
+                result[port_name] = sig_name
+    return tuple((p, s) for p, s in result.items())
 
 
 def _compose_disable_iff(

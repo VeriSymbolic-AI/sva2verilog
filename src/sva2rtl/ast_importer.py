@@ -157,6 +157,7 @@ def import_all_assertions(
 
     # First pass: collect named sequence/property declarations.
     global _DECLARATIONS
+    _DECLARATIONS.clear()
     for member in members:
         if member.get("kind") == "Instance":
             body = member.get("body", {})
@@ -539,6 +540,21 @@ def _build_seq_repetition(
             )
         )
     rep_max = int(max_val)
+    # HARDEN-03: reject invalid repetition bounds
+    if rep_min > rep_max:
+        raise SvaCompileError(
+            message=(
+                f"SVA-E002: invalid repetition range [*{rep_min}:{rep_max}] at "
+                f"{source_loc} — min must be <= max"
+            )
+        )
+    if rep_min == 0 and rep_max == 0:
+        raise SvaCompileError(
+            message=(
+                f"SVA-E002: [*0] repetition (zero-length match) at {source_loc} "
+                "is not supported"
+            )
+        )
     inner_node = node.get("expr", {})
     inner = _dispatch_expr_to_ir(inner_node, _visited) if inner_node else BoolExpr(
         text="<expr>", source_loc=source_loc
