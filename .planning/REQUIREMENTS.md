@@ -25,10 +25,10 @@ last_updated: 2026-06-02
 
 ### Hardening — Phase 06 HIGH defect fixes (carry-forward)
 
-- [ ] **HARDEN-05**: User running `--dump-tree` on a multi-property file sees an `unoptimized_checker` block for every property, not just the first
-- [ ] **HARDEN-06**: User can target an unlabeled assertion via `--property` (e.g. by source line or anonymous index) instead of the flag silently failing
-- [ ] **HARDEN-07**: User invoking `--output PATH` gets unambiguous behavior — `PATH` is interpreted as a file when single-property, directory when multi-property; mismatched modes produce a clear error
-- [ ] **HARDEN-08**: User combining `--verilog` with `--dump-ast` / `--dump-ir` / `--dump-tree` either applies the V2001 mode to dumps or receives an explicit "incompatible flags" error — no silent ignoring
+- [x] **HARDEN-05**: User running `--dump-tree` on a multi-property file sees an `unoptimized_checker` block for every property, not just the first
+- [x] **HARDEN-06**: User can target an unlabeled assertion via `--property` (e.g. by source line or anonymous index) instead of the flag silently failing
+- [x] **HARDEN-07**: User invoking `--output PATH` gets unambiguous behavior — `PATH` is interpreted as a file when single-property, directory when multi-property; mismatched modes produce a clear error
+- [x] **HARDEN-08**: User combining `--verilog` with `--dump-ast` / `--dump-ir` / `--dump-tree` either applies the V2001 mode to dumps or receives an explicit "incompatible flags" error — no silent ignoring
 
 ### Refactor — Verilog-2001 template deduplication
 
@@ -123,10 +123,10 @@ Explicit exclusions, with reasoning:
 | HARDEN-02 | 4 | 01 | complete |
 | HARDEN-03 | 4 | 01 | complete |
 | HARDEN-04 | 4 | 01 | complete |
-| HARDEN-05 | 5 | TBD | not started |
-| HARDEN-06 | 5 | TBD | not started |
-| HARDEN-07 | 5 | TBD | not started |
-| HARDEN-08 | 5 | TBD | not started |
+| HARDEN-05 | 5 | 01 | complete |
+| HARDEN-06 | 5 | 01 | complete |
+| HARDEN-07 | 5 | 01 | complete |
+| HARDEN-08 | 5 | 01 | complete |
 | POLISH-01 | 6 | TBD | not started |
 | POLISH-02 | 6 | TBD | not started |
 | POLISH-03 | 6 | TBD | not started |
