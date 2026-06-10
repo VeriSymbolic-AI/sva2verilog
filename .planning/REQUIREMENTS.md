@@ -45,10 +45,10 @@ last_updated: 2026-06-02
 
 ### Polish — MEDIUM / LOW advisory cleanup + version sync
 
-- [ ] **POLISH-01**: User running `python -c "import sva2rtl; print(sva2rtl.__version__)"` sees the same version string as `pip show sva2rtl` (i.e. `__init__.py` and `pyproject.toml` agree)
-- [ ] **POLISH-02**: All 10 Phase 06 MEDIUM advisory findings are either closed (with code change) or formally deferred (with reason logged in PROJECT.md "Out of Scope")
-- [ ] **POLISH-03**: All 9 Phase 06 LOW advisory findings are either closed or formally deferred — review board reaches zero open HIGH/MEDIUM
-- [ ] **POLISH-04**: Cross-phase code review of the v1.1 hardening diff produces zero new HIGH-severity findings
+- [x] **POLISH-01**: User running `python -c "import sva2rtl; print(sva2rtl.__version__)"` sees the same version string as `pip show sva2rtl` (i.e. `__init__.py` and `pyproject.toml` agree)
+- [x] **POLISH-02**: All 10 Phase 06 MEDIUM advisory findings are either closed (with code change) or formally deferred (with reason logged in PROJECT.md "Out of Scope")
+- [x] **POLISH-03**: All 9 Phase 06 LOW advisory findings are either closed or formally deferred — review board reaches zero open HIGH/MEDIUM
+- [x] **POLISH-04**: Cross-phase code review of the v1.1 hardening diff produces zero new HIGH-severity findings
 
 ### Validate — Nyquist Gap Remediation (Phase 1 Audit)
 
@@ -127,10 +127,10 @@ Explicit exclusions, with reasoning:
 | HARDEN-06 | 5 | 01 | complete |
 | HARDEN-07 | 5 | 01 | complete |
 | HARDEN-08 | 5 | 01 | complete |
-| POLISH-01 | 6 | TBD | not started |
-| POLISH-02 | 6 | TBD | not started |
-| POLISH-03 | 6 | TBD | not started |
-| POLISH-04 | 6 | TBD | not started |
+| POLISH-01 | 6 | 01 | complete |
+| POLISH-02 | 6 | 01 | complete |
+| POLISH-03 | 6 | 01 | complete |
+| POLISH-04 | 6 | 01 | complete |
 | NYQ-01 | 3 | TBD | not started |
 | NYQ-02 | 4 | TBD | not started |
 | NYQ-10 | 4 | TBD | not started |
