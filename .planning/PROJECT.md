@@ -87,6 +87,19 @@ Turn any SVA property into a correct, area-efficient synthesizable hardware moni
 - FPGA synthesis toolchain integration — downstream user concern
 - GUI or IDE integration — CLI-first
 
+### Deferred to v1.2 (from v1.1 Phase 6 Triage)
+
+These 8 MEDIUM/LOW findings are documented and deferred. They do not block v1.1 release:
+
+- **M-06.1** — Exception handler order dependency: explicit dispatch preferred over catch-order. No user impact.
+- **M-06.2** — SVA-E002 dual exit code: emitted from two paths. Consolidate in error-code redesign.
+- **M-06.9** — Deferred imports in cli.py: move to top-of-file in v1.2 cleanup.
+- **M-06.10** — GitHub URL inconsistency: unify URLs in pyproject.toml and README.
+- **L-06.1** — Exception type name swallowed: print actual exception class in error output.
+- **L-06.2** — Error codes embedded in strings: centralize in error-code registry.
+- **L-06.8** — --version flag position: minor UX polish.
+- **L-06.9** — Fixture name shadowing: code-style cleanup, no runtime impact.
+
 ## Context
 
 - **Market gap (still valid):** No mature open-source SVA→RTL compiler exists globally. Commercial EDA tools (VCS/Questa/Xcelium) discard SVA at synthesis — they don't generate monitor circuits. v1.0 is the first usable open-source filling that gap.
