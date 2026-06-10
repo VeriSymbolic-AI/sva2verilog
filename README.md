@@ -100,7 +100,7 @@ module sva_monitor_<name> (
     output logic pass,          // Asserted for one cycle on property match
     output logic fail,          // Asserted for one cycle on property violation
     output logic active,        // High while evaluation is in progress
-    output logic attempt_fired, // Pulse when a new attempt begins
+    output logic attempt_fired, // Sticky: set high on first start; cleared only by reset
     input  logic disable_i,     // External disable condition
     output logic disabled_o     // Indicates monitor is disabled
 );

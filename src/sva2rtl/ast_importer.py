@@ -819,7 +819,7 @@ def _extract_clock(prop_spec: dict[str, Any]) -> ClockSpec:
         raise SvaCompileError(
             message=(
                 f"Property at {source_loc} has no clock annotation. "
-                "Use @(posedge clk) or --default-clock flag."
+                "Use @(posedge clk) to specify a clock event."
             )
         )
 

@@ -141,7 +141,7 @@ The following operators are planned for v2 but not supported in v1:
 | SVA-E002 | Error | Unbounded repetition is not synthesizable | Replace `[*]` or `[+]` with bounded `[*M:N]` |
 | SVA-E003 | Error | Multi-clock property detected | Rewrite using single clock domain |
 | SVA-E004 | Error | Failed to parse SVA input (slang error) | Check syntax; ensure slang can parse the input |
-| SVA-E005 | Warning | Property may generate large state space (>256 states) | Consider simplifying or splitting the property |
+| SVA-E005 | Error | `--property` matched no assertion (label, index, or line not found) | Use a valid label name, 1-based index, or `@N` source-line number |
 
 ### Error Output Format
 
