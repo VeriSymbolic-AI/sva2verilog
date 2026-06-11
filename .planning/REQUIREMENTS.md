@@ -69,9 +69,9 @@ The following BLOCKING Nyquist gaps were identified during the retroactive v1.0 
 
 ### Release — Public v1.1.0 tag
 
-- [ ] **RELEASE-01**: Repository carries an annotated git tag `v1.1.0` pointing at the merged hardening release
-- [ ] **RELEASE-02**: GitHub release notes summarize: hardening fixes (HARDEN-01..08), V2001 dedup (REFACTOR-01..03), Verilator parity (VALIDATE-02..04), and version sync (POLISH-01) — in user-facing language
-- [ ] **RELEASE-03**: Final `pyproject.toml` version is `1.1.0`, README install/usage instructions are current, and the published artifact installs cleanly under `pip install` and `uv pip install` smoke checks
+- [x] **RELEASE-01**: Repository carries an annotated git tag `v1.1.0` pointing at the merged hardening release
+- [x] **RELEASE-02**: GitHub release notes summarize: hardening fixes (HARDEN-01..08), V2001 dedup (REFACTOR-01..03), Verilator parity (VALIDATE-02..04), and version sync (POLISH-01) — in user-facing language
+- [x] **RELEASE-03**: Final `pyproject.toml` version is `1.1.0`, README install/usage instructions are current, and the published artifact installs cleanly under `pip install` and `uv pip install` smoke checks
 
 ---
 
@@ -143,9 +143,9 @@ Explicit exclusions, with reasoning:
 | NYQ-51 | 5 | TBD | not started |
 | NYQ-52 | 5 | TBD | not started |
 | NYQ-53 | 5 | TBD | not started |
-| RELEASE-01 | 7 | TBD | not started |
-| RELEASE-02 | 7 | TBD | not started |
-| RELEASE-03 | 7 | TBD | not started |
+| RELEASE-01 | 7 | 01 | complete |
+| RELEASE-02 | 7 | 01 | complete |
+| RELEASE-03 | 7 | 01 | complete |
 
 **Total:** 34 v1.1 requirements (22 original + 12 Nyquist BLOCKING gaps). Coverage: 34/34 mapped to phases 1–7. ✅
 
