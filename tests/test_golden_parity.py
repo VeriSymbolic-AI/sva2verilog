@@ -167,9 +167,9 @@ def test_golden_parity_multi_module(
 
 
 def test_golden_file_count_minimum() -> None:
-    """tests/golden/ contains at least 29 .sv files (catches accidental deletion)."""
+    """tests/golden/ contains at least 59 .sv files (catches accidental deletion)."""
     golden_files = list(_GOLDEN.glob("*.sv"))
-    assert len(golden_files) >= 29, (
-        f"Expected at least 29 golden .sv files, found {len(golden_files)}. "
+    assert len(golden_files) >= 59, (
+        f"Expected at least 59 golden .sv files, found {len(golden_files)}. "
         f"Files: {sorted(f.name for f in golden_files)}"
     )

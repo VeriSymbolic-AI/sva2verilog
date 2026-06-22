@@ -54,9 +54,7 @@ jobs:
       - name: Install slang (Linux)
         if: runner.os == 'Linux'
         run: |
-          # Pin to v7.0 — JSON AST fixtures were generated against this version.
-          # Update when migrating to newer slang AST schema.
-          SLANG_VERSION="v7.0"
+          SLANG_VERSION="v11.0"
           wget -q "https://github.com/MikePopoloski/slang/releases/download/${SLANG_VERSION}/slang-linux.tar.gz"
           tar xzf slang-linux.tar.gz
           sudo mv slang /usr/local/bin/slang
@@ -65,7 +63,7 @@ jobs:
       - name: Install slang (macOS)
         if: runner.os == 'macOS'
         run: |
-          SLANG_VERSION="v7.0"
+          SLANG_VERSION="v11.0"
           wget -q "https://github.com/MikePopoloski/slang/releases/download/${SLANG_VERSION}/slang-macos.tar.gz"
           tar xzf slang-macos.tar.gz
           sudo mv slang /usr/local/bin/slang
@@ -80,5 +78,33 @@ jobs:
       - name: Run tests (Verilator — simulation only)
         if: matrix.simulator == 'verilator'
         run: uv run pytest tests/ -m simulation --simulator=verilator -v --timeout=120
+        env:
+          SLANG_PATH: /usr/local/bin/slang
+
+  formal:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+
+      - name: Install Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --dev
+
+      - name: Install yosys
+        run: sudo apt-get update && sudo apt-get install -y yosys
+
+      - name: Install slang
+        run: |
+          SLANG_VERSION="v11.0"
+          wget -q "https://github.com/MikePopoloski/slang/releases/download/${SLANG_VERSION}/slang-linux.tar.gz"
+          tar xzf slang-linux.tar.gz
+          sudo mv slang /usr/local/bin/slang
+          slang --version
+
+      - name: Run formal equivalence tests
+        run: uv run pytest tests/test_formal_passes.py tests/test_formal_templates.py -v --timeout=600
         env:
           SLANG_PATH: /usr/local/bin/slang

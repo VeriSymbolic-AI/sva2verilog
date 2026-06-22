@@ -19,15 +19,25 @@ import math
 import re
 
 from sva2rtl import __version__
-from sva2rtl.errors import UnsupportedConstruct
+from sva2rtl.errors import SvaCompileError, UnsupportedConstruct
 from sva2rtl.ir import (
     BoolExpr,
     CheckerNode,
     ClockSpec,
     DisableIff,
+    PropIfElse,
     PropImplication,
+    PropNot,
+    SeqAnd,
     SeqConcat,
+    SeqFirstMatch,
+    SeqGotoRep,
+    SeqIntersect,
+    SeqNonconsecRep,
+    SeqOr,
     SeqRepetition,
+    SeqThroughout,
+    SeqWithin,
     SignalFunc,
     SourceLoc,
     SVANode,
@@ -465,6 +475,26 @@ def compose(
             return _compose_implication(node, clock, label, original_text, cse_origin)
         case DisableIff():
             return _compose_disable_iff(node, clock, label, original_text, cse_origin)
+        case SeqFirstMatch():
+            return _compose_first_match(node, clock, label, original_text, cse_origin)
+        case SeqGotoRep():
+            return _compose_goto_rep(node, clock, label, original_text, cse_origin)
+        case SeqNonconsecRep():
+            return _compose_nonconsec_rep(node, clock, label, original_text, cse_origin)
+        case SeqOr():
+            return _compose_seq_or(node, clock, label, original_text, cse_origin)
+        case SeqAnd():
+            return _compose_seq_and(node, clock, label, original_text, cse_origin)
+        case SeqIntersect():
+            return _compose_intersect(node, clock, label, original_text, cse_origin)
+        case SeqWithin():
+            return _compose_within(node, clock, label, original_text, cse_origin)
+        case SeqThroughout():
+            return _compose_throughout(node, clock, label, original_text, cse_origin)
+        case PropNot():
+            return _compose_prop_not(node, clock, label, original_text, cse_origin)
+        case PropIfElse():
+            return _compose_prop_if_else(node, clock, label, original_text, cse_origin)
         case _:
             raise UnsupportedConstruct(
                 message=(
@@ -577,8 +607,14 @@ def _compose_repetition(
         observed = extract_signals(node.expr.text)
         signal_expr = node.expr.text
     else:
-        observed = ()
-        signal_expr = "<expr>"
+        raise SvaCompileError(
+            message=(
+                f"Repetition expression is not a simple boolean expression "
+                f"(got {type(node.expr).__name__}). "
+                "Repetition requires a boolean expression, e.g. sig[*3]."
+            ),
+            source_loc=node.source_loc,
+        )
 
     params: dict[str, str] = {
         "module_name": module_name,
@@ -611,10 +647,10 @@ def _compose_signal_func(
     original_text: str,
     cse_origin: str | None = None,
 ) -> CheckerNode:
-    """Build a leaf CheckerNode for a signal function ($rose/$fell/$stable/$past).
+    """Build a leaf CheckerNode for a signal function ($rose/$fell/$stable/$past/$changed).
 
     Each function maps directly to a template of the same name:
-      rose -> rose.sv.j2, fell -> fell.sv.j2, etc.
+      rose -> rose.sv.j2, fell -> fell.sv.j2, changed -> changed.sv.j2, etc.
     """
     module_name = module_name_from_label(label, original_text)
     # Single observed signal: (port_name, dut_signal_name)
@@ -685,6 +721,9 @@ def _compute_bv_width(consequent: SVANode) -> int:
     Each bit position in the shift register represents one cycle of thread age,
     so we need enough positions for the longest possible consequent evaluation
     window.
+
+    All v1.3 IR node types are now handled explicitly so that implication
+    bit-vector sizing is accurate (was defaulting to 8 for all new types).
     """
     match consequent:
         case BoolExpr():
@@ -692,6 +731,29 @@ def _compute_bv_width(consequent: SVANode) -> int:
         case SeqConcat():
             max_delay = sum(d_max for _, d_max in consequent.delays)
             return max(max_delay + 1, 1)
+        case SeqOr() | SeqAnd() | SeqIntersect():
+            return max(_compute_bv_width(consequent.left),
+                       _compute_bv_width(consequent.right))
+        case SeqWithin():
+            return max(_compute_bv_width(consequent.inner),
+                       _compute_bv_width(consequent.outer))
+        case SeqThroughout():
+            return _compute_bv_width(consequent.body)
+        case SeqFirstMatch():
+            return _compute_bv_width(consequent.body)
+        case SignalFunc():
+            return 1  # single-cycle evaluation
+        case SeqGotoRep() | SeqNonconsecRep():
+            return 8  # occurrence-based — cycle count unbounded; conservative
+        case PropNot():
+            return _compute_bv_width(consequent.body)
+        case PropIfElse():
+            tw = _compute_bv_width(consequent.true_branch)
+            if consequent.false_branch is not None:
+                tw = max(tw, _compute_bv_width(consequent.false_branch))
+            return tw
+        case SeqRepetition():
+            return max(consequent.rep_max, 1)
         case _:
             return 8  # safe default for unknown structures
 
@@ -827,4 +889,311 @@ def _compose_disable_iff(
         source_loc=node.source_loc,
         children=(body_checker,),
         cse_origin=cse_origin,
+    )
+
+
+def _compose_first_match(
+    node: SeqFirstMatch,
+    clock: ClockSpec,
+    label: str | None,
+    original_text: str,
+    cse_origin: str | None = None,
+) -> CheckerNode:
+    """Build a first_match wrapper CheckerNode.
+
+    Wraps the body sequence so that only the earliest completion is reported.
+    Once the body passes, all subsequent pass/fail/active outputs are
+    suppressed via a locked_q register.
+    """
+    module_name = module_name_from_label(label, original_text)
+    base = module_name[4:] if module_name.startswith("sva_") else module_name
+    body_checker = compose(node.body, clock, f"{base}_body", original_text)
+
+    params: dict[str, str] = {
+        "module_name": module_name,
+        "body_tmpl": body_checker.template_name,
+        "clock_signal": clock.signal,
+        "clock_edge": clock.edge,
+        "source_loc": str(node.source_loc),
+        "sva2rtl_version": __version__,
+        "original_text": original_text,
+    }
+
+    return CheckerNode(
+        template_name="first_match_top",
+        module_name=module_name,
+        params=params,
+        observed_signals=body_checker.observed_signals,
+        source_loc=node.source_loc,
+        children=(body_checker,),
+        cse_origin=cse_origin,
+    )
+
+
+def _compose_goto_rep(
+    node: SeqGotoRep,
+    clock: ClockSpec,
+    label: str | None,
+    original_text: str,
+    cse_origin: str | None = None,
+) -> CheckerNode:
+    """Build a goto repetition [->N] leaf CheckerNode."""
+    module_name = module_name_from_label(label, original_text)
+    cnt_width = max(1, math.ceil(math.log2(node.rep_max + 1))) if node.rep_max > 0 else 1
+
+    if isinstance(node.expr, BoolExpr):
+        observed = extract_signals(node.expr.text)
+        signal_expr = node.expr.text
+    else:
+        raise SvaCompileError(
+            message=f"Goto repetition [->N] requires a boolean expression, "
+                    f"got {type(node.expr).__name__}",
+            source_loc=node.source_loc,
+        )
+
+    params: dict[str, str] = {
+        "module_name": module_name,
+        "rep_min": str(node.rep_min),
+        "rep_max": str(node.rep_max),
+        "cnt_width": str(cnt_width),
+        "signal_expr": signal_expr,
+        "clock_signal": clock.signal,
+        "clock_edge": clock.edge,
+        "source_loc": str(node.source_loc),
+        "sva2rtl_version": __version__,
+        "original_text": original_text,
+    }
+
+    return CheckerNode(
+        template_name="goto_rep",
+        module_name=module_name,
+        params=params,
+        observed_signals=observed,
+        source_loc=node.source_loc,
+        children=(),
+        cse_origin=cse_origin,
+    )
+
+
+def _compose_nonconsec_rep(
+    node: SeqNonconsecRep,
+    clock: ClockSpec,
+    label: str | None,
+    original_text: str,
+    cse_origin: str | None = None,
+) -> CheckerNode:
+    """Build a non-consecutive repetition [=N] leaf CheckerNode."""
+    module_name = module_name_from_label(label, original_text)
+    cnt_width = max(1, math.ceil(math.log2(node.rep_max + 1))) if node.rep_max > 0 else 1
+
+    if isinstance(node.expr, BoolExpr):
+        observed = extract_signals(node.expr.text)
+        signal_expr = node.expr.text
+    else:
+        raise SvaCompileError(
+            message=f"Non-consecutive repetition [=N] requires a boolean expression, "
+                    f"got {type(node.expr).__name__}",
+            source_loc=node.source_loc,
+        )
+
+    params: dict[str, str] = {
+        "module_name": module_name,
+        "rep_min": str(node.rep_min),
+        "rep_max": str(node.rep_max),
+        "cnt_width": str(cnt_width),
+        "signal_expr": signal_expr,
+        "clock_signal": clock.signal,
+        "clock_edge": clock.edge,
+        "source_loc": str(node.source_loc),
+        "sva2rtl_version": __version__,
+        "original_text": original_text,
+    }
+
+    return CheckerNode(
+        template_name="nonconsec_rep",
+        module_name=module_name,
+        params=params,
+        observed_signals=observed,
+        source_loc=node.source_loc,
+        children=(),
+        cse_origin=cse_origin,
+    )
+
+
+# ── Phase 3: Complex sequence operator composers (v1.3) ────────────────────
+
+
+def _compose_seq_or(
+    node: SeqOr, clock: ClockSpec, label: str | None,
+    original_text: str, cse_origin: str | None = None,
+) -> CheckerNode:
+    """Compose sequence OR: two sub-sequences, OR their pass outputs."""
+    module_name = module_name_from_label(label, original_text)
+    base = module_name[4:] if module_name.startswith("sva_") else module_name
+    left = compose(node.left, clock, f"{base}_left", original_text)
+    right = compose(node.right, clock, f"{base}_right", original_text)
+    all_signals = _collect_signals([left, right])
+    params: dict[str, str] = {
+        "module_name": module_name, "clock_signal": clock.signal,
+        "clock_edge": clock.edge, "source_loc": str(node.source_loc),
+        "sva2rtl_version": __version__, "original_text": original_text,
+    }
+    return CheckerNode(
+        template_name="prop_or", module_name=module_name, params=params,
+        observed_signals=all_signals, source_loc=node.source_loc,
+        children=(left, right), cse_origin=cse_origin,
+    )
+
+
+def _compose_seq_and(
+    node: SeqAnd, clock: ClockSpec, label: str | None,
+    original_text: str, cse_origin: str | None = None,
+) -> CheckerNode:
+    """Compose sequence AND: two sub-sequences, AND their pass outputs."""
+    module_name = module_name_from_label(label, original_text)
+    base = module_name[4:] if module_name.startswith("sva_") else module_name
+    left = compose(node.left, clock, f"{base}_left", original_text)
+    right = compose(node.right, clock, f"{base}_right", original_text)
+    all_signals = _collect_signals([left, right])
+    params: dict[str, str] = {
+        "module_name": module_name, "clock_signal": clock.signal,
+        "clock_edge": clock.edge, "source_loc": str(node.source_loc),
+        "sva2rtl_version": __version__, "original_text": original_text,
+    }
+    return CheckerNode(
+        template_name="prop_and", module_name=module_name, params=params,
+        observed_signals=all_signals, source_loc=node.source_loc,
+        children=(left, right), cse_origin=cse_origin,
+    )
+
+
+def _compose_intersect(
+    node: SeqIntersect, clock: ClockSpec, label: str | None,
+    original_text: str, cse_origin: str | None = None,
+) -> CheckerNode:
+    """Compose intersect: both sequences complete simultaneously (AND pass + both active)."""
+    module_name = module_name_from_label(label, original_text)
+    base = module_name[4:] if module_name.startswith("sva_") else module_name
+    left = compose(node.left, clock, f"{base}_left", original_text)
+    right = compose(node.right, clock, f"{base}_right", original_text)
+    all_signals = _collect_signals([left, right])
+    params: dict[str, str] = {
+        "module_name": module_name, "clock_signal": clock.signal,
+        "clock_edge": clock.edge, "source_loc": str(node.source_loc),
+        "sva2rtl_version": __version__, "original_text": original_text,
+    }
+    return CheckerNode(
+        template_name="prop_intersect", module_name=module_name, params=params,
+        observed_signals=all_signals, source_loc=node.source_loc,
+        children=(left, right), cse_origin=cse_origin,
+    )
+
+
+def _compose_within(
+    node: SeqWithin, clock: ClockSpec, label: str | None,
+    original_text: str, cse_origin: str | None = None,
+) -> CheckerNode:
+    """Compose within: inner sequence completes within outer's window."""
+    module_name = module_name_from_label(label, original_text)
+    base = module_name[4:] if module_name.startswith("sva_") else module_name
+    inner = compose(node.inner, clock, f"{base}_inner", original_text)
+    outer = compose(node.outer, clock, f"{base}_outer", original_text)
+    all_signals = _collect_signals([inner, outer])
+    params: dict[str, str] = {
+        "module_name": module_name, "clock_signal": clock.signal,
+        "clock_edge": clock.edge, "source_loc": str(node.source_loc),
+        "sva2rtl_version": __version__, "original_text": original_text,
+    }
+    return CheckerNode(
+        template_name="prop_within", module_name=module_name, params=params,
+        observed_signals=all_signals, source_loc=node.source_loc,
+        children=(inner, outer), cse_origin=cse_origin,
+    )
+
+
+def _compose_throughout(
+    node: SeqThroughout, clock: ClockSpec, label: str | None,
+    original_text: str, cse_origin: str | None = None,
+) -> CheckerNode:
+    """Compose throughout: condition must hold continuously through body sequence."""
+    module_name = module_name_from_label(label, original_text)
+    base = module_name[4:] if module_name.startswith("sva_") else module_name
+    cond_checker = compose(node.condition, clock, f"{base}_cond", original_text)
+    body_checker = compose(node.body, clock, f"{base}_body", original_text)
+    all_signals = _collect_signals([cond_checker, body_checker])
+    if isinstance(node.condition, BoolExpr):
+        cond_text = node.condition.text
+    else:
+        cond_text = "<cond>"
+    params: dict[str, str] = {
+        "module_name": module_name, "cond_expr": cond_text,
+        "clock_signal": clock.signal, "clock_edge": clock.edge,
+        "source_loc": str(node.source_loc),
+        "sva2rtl_version": __version__, "original_text": original_text,
+    }
+    return CheckerNode(
+        template_name="prop_throughout", module_name=module_name, params=params,
+        observed_signals=all_signals, source_loc=node.source_loc,
+        children=(cond_checker, body_checker), cse_origin=cse_origin,
+    )
+
+
+# ── Phase 4: Property operator composers (v1.3) ────────────────────────────
+
+
+def _compose_prop_not(
+    node: PropNot, clock: ClockSpec, label: str | None,
+    original_text: str, cse_origin: str | None = None,
+) -> CheckerNode:
+    """Compose property NOT: invert pass/fail of the body checker."""
+    module_name = module_name_from_label(label, original_text)
+    base = module_name[4:] if module_name.startswith("sva_") else module_name
+    body_checker = compose(node.body, clock, f"{base}_body", original_text)
+    params: dict[str, str] = {
+        "module_name": module_name, "clock_signal": clock.signal,
+        "clock_edge": clock.edge, "source_loc": str(node.source_loc),
+        "sva2rtl_version": __version__, "original_text": original_text,
+    }
+    return CheckerNode(
+        template_name="prop_not", module_name=module_name, params=params,
+        observed_signals=body_checker.observed_signals,
+        source_loc=node.source_loc, children=(body_checker,),
+        cse_origin=cse_origin,
+    )
+
+
+def _compose_prop_if_else(
+    node: PropIfElse, clock: ClockSpec, label: str | None,
+    original_text: str, cse_origin: str | None = None,
+) -> CheckerNode:
+    """Compose property if-else: multiplex between true/false branches."""
+    module_name = module_name_from_label(label, original_text)
+    base = module_name[4:] if module_name.startswith("sva_") else module_name
+    true_checker = compose(node.true_branch, clock, f"{base}_true", original_text)
+    children = [true_checker]
+    has_else = node.false_branch is not None
+    if has_else:
+        false_checker = compose(node.false_branch, clock, f"{base}_false", original_text)
+        children.append(false_checker)
+    all_signals = _collect_signals(children)
+    if isinstance(node.condition, BoolExpr):
+        cond_text = node.condition.text
+        # Add condition signals to observed_signals (used in comb. MUX)
+        cond_sigs = extract_signals(cond_text)
+        cond_seen = {p for p, _ in all_signals}
+        cond_extra = tuple((p, s) for p, s in cond_sigs if p not in cond_seen)
+        all_signals = all_signals + cond_extra
+    else:
+        cond_text = "<cond>"
+    params: dict[str, str] = {
+        "module_name": module_name, "cond_expr": cond_text,
+        "has_else": "1" if has_else else "0",
+        "clock_signal": clock.signal, "clock_edge": clock.edge,
+        "source_loc": str(node.source_loc),
+        "sva2rtl_version": __version__, "original_text": original_text,
+    }
+    return CheckerNode(
+        template_name="prop_if_else", module_name=module_name, params=params,
+        observed_signals=all_signals, source_loc=node.source_loc,
+        children=tuple(children), cse_origin=cse_origin,
     )

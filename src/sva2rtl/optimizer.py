@@ -22,6 +22,7 @@ changed (max 2 total iterations, D-03).  This catches cascading opportunities
 from __future__ import annotations
 
 import dataclasses
+import hashlib
 import logging
 from collections.abc import Callable
 
@@ -347,6 +348,12 @@ def dead_node(root: CheckerNode) -> CheckerNode:
       ``constant_fold``; a branch guarded by a constant-false condition can
       never fire, so it is structurally unreachable at runtime
 
+    **Important:** ``_const_false`` nodes inside ``seq_concat_top`` are NOT
+    removed, because they produce ``fail`` events that downstream token-
+    passing elements depend on for correct semantics. Removing a ``1'b0``
+    from the middle of a sequence like ``a ##1 1'b0 ##2 b`` would allow
+    the sequence to succeed when it should always fail.
+
     For the common case (no dead branches), the function returns the tree
     unchanged in O(n) time.  When dead branches are found, the sub-tree
     is rebuilt using ``dataclasses.replace()`` — the same immutable pattern
@@ -356,6 +363,7 @@ def dead_node(root: CheckerNode) -> CheckerNode:
     - Runs last: all other passes have already done their transformations
     - ``constant_fold`` tags constant-false ``bool_expr`` nodes with
       ``_const_false="1"``; dead_node removes those nodes from their parent
+      (except inside seq_concat_top)
     - The main value for Phase 5 MVP is the structural guarantee: any pass
       can mark a node dead and dead_node will remove it
 
@@ -371,20 +379,29 @@ def dead_node(root: CheckerNode) -> CheckerNode:
         (same object) if no dead nodes are found.
     """
 
-    def _is_dead(node: CheckerNode) -> bool:
-        """Return True if node is marked dead by an upstream pass."""
-        return (
-            node.params.get("_dead") == "true"
-            or node.params.get("_const_false") == "1"
-        )
+    def _is_dead(node: CheckerNode, parent_tmpl: str | None = None) -> bool:
+        """Return True if node is marked dead by an upstream pass.
+
+        _const_false nodes inside seq_concat_top are NOT dead — they
+        produce fail events essential for token-passing correctness.
+        """
+        if node.params.get("_dead") == "true":
+            return True
+        if node.params.get("_const_false") == "1" and parent_tmpl != "seq_concat_top":
+            return True
+        return False
 
     def _prune(node: CheckerNode) -> CheckerNode:
         """Recursively prune dead children from node."""
         if not node.children:
             return node
 
-        # Filter out dead children first
-        live_children = tuple(c for c in node.children if not _is_dead(c))
+        # Filter out dead children — but _const_false nodes inside
+        # seq_concat_top are NOT removed (they produce fail events)
+        live_children = tuple(
+            c for c in node.children
+            if not _is_dead(c, parent_tmpl=node.template_name)
+        )
 
         # Recurse into surviving live children
         new_children = tuple(_prune(c) for c in live_children)
@@ -520,6 +537,29 @@ def _cse_canonical_name(node: CheckerNode) -> str:
     if tmpl == "bool_expr":
         h = structural_hash(node)
         return f"sva_cse_bool_expr_{h}"
+    if tmpl in ("goto_rep", "nonconsec_rep"):
+        min_v = node.params.get("rep_min", "0")
+        max_v = node.params.get("rep_max", "0")
+        return f"sva_cse_{tmpl}_{min_v}_{max_v}"
+    if tmpl in ("rose", "fell", "stable", "past", "changed"):
+        sig = node.params.get("signal_name", "sig")
+        depth = node.params.get("depth", "1")
+        return f"sva_cse_{tmpl}_{sig}_{depth}"
+    if tmpl == "overlap_bitvec":
+        w = node.params.get("bv_width", "1")
+        return f"sva_cse_overlap_bitvec_{w}"
+    if tmpl == "nonoverlap":
+        w = node.params.get("bv_width", "1")
+        return f"sva_cse_nonoverlap_{w}"
+    if tmpl == "disable_iff_top":
+        cond = node.params.get("cond_expr", "cond")
+        h = hashlib.sha256(cond.encode()).hexdigest()[:8]
+        return f"sva_cse_disable_iff_top_{h}"
+    if tmpl in ("first_match_top", "seq_concat_top",
+                "prop_or", "prop_and", "prop_intersect", "prop_within",
+                "prop_throughout", "prop_not", "prop_if_else"):
+        h = structural_hash(node)
+        return f"sva_cse_{tmpl}_{h}"
     h = structural_hash(node)
     return f"sva_cse_{tmpl}_{h}"
 

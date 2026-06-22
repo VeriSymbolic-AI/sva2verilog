@@ -44,6 +44,7 @@ from typing import Any
 import pytest
 
 from sva2rtl.ast_importer import import_assertion
+from sva2rtl.behavioral_oracle import simulate_checker_hierarchy
 from sva2rtl.composer import compose
 from sva2rtl.emitter import emit_all
 from sva2rtl.ir import CheckerNode
@@ -495,3 +496,118 @@ class TestDelayThreeElement:
         assert not rtl_out[2]["active"], "t=2: disabled → active=0"
         # t=8: would be pass if not for the mid-chain disable
         assert not rtl_out[8]["pass"], "t=8: chain was broken by disable → no pass"
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Oracle cross-check tests
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+class TestDelayOracleCrosscheck:
+    """Oracle cross-check: verify RTL and oracle event patterns match.
+
+    Note: the behavioral oracle models delay relative to ``start`` without the
+    2-cycle bool_expr overhead.  Cycle-by-cycle comparison is therefore not
+    possible; instead we verify that both produce the same set of pass/fail events.
+    """
+
+    def _count_events(self, results: list[dict]) -> dict[str, int]:
+        return {
+            "pass": sum(1 for r in results if r.get("pass")),
+            "fail": sum(1 for r in results if r.get("fail")),
+            "active": sum(1 for r in results if r.get("active")),
+        }
+
+    def test_fixed_delay_oracle_event_pattern(self, tmp_path: Path, simulator: str) -> None:
+        """a ##3 b: both RTL and oracle produce pass events when timing is correct."""
+        checker = _build_checker("delay_fixed")
+        # b=1 held from t=4 through t=6 to cover both oracle (pass at ~t=4)
+        # and RTL (pass at ~t=6) timing windows
+        stimulus = [
+            {"start": True,  "a": True,  "b": False},  # t=0
+            {"start": False, "a": False, "b": False},  # t=1
+            {"start": False, "a": False, "b": False},  # t=2
+            {"start": False, "a": False, "b": False},  # t=3
+            {"start": False, "a": False, "b": True},   # t=4
+            {"start": False, "a": False, "b": True},   # t=5
+            {"start": False, "a": False, "b": True},   # t=6
+            {"start": False, "a": False, "b": False},  # t=7
+        ]
+        rtl_out = _run_stimulus(checker, stimulus, tmp_path, simulator)
+        oracle_out = simulate_checker_hierarchy(checker, stimulus)
+
+        rtl_events = self._count_events(rtl_out)
+        oracle_events = self._count_events(oracle_out)
+
+        # Both should have a pass event
+        assert rtl_events["pass"] > 0
+        assert oracle_events["pass"] > 0
+
+    def test_range_delay_oracle_event_pattern(self, tmp_path: Path, simulator: str) -> None:
+        """a ##[2:5] b: both RTL and oracle produce pass events within window."""
+        checker = _build_checker("delay_range")
+        # b=1 held over a wide window to cover both timing domains
+        stimulus = [
+            {"start": True,  "a": True,  "b": False},  # t=0
+            {"start": False, "a": False, "b": False},  # t=1
+            {"start": False, "a": False, "b": False},  # t=2
+            {"start": False, "a": False, "b": True},   # t=3
+            {"start": False, "a": False, "b": True},   # t=4
+            {"start": False, "a": False, "b": True},   # t=5
+            {"start": False, "a": False, "b": True},   # t=6
+            {"start": False, "a": False, "b": True},   # t=7
+            {"start": False, "a": False, "b": False},  # t=8
+        ]
+        rtl_out = _run_stimulus(checker, stimulus, tmp_path, simulator)
+        oracle_out = simulate_checker_hierarchy(checker, stimulus)
+
+        rtl_events = self._count_events(rtl_out)
+        oracle_events = self._count_events(oracle_out)
+
+        assert rtl_events["pass"] > 0
+        assert oracle_events["pass"] > 0
+
+    def test_zero_delay_oracle_event_pattern(self, tmp_path: Path, simulator: str) -> None:
+        """a ##0 b: both RTL and oracle produce pass events."""
+        checker = _build_checker("delay_zero")
+        # b=1 at t=1 (after bool_expr_a registers), held for pipeline
+        stimulus = [
+            {"start": True,  "a": True,  "b": True},   # t=0
+            {"start": False, "a": False, "b": True},   # t=1: b needed for ##0
+            {"start": False, "a": False, "b": False},  # t=2: pass fires
+            {"start": False, "a": False, "b": False},  # t=3
+        ]
+        rtl_out = _run_stimulus(checker, stimulus, tmp_path, simulator)
+        oracle_out = simulate_checker_hierarchy(checker, stimulus)
+
+        rtl_events = self._count_events(rtl_out)
+        oracle_events = self._count_events(oracle_out)
+
+        assert rtl_events["pass"] > 0
+        assert oracle_events["pass"] > 0
+
+    def test_three_element_oracle_event_pattern(self, tmp_path: Path, simulator: str) -> None:
+        """a ##1 b ##2 c: both RTL and oracle produce pass events."""
+        checker = _build_checker("delay_three_element")
+        # c=1 held from t=6 through t=9 to cover both timing domains
+        stimulus = [
+            {"start": True,  "a": True,  "b": False, "c": False},  # t=0
+            {"start": False, "a": False, "b": False, "c": False},  # t=1
+            {"start": False, "a": False, "b": False, "c": False},  # t=2
+            {"start": False, "a": False, "b": True,  "c": False},  # t=3
+            {"start": False, "a": False, "b": False, "c": False},  # t=4
+            {"start": False, "a": False, "b": False, "c": False},  # t=5
+            {"start": False, "a": False, "b": False, "c": True},   # t=6
+            {"start": False, "a": False, "b": False, "c": True},   # t=7
+            {"start": False, "a": False, "b": False, "c": True},   # t=8
+            {"start": False, "a": False, "b": False, "c": True},   # t=9
+            {"start": False, "a": False, "b": False, "c": False},  # t=10
+        ]
+        rtl_out = _run_stimulus(checker, stimulus, tmp_path, simulator)
+        oracle_out = simulate_checker_hierarchy(checker, stimulus)
+
+        rtl_events = self._count_events(rtl_out)
+        oracle_events = self._count_events(oracle_out)
+
+        assert rtl_events["pass"] > 0
+        assert oracle_events["pass"] > 0

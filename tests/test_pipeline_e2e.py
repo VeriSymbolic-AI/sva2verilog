@@ -61,21 +61,17 @@ def test_e2e_bool_assert(tmp_path: Path) -> None:
 
 @requires_slang
 def test_e2e_delay_assert_rejected() -> None:
-    """Full pipeline on delay_assert.sv exits 2 for unsupported construct.
+    """Full pipeline on delay_assert.sv exits 0 (SequenceConcat is now supported).
 
-    ``a ##1 b`` (SequenceConcat) is not supported in Phase 1.  The CLI must
-    return exit code 2 and print a message containing 'SVA-E002' or 'unsupported'.
+    ``a ##1 b`` (SequenceConcat) produces valid RTL via the token-passing
+    architecture.  This verifies the full pipeline succeeds.
     """
     runner = CliRunner()
     result = runner.invoke(main, [str(_FIXTURES / "delay_assert.sv")])
 
-    assert result.exit_code == 2, (
-        f"Expected exit code 2 for unsupported construct, got {result.exit_code}.\n"
-        f"Output: {result.output}"
-    )
-    combined = (result.output or "") + (result.stderr or "")
-    assert "SVA-E002" in combined or "unsupported" in combined.lower(), (
-        f"Expected 'SVA-E002' or 'unsupported' in output: {combined}"
+    assert result.exit_code == 0, (
+        f"Expected exit_code 0 for delay_assert.sv (SequenceConcat supported), "
+        f"got {result.exit_code}.\nOutput: {result.output}"
     )
 
 

@@ -109,7 +109,20 @@ An open-source SVA (SystemVerilog Assertion) to synthesizable RTL compiler. It t
 <!-- GSD:conventions-start source:CONVENTIONS.md -->
 ## Conventions
 
-Conventions not yet established. Will populate as patterns emerge during development.
+### Template Design: `wire` vs `logic` for Intermediate Signals
+
+**CRITICAL**: In iverilog, `logic x = expr;` is a **variable initial assignment** (executed once at time 0), NOT a continuous assignment. This causes x-propagation in multi-module simulations.
+
+Rules for Jinja2 templates:
+- **Registered signals** (`_q`): use `{{ signal_type(verilog_mode) }}` → `logic`
+- **Inter-module connection wires** (driven by child module outputs): use explicit `wire`
+- **Combinational logic wires** (`_body_*`, `_cond_*`): use explicit `wire = expr` or `wire x; assign x = expr;`
+
+Never use `{{ wire_type(verilog_mode) }} _body_active = expr;` — it produces `logic _body_active = expr;` which is init-only in iverilog.
+
+### Port Instantiation
+
+Always use **explicit port connections** for child module instantiations in composed templates.  Do NOT use `.*` implicit connections — they connect child output ports (active/pass/fail) to parent output ports of the same name, creating multi-driver conflicts.
 <!-- GSD:conventions-end -->
 
 <!-- GSD:architecture-start source:ARCHITECTURE.md -->

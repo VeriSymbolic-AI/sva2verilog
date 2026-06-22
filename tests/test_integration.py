@@ -148,9 +148,9 @@ def test_pipeline_sync_reset() -> None:
     assert "if (!rst_n" in sv, "Missing 'if (!rst_n' synchronous reset"
 
     # All four FFs must be explicitly reset to 0
-    resets = sv.count("<= 1'b0")
+    resets = sv.count("<= 1'b0") + sv.count("<= '0")
     assert resets >= 4, (
-        f"Expected at least 4 synchronous reset assignments (<= 1'b0), found {resets}"
+        f"Expected at least 4 synchronous reset assignments (<= 1'b0 or <= '0), found {resets}"
     )
 
 
@@ -222,3 +222,52 @@ def test_pipeline_observed_signals_as_ports() -> None:
     # bool_simple has 'a' and 'b' in the expression
     assert "input  logic a" in sv, "Signal 'a' must appear as 'input  logic a'"
     assert "input  logic b" in sv, "Signal 'b' must appear as 'input  logic b'"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# v1.3 Tier 2 operator pipeline tests
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+def test_pipeline_v13_seq_or() -> None:
+    """v13_or_seq.json: full pipeline emits valid SV for prop_or."""
+    sv = _run("v13_or_seq.json")
+    assert "module" in sv and "endmodule" in sv
+    assert "always_ff" in sv
+    assert "active_q" in sv
+
+
+def test_pipeline_v13_seq_and() -> None:
+    """v13_and_seq.json: full pipeline emits valid SV for prop_and with matched regs."""
+    sv = _run("v13_and_seq.json")
+    assert "module" in sv and "endmodule" in sv
+    assert "left_matched_q" in sv, "prop_and must have left_matched_q register"
+    assert "right_matched_q" in sv, "prop_and must have right_matched_q register"
+
+
+def test_pipeline_v13_intersect() -> None:
+    """v13_intersect_seq.json: full pipeline emits valid SV for prop_intersect."""
+    sv = _run("v13_intersect_seq.json")
+    assert "module" in sv and "endmodule" in sv
+    assert "always_ff" in sv
+
+
+def test_pipeline_v13_prop_not() -> None:
+    """v13_prop_not.json: full pipeline emits valid SV for prop_not (inverts pass/fail)."""
+    sv = _run("v13_prop_not.json")
+    assert "module" in sv and "endmodule" in sv
+    assert "always_ff" in sv
+
+
+def test_pipeline_v13_throughout() -> None:
+    """v13_throughout_seq.json: full pipeline for prop_throughout with explicit cond wiring."""
+    sv = _run("v13_throughout_seq.json")
+    assert "module" in sv and "endmodule" in sv
+    assert "_cond_start" in sv, "throughout must drive _cond_start = start | body_active"
+
+
+def test_pipeline_v13_if_else() -> None:
+    """v13_if_else_prop.json: full pipeline emits valid SV for prop_if_else."""
+    sv = _run("v13_if_else_prop.json")
+    assert "module" in sv and "endmodule" in sv
+    assert "has_else" not in sv or "always_ff" in sv  # has_else is a param, may appear

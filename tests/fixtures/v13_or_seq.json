@@ -1,0 +1,146 @@
+{
+  "design": {
+    "name": "$root",
+    "kind": "Root",
+    "addr": 4307181280,
+    "members": [
+      {
+        "name": "",
+        "kind": "CompilationUnit",
+        "addr": 6338700054992
+      },
+      {
+        "name": "m",
+        "kind": "Instance",
+        "addr": 6338700055616,
+        "body": {
+          "name": "m",
+          "kind": "InstanceBody",
+          "addr": 6338700055272,
+          "members": [
+            {
+              "name": "clk",
+              "kind": "Port",
+              "addr": 6338700055752,
+              "type": "logic",
+              "direction": "In",
+              "internalSymbol": "6338700055872 clk"
+            },
+            {
+              "name": "clk",
+              "kind": "Net",
+              "addr": 6338700055872,
+              "type": "logic",
+              "netType": {
+                "name": "wire",
+                "kind": "NetType",
+                "addr": 4307179040,
+                "type": "logic"
+              }
+            },
+            {
+              "name": "a",
+              "kind": "Port",
+              "addr": 6338700056032,
+              "type": "logic",
+              "direction": "In",
+              "internalSymbol": "6338700056152 a"
+            },
+            {
+              "name": "a",
+              "kind": "Net",
+              "addr": 6338700056152,
+              "type": "logic",
+              "netType": {
+                "name": "wire",
+                "kind": "NetType",
+                "addr": 4307179040,
+                "type": "logic"
+              }
+            },
+            {
+              "name": "b",
+              "kind": "Port",
+              "addr": 6338700056312,
+              "type": "logic",
+              "direction": "In",
+              "internalSymbol": "6338700056432 b"
+            },
+            {
+              "name": "b",
+              "kind": "Net",
+              "addr": 6338700056432,
+              "type": "logic",
+              "netType": {
+                "name": "wire",
+                "kind": "NetType",
+                "addr": 4307179040,
+                "type": "logic"
+              }
+            },
+            {
+              "name": "",
+              "kind": "ProceduralBlock",
+              "addr": 6338700055512,
+              "procedureKind": "Always",
+              "body": {
+                "kind": "ConcurrentAssertion",
+                "propertySpec": {
+                  "kind": "Clocking",
+                  "clocking": {
+                    "kind": "SignalEvent",
+                    "expr": {
+                      "kind": "NamedValue",
+                      "type": "logic",
+                      "symbol": "6338700055872 clk"
+                    },
+                    "edge": "PosEdge"
+                  },
+                  "expr": {
+                    "kind": "Binary",
+                    "op": "Or",
+                    "left": {
+                      "kind": "Simple",
+                      "expr": {
+                        "kind": "NamedValue",
+                        "type": "logic",
+                        "symbol": "6338700056152 a"
+                      }
+                    },
+                    "right": {
+                      "kind": "Simple",
+                      "expr": {
+                        "kind": "NamedValue",
+                        "type": "logic",
+                        "symbol": "6338700056432 b"
+                      }
+                    }
+                  }
+                },
+                "ifTrue": {
+                  "kind": "Empty"
+                },
+                "assertionKind": "Assert"
+              }
+            }
+          ],
+          "definition": "4308163968 m"
+        },
+        "connections": [
+        ]
+      }
+    ]
+  },
+  "definitions": [
+    {
+      "name": "m",
+      "kind": "Definition",
+      "addr": 4308163968,
+      "defaultNetType": "4307179040 wire",
+      "definitionKind": "Module",
+      "defaultLifetime": "Static",
+      "unconnectedDrive": "None",
+      "cellDefine": false
+    }
+  ]
+}

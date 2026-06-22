@@ -674,7 +674,13 @@ def test_count_modules_never_exceeds_count_nodes() -> None:
 
 
 def test_dead_node_removes_const_false_child() -> None:
-    """A child tagged _const_false=1 is pruned from the parent's children."""
+    """A child tagged _const_false=1 inside seq_concat_top is NOT pruned.
+
+    _const_false nodes inside seq_concat_top must be preserved because they
+    produce fail events that downstream token-passing elements depend on
+    for correct semantics. Removing them would make ``a ##1 1'b0 ##2 b``
+    succeed when it should always fail.
+    """
     from sva2rtl.optimizer import dead_node
 
     false_node = _make_bool_checker("1'b0", "sva_false")
@@ -686,8 +692,10 @@ def test_dead_node_removes_const_false_child() -> None:
     top = _make_concat_top((false_node, live_node))
 
     result = dead_node(top)
-    assert len(result.children) == 1
-    assert result.children[0].module_name == "sva_live"
+    # _const_false inside seq_concat_top is NOT removed
+    assert len(result.children) == 2
+    assert result.children[0].module_name == "sva_false"
+    assert result.children[1].module_name == "sva_live"
 
 
 def test_dead_node_removes_dead_marked_child() -> None:
@@ -698,6 +706,32 @@ def test_dead_node_removes_dead_marked_child() -> None:
     dead = dataclasses.replace(dead, params={**dead.params, "_dead": "true"})
     live = _make_bool_checker("y", "sva_live")
     top = _make_concat_top((dead, live))
+
+    result = dead_node(top)
+    assert len(result.children) == 1
+    assert result.children[0].module_name == "sva_live"
+
+
+def test_dead_node_removes_const_false_in_implication() -> None:
+    """_const_false child inside overlap_bitvec (not seq_concat_top) IS pruned."""
+    from sva2rtl.optimizer import dead_node
+
+    false_node = _make_bool_checker("1'b0", "sva_false")
+    false_node = dataclasses.replace(
+        false_node, params={**false_node.params, "_const_false": "1"}
+    )
+    live_node = _make_bool_checker("req", "sva_live")
+    # overlap_bitvec wrapper — _const_false children ARE removed here
+    top = CheckerNode(
+        template_name="overlap_bitvec",
+        module_name="sva_impl",
+        params={"module_name": "sva_impl", "bv_width": "1", "clock_signal": "clk",
+                "clock_edge": "posedge", "source_loc": "t:1:1",
+                "sva2rtl_version": "1.2.0", "original_text": "a|->b"},
+        observed_signals=(),
+        source_loc=SourceLoc("t", 1, 1),
+        children=(false_node, live_node),
+    )
 
     result = dead_node(top)
     assert len(result.children) == 1
@@ -716,7 +750,11 @@ def test_dead_node_no_dead_children_unchanged() -> None:
 
 
 def test_constant_fold_then_dead_node_prunes_false() -> None:
-    """constant_fold tags 1'b0, dead_node then prunes it."""
+    """constant_fold tags 1'b0, dead_node does NOT prune it from seq_concat_top.
+
+    _const_false nodes inside seq_concat_top are preserved because they
+    produce fail events essential for token-passing correctness.
+    """
     from sva2rtl.optimizer import dead_node
 
     false_node = _make_bool_checker("1'b0", "sva_false")
@@ -726,9 +764,10 @@ def test_constant_fold_then_dead_node_prunes_false() -> None:
     folded = constant_fold(top)
     pruned = dead_node(folded)
 
-    # The 1'b0 child was tagged _const_false=1 then pruned
-    assert len(pruned.children) == 1
-    assert pruned.children[0].module_name == "sva_live"
+    # The 1'b0 child was tagged _const_false=1 but NOT pruned from seq_concat_top
+    assert len(pruned.children) == 2
+    assert pruned.children[0].params.get("_const_false") == "1"
+    assert pruned.children[1].module_name == "sva_live"
 
 
 # ── Structural parity tests (no simulation needed) ────────────────────────

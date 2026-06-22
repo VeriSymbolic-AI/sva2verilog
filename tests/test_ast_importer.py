@@ -307,8 +307,9 @@ def test_extract_source_loc_partial_fields() -> None:
 
 
 def test_unsupported_kinds_table_is_empty() -> None:
-    """UNSUPPORTED_KINDS_PHASE1 is now empty — all Phase 1/2/3 constructs are supported."""
-    assert len(UNSUPPORTED_KINDS_PHASE1) == 0
+    """UNSUPPORTED_KINDS_PHASE1 lists only constructs explicitly deferred to future versions."""
+    # strong()/weak() are the only remaining explicitly unsupported constructs
+    assert UNSUPPORTED_KINDS_PHASE1 == {"StrongWeakAssertionExpr": "strong()/weak()"}
 
 
 # ── PropImplication import tests ─────────────────────────────────────────

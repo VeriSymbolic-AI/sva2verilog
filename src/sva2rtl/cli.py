@@ -29,6 +29,7 @@ from sva2rtl.errors import (
     SvaError,
     UnsupportedConstruct,
 )
+from sva2rtl.formal import check_optimizer_pass
 from sva2rtl.frontend import invoke_slang
 from sva2rtl.normalizer import normalize
 from sva2rtl.optimizer import optimize
@@ -113,6 +114,13 @@ def _resolve_output_mode(
     default=False,
     help="Skip optimization passes (emit unoptimized output)",
 )
+@click.option(
+    "--verify",
+    "verify_flag",
+    is_flag=True,
+    default=False,
+    help="Run yosys formal equivalence check between unoptimized and optimized RTL",
+)
 @click.version_option(package_name="sva2rtl", prog_name="sva2rtl")
 def main(
     input_file: str,
@@ -124,6 +132,7 @@ def main(
     property_name: str | None,
     verilog: bool,
     no_optimize: bool,
+    verify_flag: bool,
 ) -> None:
     """Compile an SVA property file to a synthesizable SystemVerilog monitor.
 
@@ -225,6 +234,21 @@ def main(
             if not no_optimize:
                 checker_node = optimize(checker_node)
 
+            # --verify: run yosys formal equivalence check
+            if verify_flag and not no_optimize:
+                passed, yosys_output = check_optimizer_pass(
+                    unoptimized_checker, checker_node
+                )
+                click.echo(yosys_output)
+                if not passed:
+                    click.echo(
+                        "ERROR: Formal equivalence check FAILED — "
+                        "optimized RTL is not equivalent to unoptimized RTL.",
+                        err=True,
+                    )
+                    sys.exit(1)
+                click.echo("PASS: Formal equivalence check — optimized RTL is equivalent.")
+
             if dump_tree:
                 from sva2rtl.composer import compute_hash_map
                 from sva2rtl.debug import format_dump_tree
@@ -276,6 +300,22 @@ def main(
                 unopt = checker_node
                 if not no_optimize:
                     checker_node = optimize(checker_node)
+
+                # --verify: run formal equivalence check per assertion
+                if verify_flag and not no_optimize:
+                    passed, yosys_output = check_optimizer_pass(unopt, checker_node)
+                    click.echo(yosys_output)
+                    if not passed:
+                        click.echo(
+                            "ERROR: Formal equivalence check FAILED for "
+                            f"assertion '{label or '<unlabeled>'}' — "
+                            "optimized RTL is not equivalent to unoptimized RTL.",
+                            err=True,
+                        )
+                        sys.exit(1)
+                    click.echo(
+                        f"PASS: Formal equivalence check for '{label or '<unlabeled>'}'."
+                    )
 
                 if dump_tree:
                     from sva2rtl.composer import compute_hash_map

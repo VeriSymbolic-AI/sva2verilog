@@ -21,9 +21,19 @@ from __future__ import annotations
 from sva2rtl.ir import (
     BoolExpr,
     DisableIff,
+    PropIfElse,
     PropImplication,
+    PropNot,
+    SeqAnd,
     SeqConcat,
+    SeqFirstMatch,
+    SeqGotoRep,
+    SeqIntersect,
+    SeqNonconsecRep,
+    SeqOr,
     SeqRepetition,
+    SeqThroughout,
+    SeqWithin,
     SignalFunc,
     SVANode,
 )
@@ -96,6 +106,55 @@ def normalize(node: SVANode) -> SVANode:
                 )
             )
 
+        case SeqFirstMatch():
+            new_body = normalize(node.body)
+            return _normalize_node(
+                SeqFirstMatch(body=new_body, source_loc=node.source_loc)
+            )
+
+        case SeqGotoRep():
+            new_expr = normalize(node.expr)
+            return _normalize_node(SeqGotoRep(
+                expr=new_expr, rep_min=node.rep_min, rep_max=node.rep_max,
+                source_loc=node.source_loc,
+            ))
+
+        case SeqNonconsecRep():
+            new_expr = normalize(node.expr)
+            return _normalize_node(SeqNonconsecRep(
+                expr=new_expr, rep_min=node.rep_min, rep_max=node.rep_max,
+                source_loc=node.source_loc,
+            ))
+
+        case SeqOr():
+            new_left = normalize(node.left)
+            new_right = normalize(node.right)
+            return _normalize_node(SeqOr(left=new_left, right=new_right, source_loc=node.source_loc))
+        case SeqAnd():
+            new_left = normalize(node.left)
+            new_right = normalize(node.right)
+            return _normalize_node(SeqAnd(left=new_left, right=new_right, source_loc=node.source_loc))
+        case SeqIntersect():
+            new_left = normalize(node.left)
+            new_right = normalize(node.right)
+            return _normalize_node(SeqIntersect(left=new_left, right=new_right, source_loc=node.source_loc))
+        case SeqWithin():
+            new_inner = normalize(node.inner)
+            new_outer = normalize(node.outer)
+            return _normalize_node(SeqWithin(inner=new_inner, outer=new_outer, source_loc=node.source_loc))
+        case SeqThroughout():
+            new_cond = normalize(node.condition)
+            new_body = normalize(node.body)
+            return _normalize_node(SeqThroughout(condition=new_cond, body=new_body, source_loc=node.source_loc))
+        case PropNot():
+            new_body = normalize(node.body)
+            return _normalize_node(PropNot(body=new_body, source_loc=node.source_loc))
+        case PropIfElse():
+            new_cond = normalize(node.condition)
+            new_true = normalize(node.true_branch)
+            new_false = normalize(node.false_branch) if node.false_branch is not None else None
+            return _normalize_node(PropIfElse(condition=new_cond, true_branch=new_true, false_branch=new_false, source_loc=node.source_loc))
+
         case _:
             return node
 
@@ -116,11 +175,32 @@ def _normalize_node(node: SVANode) -> SVANode:
 
         case PropImplication():
             # D-05: Do NOT desugar PropImplication(overlapping=False) to |-> ##1.
-            # This preserves golden file parity — |=> desugaring is deferred to
-            # Phase 5+ or when |=> appears nested in complex compositions.
             return node
 
         case DisableIff():
+            return node
+
+        case SeqFirstMatch():
+            return node
+
+        case SeqGotoRep():
+            return node
+
+        case SeqNonconsecRep():
+            return node
+        case SeqOr():
+            return node
+        case SeqAnd():
+            return node
+        case SeqIntersect():
+            return node
+        case SeqWithin():
+            return node
+        case SeqThroughout():
+            return node
+        case PropNot():
+            return node
+        case PropIfElse():
             return node
 
         case BoolExpr():
@@ -163,15 +243,7 @@ def _flatten_concat(node: SeqConcat) -> SeqConcat:
         # Add the outer delay connecting this element to the next
         # (only if not the last element)
         if i < len(node.delays):
-            # If the current element was a SeqConcat, the outer delay connects
-            # the last element of the inner concat to the next outer element.
-            # If not, it connects this element to the next.
-            if not isinstance(elem, SeqConcat):
-                new_delays.append(node.delays[i])
-            else:
-                # The outer delay at position i connects the last element of
-                # the inlined inner concat to the next outer element.
-                new_delays.append(node.delays[i])
+            new_delays.append(node.delays[i])
 
     return SeqConcat(
         elements=tuple(new_elements),

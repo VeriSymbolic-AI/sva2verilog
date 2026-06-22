@@ -451,3 +451,49 @@ def test_oracle_invalid_kind_raises() -> None:
     """Constructor raises ValueError for unknown operator kind."""
     with pytest.raises(ValueError, match="Unknown kind"):
         SVABehavioralSim("bogus_op", {})
+
+
+# ── Hierarchical oracle tests (ORACLE-01) ────────────────────────────────
+
+from sva2rtl.behavioral_oracle import simulate_checker_hierarchy
+from sva2rtl.ir import CheckerNode, ClockSpec, SourceLoc
+
+
+def test_hierarchical_seq_concat_composes_children() -> None:
+    """seq_concat_top with 2 elements: token passing chains pass correctly."""
+    loc = SourceLoc("test.sv", 1, 1)
+    clock = ClockSpec(edge="posedge", signal="clk", source_loc=loc)
+    e0 = CheckerNode(
+        template_name="bool_expr", module_name="sva_e0",
+        params={}, observed_signals=(), source_loc=loc, children=(),
+    )
+    e1 = CheckerNode(
+        template_name="bool_expr", module_name="sva_e1",
+        params={}, observed_signals=(), source_loc=loc, children=(),
+    )
+    tree = CheckerNode(
+        template_name="seq_concat_top", module_name="sva_top",
+        params={}, observed_signals=(), source_loc=loc,
+        children=(e0, e1),
+    )
+    stim = [{"start": True}, {"start": False}, {"start": False}]
+    out = simulate_checker_hierarchy(tree, stim)
+    assert len(out) == 3
+
+
+def test_hierarchical_disable_iff_gates_outputs() -> None:
+    """disable_iff_top with cond=True gates body outputs to zero."""
+    loc = SourceLoc("test.sv", 1, 1)
+    clock = ClockSpec(edge="posedge", signal="clk", source_loc=loc)
+    body = CheckerNode(
+        template_name="bool_expr", module_name="sva_body",
+        params={}, observed_signals=(), source_loc=loc, children=(),
+    )
+    tree = CheckerNode(
+        template_name="disable_iff_top", module_name="sva_top",
+        params={"cond_expr": "cond"}, observed_signals=(), source_loc=loc,
+        children=(body,),
+    )
+    stim = [{"start": True, "cond": True}]
+    out = simulate_checker_hierarchy(tree, stim)
+    assert not out[0]["pass"], "cond true gates output"

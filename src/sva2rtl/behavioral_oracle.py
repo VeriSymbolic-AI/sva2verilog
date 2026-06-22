@@ -48,6 +48,9 @@ class SVABehavioralSim:
             "fell",
             "stable",
             "past",
+            "changed",
+            "goto_rep",
+            "nonconsec_rep",
         }
         if kind not in _valid_kinds:
             raise ValueError(f"Unknown kind '{kind}'; must be one of {_valid_kinds}")
@@ -128,6 +131,12 @@ class SVABehavioralSim:
             return self._tick_stable(signals)
         elif self._kind == "past":
             return self._tick_past(signals)
+        elif self._kind == "changed":
+            return self._tick_changed(signals)
+        elif self._kind == "goto_rep":
+            return self._tick_goto_rep(signals)
+        elif self._kind == "nonconsec_rep":
+            return self._tick_nonconsec_rep(signals)
         else:  # implication_nonoverlap
             return self._tick_nonoverlap(signals)
 
@@ -243,6 +252,70 @@ class SVABehavioralSim:
             "overflow": False,
         }
 
+    # ── Goto repetition model ([->N]) ─────────────────────────────────────
+
+    def _tick_goto_rep(self, signals: dict[str, bool]) -> dict[str, bool]:
+        """Model expr[->N] semantics: count non-consecutive occurrences.
+
+        Counts cycles where sig=true. Passes immediately when count reaches
+        rep_min..rep_max. Once passed, stays in pass state.
+        """
+        start: bool = bool(signals.get("start", False))
+        sig: bool = bool(signals.get("sig", False))
+        rep_min: int = int(self._params.get("rep_min", 1))
+        rep_max: int = int(self._params.get("rep_max", 1))
+
+        old_count = self._rep_count
+        old_running = self._rep_running
+
+        if start and not old_running:
+            self._rep_running = True
+            self._rep_count = 1 if sig else 0
+            self._attempt_fired = True
+        elif old_running and sig:
+            if old_count < rep_max:
+                self._rep_count = old_count + 1
+
+        pass_val = old_running and sig and old_count >= rep_min - 1
+        active_val = old_running
+
+        return {
+            "active": active_val,
+            "pass": pass_val,
+            "fail": False,
+            "overflow": False,
+        }
+
+    # ── Non-consecutive repetition model ([=N]) ───────────────────────────
+
+    def _tick_nonconsec_rep(self, signals: dict[str, bool]) -> dict[str, bool]:
+        """Model expr[=N] semantics: count occurrences, relaxed tail.
+
+        Counts cycles where sig=true. Passes when count >= rep_min.
+        Unlike [->N], no tight completion requirement.
+        """
+        start: bool = bool(signals.get("start", False))
+        sig: bool = bool(signals.get("sig", False))
+        rep_min: int = int(self._params.get("rep_min", 1))
+        rep_max: int = int(self._params.get("rep_max", 1))
+
+        old_count = self._rep_count
+
+        if start:
+            self._attempt_fired = True
+            if sig and old_count < rep_max:
+                self._rep_count = old_count + 1
+
+        pass_val = old_count >= rep_min
+        active_val = start
+
+        return {
+            "active": active_val,
+            "pass": pass_val,
+            "fail": False,
+            "overflow": False,
+        }
+
     # ── Signal function models ($rose, $fell, $stable, $past) ────────────
 
     def _tick_rose(self, signals: dict[str, bool]) -> dict[str, bool]:
@@ -274,6 +347,21 @@ class SVABehavioralSim:
 
         pass_val = start and fell_detect
         fail_val = start and not fell_detect
+        return {"active": start, "pass": pass_val, "fail": fail_val, "overflow": False}
+
+    def _tick_changed(self, signals: dict[str, bool]) -> dict[str, bool]:
+        """Model $changed(sig): pass when sig differs from previous cycle."""
+        start: bool = bool(signals.get("start", False))
+        sig: bool = bool(signals.get("sig", False))
+
+        changed_detect = sig != self._sig_prev
+        self._sig_prev = sig
+
+        if start:
+            self._attempt_fired = True
+
+        pass_val = start and changed_detect
+        fail_val = start and not changed_detect
         return {"active": start, "pass": pass_val, "fail": fail_val, "overflow": False}
 
     def _tick_stable(self, signals: dict[str, bool]) -> dict[str, bool]:
@@ -428,3 +516,357 @@ class SVABehavioralSim:
             "fail": fail_val,
             "overflow": False,
         }
+
+# ── Hierarchical oracle: composes SVABehavioralSim instances ─────────────
+# Appended to behavioral_oracle.py for Phase 4 (ORACLE-01).
+
+from typing import Any
+import re as _re_oracle
+
+
+def simulate_checker_hierarchy(
+    tree: "CheckerNode",
+    stimulus: list[dict[str, bool]],
+) -> list[dict[str, bool]]:
+    """Simulate a composed checker tree cycle-by-cycle.
+
+    Walks the CheckerNode hierarchy, instantiates SVABehavioralSim for each
+    leaf template, and wires them according to the token-passing architecture
+    (seq_concat_top, overlap_bitvec, disable_iff_top).
+    """
+    hier_sim = _HierarchicalSim(tree)
+    return [hier_sim.tick(cycle) for cycle in stimulus]
+
+
+_LEAF_TEMPLATES: frozenset[str] = frozenset({
+    "bool_expr", "concat_delay", "delay_fixed", "delay_range", "rep_consecutive",
+    "rose", "fell", "stable", "past", "changed", "goto_rep", "nonconsec_rep",
+    "overlap_bitvec", "nonoverlap",
+})
+
+_TEMPLATE_ORACLE_MAP: dict[str, str] = {
+    "bool_expr": "delay_fixed",
+    "concat_delay": "delay_fixed",
+    "delay_fixed": "delay_fixed",
+    "delay_range": "delay_range",
+    "rep_consecutive": "rep_consecutive",
+    "rose": "rose",
+    "fell": "fell",
+    "stable": "stable",
+    "past": "past",
+    "changed": "changed",
+    "goto_rep": "goto_rep",
+    "nonconsec_rep": "nonconsec_rep",
+    "overlap_bitvec": "implication_overlap",
+    "nonoverlap": "implication_nonoverlap",
+}
+
+
+class _HierarchicalSim:
+    """Internal: evaluates a checker tree by wiring child oracles."""
+
+    def __init__(self, root: "CheckerNode") -> None:
+        self._root = root
+        self._leaf_oracles: dict[str, "SVABehavioralSim"] = {}
+        self._build_oracles(root)
+
+    def _build_oracles(self, node: "CheckerNode") -> None:
+        tname = node.template_name
+        if tname in _LEAF_TEMPLATES:
+            params = _extract_oracle_params(node)
+            self._leaf_oracles[node.module_name] = SVABehavioralSim(
+                _TEMPLATE_ORACLE_MAP[tname], params
+            )
+        for child in node.children:
+            self._build_oracles(child)
+
+    def tick(self, signals: dict[str, bool]) -> dict[str, bool]:
+        return self._tick_node(self._root, signals)
+
+    def _tick_node(self, node: "CheckerNode", signals: dict[str, bool]) -> dict[str, bool]:
+        tname = node.template_name
+        if tname in _LEAF_TEMPLATES:
+            oracle = self._leaf_oracles[node.module_name]
+            return oracle.tick(_map_stimulus(tname, signals, node))
+        if tname == "seq_concat_top":
+            return self._tick_seq_concat(node, signals)
+        if tname == "disable_iff_top":
+            return self._tick_disable_iff(node, signals)
+        if tname == "first_match_top":
+            return self._tick_first_match(node, signals)
+        if tname in ("overlap_bitvec", "nonoverlap"):
+            return self._tick_implication(node, signals, tname)
+        if tname == "prop_or":
+            return self._tick_prop_or(node, signals)
+        if tname == "prop_and":
+            return self._tick_prop_and(node, signals)
+        if tname == "prop_intersect":
+            return self._tick_prop_intersect(node, signals)
+        if tname == "prop_within":
+            return self._tick_prop_within(node, signals)
+        if tname == "prop_throughout":
+            return self._tick_prop_throughout(node, signals)
+        if tname == "prop_not":
+            return self._tick_prop_not(node, signals)
+        if tname == "prop_if_else":
+            return self._tick_prop_if_else(node, signals)
+        if node.children:
+            return self._tick_node(node.children[0], signals)
+        return {"pass": False, "fail": False, "active": False, "overflow": False}
+
+    def _tick_seq_concat(self, node: "CheckerNode", signals: dict[str, bool]) -> dict[str, bool]:
+        children = node.children
+        prev_pass = False
+        any_fail = False
+        any_active = False
+        for i, child in enumerate(children):
+            child_sigs = dict(signals)
+            child_sigs["start"] = signals.get("start", False) if i == 0 else prev_pass
+            out = self._tick_node(child, child_sigs)
+            prev_pass = out["pass"]
+            if out["fail"]:
+                any_fail = True
+            if out["active"]:
+                any_active = True
+        return {"pass": prev_pass, "fail": any_fail, "active": any_active, "overflow": False}
+
+    def _tick_disable_iff(self, node: "CheckerNode", signals: dict[str, bool]) -> dict[str, bool]:
+        body = node.children[0] if node.children else None
+        if body is None:
+            return {"pass": False, "fail": False, "active": False, "overflow": False}
+        cond_text = node.params.get("cond_expr", "")
+        cond_sigs = _re_oracle.findall(r"\b([a-zA-Z_]\w*)\b", cond_text)
+        cond_val = all(signals.get(s, False) for s in cond_sigs) if cond_sigs else signals.get("cond", False)
+        if cond_val:
+            self._tick_node(body, {**signals, "disable": True})
+            return {"pass": False, "fail": False, "active": False, "overflow": False}
+        return self._tick_node(body, signals)
+
+    def _tick_first_match(self, node: "CheckerNode", signals: dict[str, bool]) -> dict[str, bool]:
+        """Tick a first_match_top wrapper: gate outputs once body passes.
+
+        On the cycle the body first passes, output is passed through and the
+        node is locked.  All subsequent cycles return inactive/false until the
+        next start fires, which resets the lock.
+        """
+        body = node.children[0] if node.children else None
+        if body is None:
+            return {"pass": False, "fail": False, "active": False, "overflow": False}
+        out = self._tick_node(body, signals)
+
+        key = node.module_name
+        if not hasattr(self, "_fm_locked"):
+            self._fm_locked: dict[str, bool] = {}
+
+        # Reset lock on new start (new evaluation window)
+        if signals.get("start", False):
+            self._fm_locked[key] = False
+
+        locked = self._fm_locked.get(key, False)
+
+        # On the first pass cycle: pass through and set lock
+        if out["pass"] and not locked:
+            self._fm_locked[key] = True
+            return out  # pass=1, fail=0 (body just completed)
+        # Already locked: suppress everything
+        if locked:
+            return {"pass": False, "fail": False, "active": False, "overflow": out.get("overflow", False)}
+        # Not yet passed, not locked: pass through body outputs
+        return out
+
+    # ── Phase 3: Complex sequence operator oracles (v1.3) ────────────────
+
+    def _tick_prop_or(self, node: "CheckerNode", signals: dict[str, bool]) -> dict[str, bool]:
+        """prop_or: OR two sub-checkers."""
+        if len(node.children) < 2:
+            return {"pass": False, "fail": False, "active": False, "overflow": False}
+        l = self._tick_node(node.children[0], signals)
+        r = self._tick_node(node.children[1], signals)
+        return {"pass": l["pass"] or r["pass"], "fail": l["fail"] or r["fail"],
+                "active": l["active"] or r["active"], "overflow": l.get("overflow", False) or r.get("overflow", False)}
+
+    def _tick_prop_and(self, node: "CheckerNode", signals: dict[str, bool]) -> dict[str, bool]:
+        """prop_and: both must eventually pass; matches when the LATER one completes.
+
+        IEEE 1800-2017: s1 and s2 — both start at the same time; the ``and``
+        matches at the cycle where the last of the two sequences finishes.  We
+        latch each side's pass so that ``body_pass`` fires on the cycle where
+        the trailing side completes.
+
+        Matched state is cleared when a new start fires and neither side is
+        currently active (i.e. the previous evaluation has completed).
+        """
+        if len(node.children) < 2:
+            return {"pass": False, "fail": False, "active": False, "overflow": False}
+        l = self._tick_node(node.children[0], signals)
+        r = self._tick_node(node.children[1], signals)
+
+        key = node.module_name
+        if not hasattr(self, "_and_state"):
+            self._and_state: dict[str, dict[str, bool]] = {}
+        if key not in self._and_state:
+            self._and_state[key] = {"left_m": False, "right_m": False}
+        st = self._and_state[key]
+
+        if signals.get("disable", False):
+            st["left_m"] = False
+            st["right_m"] = False
+
+        # Clear matched state on new start when previous evaluation is done
+        if signals.get("start", False) and not l["active"] and not r["active"]:
+            st["left_m"] = False
+            st["right_m"] = False
+
+        if l["pass"]:
+            st["left_m"] = True
+        if r["pass"]:
+            st["right_m"] = True
+
+        pass_val = (l["pass"] and st["right_m"]) or (r["pass"] and st["left_m"]) or (l["pass"] and r["pass"])
+        return {"pass": pass_val, "fail": l["fail"] or r["fail"],
+                "active": l["active"] or r["active"],
+                "overflow": l.get("overflow", False) or r.get("overflow", False)}
+
+    def _tick_prop_intersect(self, node: "CheckerNode", signals: dict[str, bool]) -> dict[str, bool]:
+        """prop_intersect: both must pass at same cycle (intersection)."""
+        if len(node.children) < 2:
+            return {"pass": False, "fail": False, "active": False, "overflow": False}
+        l = self._tick_node(node.children[0], signals)
+        r = self._tick_node(node.children[1], signals)
+        return {"pass": l["pass"] and r["pass"], "fail": l["fail"] or r["fail"],
+                "active": l["active"] and r["active"], "overflow": l.get("overflow", False) or r.get("overflow", False)}
+
+    def _tick_prop_within(self, node: "CheckerNode", signals: dict[str, bool]) -> dict[str, bool]:
+        """prop_within: inner pass while outer is still active."""
+        if len(node.children) < 2:
+            return {"pass": False, "fail": False, "active": False, "overflow": False}
+        inner = self._tick_node(node.children[0], signals)
+        outer = self._tick_node(node.children[1], signals)
+        return {"pass": inner["pass"] and outer["active"],
+                "fail": inner["fail"] or outer["fail"],
+                "active": inner["active"] or outer["active"],
+                "overflow": inner.get("overflow", False) or outer.get("overflow", False)}
+
+    def _tick_prop_throughout(self, node: "CheckerNode", signals: dict[str, bool]) -> dict[str, bool]:
+        """prop_throughout: condition must hold throughout body sequence.
+
+        Mirrors RTL template behaviour: cond checker is driven by
+        ``_cond_start = start | body_active`` so it is re-evaluated on every
+        cycle the body is active.  We also directly evaluate the cond
+        expression against current signals because the boolean-expression
+        oracle model always passes (it doesn't evaluate the actual boolean
+        expression — see _eval_cond_expr).
+        """
+        if len(node.children) < 2:
+            return {"pass": False, "fail": False, "active": False, "overflow": False}
+
+        body = self._tick_node(node.children[1], signals)
+        # Drive cond with _cond_start = start | body_active
+        cond_sigs = dict(signals)
+        cond_sigs["start"] = signals.get("start", False) or body["active"]
+        cond = self._tick_node(node.children[0], cond_sigs)
+
+        # Directly evaluate the cond expression so that a false condition
+        # is detected (the boolexpr oracle always passes when started).
+        cond_expr_ok = _eval_cond_expr(node.children[0], signals)
+
+        return {"pass": body["pass"] and cond_expr_ok,
+                "fail": body["fail"] or (body["active"] and not cond_expr_ok),
+                "active": body["active"],
+                "overflow": cond.get("overflow", False) or body.get("overflow", False)}
+
+    def _tick_prop_not(self, node: "CheckerNode", signals: dict[str, bool]) -> dict[str, bool]:
+        """prop_not: invert pass/fail of body."""
+        body = node.children[0] if node.children else None
+        if body is None:
+            return {"pass": False, "fail": False, "active": False, "overflow": False}
+        out = self._tick_node(body, signals)
+        return {"pass": out["fail"], "fail": out["pass"],
+                "active": out["active"], "overflow": out.get("overflow", False)}
+
+    def _tick_prop_if_else(self, node: "CheckerNode", signals: dict[str, bool]) -> dict[str, bool]:
+        """prop_if_else: multiplex between true/false branches."""
+        # Evaluate condition from cond_expr in params
+        cond_text = node.params.get("cond_expr", "")
+        cond_sigs = _re_oracle.findall(r"\b([a-zA-Z_]\w*)\b", cond_text)
+        cond_val = all(signals.get(s, False) for s in cond_sigs) if cond_sigs else signals.get("cond", False)
+        if cond_val:
+            return self._tick_node(node.children[0], signals)
+        if len(node.children) > 1:
+            return self._tick_node(node.children[1], signals)
+        return {"pass": False, "fail": False, "active": False, "overflow": False}
+
+    def _tick_implication(self, node: "CheckerNode", signals: dict[str, bool], tname: str) -> dict[str, bool]:
+        if len(node.children) < 2:
+            return {"pass": False, "fail": False, "active": False, "overflow": False}
+        ant_out = self._tick_node(node.children[0], signals)
+        cons_out = self._tick_node(node.children[1], signals)
+        return {
+            "pass": ant_out["pass"] and cons_out["pass"],
+            "fail": ant_out["pass"] and cons_out["fail"],
+            "active": ant_out["active"] or cons_out["active"],
+            "overflow": False,
+        }
+
+
+def _extract_oracle_params(node: "CheckerNode") -> dict[str, Any]:
+    tname = node.template_name
+    params: dict[str, Any] = {}
+    if tname in ("delay_fixed", "delay_range", "concat_delay"):
+        params["delay_min"] = int(node.params.get("delay_min", 1))
+        params["delay_max"] = int(node.params.get("delay_max", 1))
+    elif tname in ("rep_consecutive", "goto_rep", "nonconsec_rep"):
+        params["rep_min"] = int(node.params.get("rep_min", 1))
+        params["rep_max"] = int(node.params.get("rep_max", 1))
+    elif tname in ("rose", "fell", "stable", "past", "changed"):
+        params["depth"] = int(node.params.get("depth", 1))
+    elif tname in ("overlap_bitvec", "nonoverlap"):
+        params["bv_width"] = int(node.params.get("bv_width", 1))
+    return params
+
+
+def _map_stimulus(tname: str, signals: dict[str, bool], node: "CheckerNode") -> dict[str, bool]:
+    if tname == "bool_expr":
+        return {"start": signals.get("start", False)}
+    if tname in ("delay_fixed", "delay_range"):
+        return {"start": signals.get("start", False)}
+    if tname in ("rep_consecutive", "goto_rep", "nonconsec_rep", "rose", "fell", "stable", "past", "changed"):
+        sig_name = _extract_obs_sig(node, 0)
+        return {"start": signals.get("start", False), "sig": signals.get(sig_name, False)}
+    if tname in ("overlap_bitvec", "nonoverlap"):
+        return {
+            "ant_pass": signals.get("ant_pass", signals.get("start", False)),
+            "con_pass": signals.get("con_pass", False),
+        }
+    return signals
+
+
+def _extract_obs_sig(node: "CheckerNode", idx: int) -> str:
+    obs = node.observed_signals
+    if idx < len(obs):
+        return str(obs[idx][0])
+    return "sig"
+
+
+def _eval_cond_expr(cond_node: "CheckerNode", signals: dict[str, bool]) -> bool:
+    """Evaluate a boolean-expression checker's condition against signal values.
+
+    The behavioral oracle models ``bool_expr`` as ``delay_fixed(0,0)`` which
+    always passes when started — it does not evaluate the actual boolean
+    expression.  For throughout we need to know whether the condition signal
+    (e.g. ``en``) itself is true, so we look at the signal value in the
+    stimulus.
+    """
+    if cond_node.template_name != "bool_expr":
+        return True  # non-boolexpr: assume passes (conservative)
+    obs = cond_node.observed_signals
+    if obs:
+        # For simple throughot like ``en throughout body``, check if en is high
+        for port_name, _ in obs:
+            if signals.get(port_name, False):
+                return True  # at least one observed signal is true
+        return False  # all observed signals are false → condition violated
+    return True  # no signals to check: assume passes
+
+
+from sva2rtl.ir import CheckerNode  # noqa: E402

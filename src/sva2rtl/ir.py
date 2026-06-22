@@ -95,22 +95,23 @@ class SeqRepetition(SVANode):
 
 @dataclass(frozen=True)
 class SignalFunc(SVANode):
-    """Signal function leaf: ``$rose``, ``$fell``, ``$stable``, or ``$past`` (Phase 3+).
+    """Signal function leaf: ``$rose``, ``$fell``, ``$stable``, ``$past``, or ``$changed``.
 
-    These are edge/stability detection functions that operate on a single signal
-    and produce a 1-bit result.  Each maps to a small RTL template with either
-    one flip-flop (rose/fell/stable) or an N-stage shift register (past).
+    These are edge/stability/delta detection functions that operate on a single
+    signal and produce a 1-bit result.  Each maps to a small RTL template with either
+    one flip-flop (rose/fell/stable/changed) or an N-stage shift register (past).
 
     Attributes:
-        func_name:  One of ``"rose"``, ``"fell"``, ``"stable"``, ``"past"``.
+        func_name:  One of ``"rose"``, ``"fell"``, ``"stable"``, ``"past"``, ``"changed"``.
         signal:     The signal name, e.g. ``"req"``.
         depth:      Pipeline depth for ``$past(sig, N)``; default ``1``.
-                    Ignored for rose/fell/stable.
+                    Ignored for rose/fell/stable/changed.
 
     Example::
 
         SignalFunc(func_name="rose", signal="req", depth=1, source_loc=...)
         SignalFunc(func_name="past", signal="data", depth=3, source_loc=...)
+        SignalFunc(func_name="changed", signal="sig", depth=1, source_loc=...)
     """
 
     func_name: str   # "rose" | "fell" | "stable" | "past"
@@ -150,6 +151,191 @@ class DisableIff(SVANode):
 
     condition: SVANode  # boolean expression for the disable condition
     body: SVANode       # the wrapped property/sequence
+
+
+@dataclass(frozen=True)
+class SeqFirstMatch(SVANode):
+    """``first_match(seq)`` — earliest completion wins (Phase 3+ / v1.3).
+
+    Wraps a sequence so that only the earliest possible completion is
+    reported.  Once the inner sequence matches, all subsequent matches
+    are suppressed.
+
+    Attributes:
+        body:  The wrapped sequence or property.
+
+    Example::
+
+        // first_match(a ##[1:3] b) — match at earliest b, suppress later matches
+        SeqFirstMatch(body=SeqConcat(...), source_loc=...)
+    """
+
+    body: SVANode
+
+
+@dataclass(frozen=True)
+class SeqGotoRep(SVANode):
+    """``expr[->N]`` — goto repetition (Phase 3+ / v1.3).
+
+    N non-consecutive occurrences of *expr*.  The sequence matches
+    immediately at the Nth occurrence.  Unlike ``[*N]``, the occurrences
+    need not be consecutive.
+
+    Attributes:
+        expr:     Boolean expression to monitor (must be BoolExpr).
+        rep_min:  Minimum occurrence count (typically == rep_max for [->N]).
+        rep_max:  Maximum occurrence count.
+
+    Example::
+
+        // a[->3] — a must be true exactly 3 times (not consecutively)
+        SeqGotoRep(expr=BoolExpr(text="a"), rep_min=3, rep_max=3, source_loc=...)
+    """
+
+    expr: SVANode
+    rep_min: int
+    rep_max: int
+
+
+@dataclass(frozen=True)
+class SeqNonconsecRep(SVANode):
+    """``expr[=N]`` — non-consecutive repetition (Phase 3+ / v1.3).
+
+    N non-consecutive occurrences of *expr*.  Similar to ``[->N]`` but
+    after the Nth occurrence the sequence may end at any later cycle
+    (no requirement for *expr* to become false after N matches).
+
+    Attributes:
+        expr:     Boolean expression to monitor (must be BoolExpr).
+        rep_min:  Minimum occurrence count.
+        rep_max:  Maximum occurrence count.
+
+    Example::
+
+        // a[=2] — a must be true at least 2 times (not consecutively)
+        SeqNonconsecRep(expr=BoolExpr(text="a"), rep_min=2, rep_max=2, source_loc=...)
+    """
+
+    expr: SVANode
+    rep_min: int
+    rep_max: int
+
+
+# ── Phase 3: Complex sequence operators (v1.3) ────────────────────────────
+
+
+@dataclass(frozen=True)
+class SeqOr(SVANode):
+    """Sequence OR: ``s1 or s2`` — either sequence matches (share same start point).
+
+    Both sequences are evaluated simultaneously from the same start.  The
+    composed sequence matches when either sub-sequence matches.
+
+    Attributes:
+        left:   Left operand sequence.
+        right:  Right operand sequence.
+    """
+
+    left: SVANode
+    right: SVANode
+
+
+@dataclass(frozen=True)
+class SeqAnd(SVANode):
+    """Sequence AND: ``s1 and s2`` — both sequences match (share same start point).
+
+    Both sequences are evaluated simultaneously from the same start.  The
+    composed sequence matches when both sub-sequences have matched.
+    Length may differ; match at the later completion time.
+
+    Attributes:
+        left:   Left operand sequence.
+        right:  Right operand sequence.
+    """
+
+    left: SVANode
+    right: SVANode
+
+
+@dataclass(frozen=True)
+class SeqIntersect(SVANode):
+    """Sequence intersect: ``s1 intersect s2`` — both complete simultaneously.
+
+    Both sequences must start at the same time AND complete at the same
+    cycle for the composed sequence to match.
+
+    Attributes:
+        left:   Left operand sequence.
+        right:  Right operand sequence.
+    """
+
+    left: SVANode
+    right: SVANode
+
+
+@dataclass(frozen=True)
+class SeqWithin(SVANode):
+    """Sequence within: ``s1 within s2`` — s1 completes within s2's window.
+
+    s1 must match entirely within the evaluation window of s2.
+    s2 defines the temporal envelope.
+
+    Attributes:
+        inner:  The sequence that must complete within the outer envelope.
+        outer:  The enclosing sequence defining the temporal window.
+    """
+
+    inner: SVANode
+    outer: SVANode
+
+
+@dataclass(frozen=True)
+class SeqThroughout(SVANode):
+    """Sequence throughout: ``expr throughout seq`` — expr holds throughout seq.
+
+    The boolean expression *condition* must hold continuously for the
+    entire duration of the sub-sequence *body*.
+
+    Attributes:
+        condition:  Boolean expression that must hold true.
+        body:       The sequence being conditioned.
+    """
+
+    condition: SVANode  # BoolExpr
+    body: SVANode
+
+
+# ── Phase 4: Property operators (v1.3) ────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class PropNot(SVANode):
+    """Property not: ``not (property)`` — invert pass/fail of the wrapped property.
+
+    Swaps the pass and fail outputs of the underlying property checker.
+    Attributes:
+        body:  The property to negate.
+    """
+
+    body: SVANode
+
+
+@dataclass(frozen=True)
+class PropIfElse(SVANode):
+    """Property if-else: ``if (cond) prop1 else prop2`` — conditional property.
+
+    Evaluates *cond* and selects which property to check: prop1 when
+    cond is true, prop2 (if present) when cond is false.
+
+    Attributes:
+        condition:  Boolean selector expression.
+        true_branch:  Property checked when condition is true.
+        false_branch:  Property checked when condition is false (None if no else).
+    """
+
+    condition: SVANode  # BoolExpr
+    true_branch: SVANode
+    false_branch: SVANode | None = None
 
 
 # ── Clocking ───────────────────────────────────────────────────────────────

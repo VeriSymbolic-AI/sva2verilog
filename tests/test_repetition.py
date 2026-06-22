@@ -380,3 +380,296 @@ def test_oracle_invalid_kind_still_raises() -> None:
     """Constructor still raises ValueError for unknown kind (regression)."""
     with pytest.raises(ValueError, match="Unknown kind"):
         SVABehavioralSim("bogus_op", {})
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# v1.3 Tier 2 — goto repetition [->N]
+# ══════════════════════════════════════════════════════════════════════════════
+
+from sva2rtl.ir import SeqGotoRep  # noqa: E402
+
+
+def test_import_goto_rep() -> None:
+    """Fixture with [->3] imports as SeqGotoRep(rep_min=3, rep_max=3)."""
+    ast = _load_fixture("goto_rep.json")
+    node, clock, text, label = import_assertion(ast)
+    assert isinstance(node, SeqGotoRep)
+    assert node.rep_min == 3
+    assert node.rep_max == 3
+    assert isinstance(node.expr, BoolExpr)
+    assert node.expr.text == "a"
+
+
+def test_import_goto_rep_text() -> None:
+    """Reconstructed text for [->3] contains '[->3]'."""
+    ast = _load_fixture("goto_rep.json")
+    _node, _clock, text, _label = import_assertion(ast)
+    assert "[->3]" in text
+
+
+def test_compose_goto_rep() -> None:
+    """compose() on SeqGotoRep returns CheckerNode with goto_rep template."""
+    ast = _load_fixture("goto_rep.json")
+    node, clock, text, label = import_assertion(ast)
+    checker = compose(node, clock, label, text)
+    assert checker.template_name == "goto_rep"
+    assert checker.params["rep_min"] == "3"
+    assert checker.params["rep_max"] == "3"
+    assert checker.params["cnt_width"] == "2"
+
+
+def test_compose_goto_rep_cnt_width() -> None:
+    """cnt_width for rep_max=7 is ceil(log2(8)) = 3."""
+    loc = SourceLoc("test.sv", 1, 1)
+    clock = ClockSpec(edge="posedge", signal="clk", source_loc=loc)
+    rep = SeqGotoRep(expr=BoolExpr(text="a", source_loc=loc), rep_min=7, rep_max=7, source_loc=loc)
+    checker = compose(rep, clock, None, "a [->7]")
+    assert checker.params["cnt_width"] == "3"
+
+
+def test_emit_goto_rep() -> None:
+    """Full pipeline: goto_rep.json → emit_all → valid SV with module/endmodule."""
+    ast = _load_fixture("goto_rep.json")
+    node, clock, text, label = import_assertion(ast)
+    checker = compose(node, clock, label, text)
+    modules = emit_all(checker)
+    assert len(modules) >= 1
+    sv = list(modules.values())[0]
+    assert "module " in sv
+    assert "endmodule" in sv
+    assert "count_q" in sv
+    assert "passed_q" in sv
+
+
+def test_emit_goto_rep_golden() -> None:
+    """Emit goto_rep, write golden file if missing, then assert match."""
+    from tests.conftest import assert_golden
+
+    ast = _load_fixture("goto_rep.json")
+    node, clock, text, label = import_assertion(ast)
+    checker = compose(node, clock, label, text)
+    modules = emit_all(checker)
+    sv = list(modules.values())[0]
+
+    golden_path = _GOLDEN / "sva_goto_rep.sv"
+    if not golden_path.exists():
+        golden_path.write_text(sv, encoding="utf-8")
+
+    assert_golden(sv, golden_path)
+
+
+def test_oracle_goto_rep_exact_3() -> None:
+    """goto_rep [->3]: pass fires at exactly the 3rd occurrence (non-consecutive)."""
+    sim = SVABehavioralSim("goto_rep", {"rep_min": 3, "rep_max": 3})
+    out0 = sim.tick({"start": True, "sig": True})   # count → 1
+    assert not out0["pass"], "count just became 1, no pass yet"
+    sim.tick({"start": False, "sig": False})  # gap OK for [->N]
+    sim.tick({"start": False, "sig": False})  # gap OK
+    out3 = sim.tick({"start": False, "sig": True})   # count → 2
+    out4 = sim.tick({"start": False, "sig": True})   # count → 3: pass
+    assert not out3["pass"]
+    assert out4["pass"], "3rd occurrence: pass"
+
+
+def test_oracle_goto_rep_never_fails() -> None:
+    """goto_rep [->N]: never asserts fail, only waits."""
+    sim = SVABehavioralSim("goto_rep", {"rep_min": 2, "rep_max": 2})
+    sim.tick({"start": True, "sig": True})
+    for i in range(10):
+        out = sim.tick({"start": False, "sig": False})
+        assert not out["fail"], f"tick {i}: [->N] should never fail"
+
+
+def test_oracle_goto_rep_lock_after_pass() -> None:
+    """goto_rep [->2]: once passed, stays in pass state."""
+    sim = SVABehavioralSim("goto_rep", {"rep_min": 2, "rep_max": 2})
+    sim.tick({"start": True, "sig": True})   # count=1
+    assert not sim.tick({"start": False, "sig": False})["pass"]
+    out = sim.tick({"start": False, "sig": True})   # count=2 → pass
+    assert out["pass"]
+    for i in range(5):
+        assert sim.tick({"start": False, "sig": True})["pass"], f"tick {i}: locked pass"
+
+
+def test_oracle_goto_rep_reset_clears() -> None:
+    """reset() clears count and running state for goto_rep."""
+    sim = SVABehavioralSim("goto_rep", {"rep_min": 3, "rep_max": 3})
+    sim.tick({"start": True, "sig": True})
+    sim.tick({"start": False, "sig": True})
+    sim.reset()
+    out = sim.tick({"start": True, "sig": True})
+    assert not out["pass"], "after reset: should not be in pass state"
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# v1.3 Tier 2 — non-consecutive repetition [=N]
+# ══════════════════════════════════════════════════════════════════════════════
+
+from sva2rtl.ir import SeqNonconsecRep  # noqa: E402
+
+
+def test_import_nonconsec_rep() -> None:
+    """Fixture with [=5] imports as SeqNonconsecRep(rep_min=5, rep_max=5)."""
+    ast = _load_fixture("nonconsec_rep.json")
+    node, clock, text, label = import_assertion(ast)
+    assert isinstance(node, SeqNonconsecRep)
+    assert node.rep_min == 5
+    assert node.rep_max == 5
+    assert isinstance(node.expr, BoolExpr)
+    assert node.expr.text == "a"
+
+
+def test_import_nonconsec_rep_text() -> None:
+    """Reconstructed text for [=5] contains '[=5]'."""
+    ast = _load_fixture("nonconsec_rep.json")
+    _node, _clock, text, _label = import_assertion(ast)
+    assert "[=5]" in text
+
+
+def test_compose_nonconsec_rep() -> None:
+    """compose() on SeqNonconsecRep returns CheckerNode with nonconsec_rep template."""
+    ast = _load_fixture("nonconsec_rep.json")
+    node, clock, text, label = import_assertion(ast)
+    checker = compose(node, clock, label, text)
+    assert checker.template_name == "nonconsec_rep"
+    assert checker.params["rep_min"] == "5"
+    assert checker.params["rep_max"] == "5"
+    assert checker.params["cnt_width"] == "3"
+
+
+def test_emit_nonconsec_rep() -> None:
+    """Full pipeline: nonconsec_rep.json → emit_all → valid SV output."""
+    ast = _load_fixture("nonconsec_rep.json")
+    node, clock, text, label = import_assertion(ast)
+    checker = compose(node, clock, label, text)
+    modules = emit_all(checker)
+    sv = list(modules.values())[0]
+    assert "module " in sv
+    assert "endmodule" in sv
+    assert "count_q" in sv
+    assert "passed_q" not in sv
+
+
+def test_emit_nonconsec_rep_golden() -> None:
+    """Emit nonconsec_rep, write golden file if missing, then assert match."""
+    from tests.conftest import assert_golden
+
+    ast = _load_fixture("nonconsec_rep.json")
+    node, clock, text, label = import_assertion(ast)
+    checker = compose(node, clock, label, text)
+    modules = emit_all(checker)
+    sv = list(modules.values())[0]
+
+    golden_path = _GOLDEN / "sva_nonconsec_rep.sv"
+    if not golden_path.exists():
+        golden_path.write_text(sv, encoding="utf-8")
+
+    assert_golden(sv, golden_path)
+
+
+def test_oracle_nonconsec_rep_pass_at_5() -> None:
+    """nonconsec_rep [=5]: passes when old_count >= 5 (OLD-state semantics, start-driven counting)."""
+    sim = SVABehavioralSim("nonconsec_rep", {"rep_min": 5, "rep_max": 5})
+    # Oracle increments count on (start=True, sig=True).
+    # After 5 such cycles: old_count=5 → pass_val=True
+    sim.tick({"start": True, "sig": True})   # old_count=0 → no pass; count→1
+    sim.tick({"start": True, "sig": True})   # old_count=1 → no pass; count→2
+    sim.tick({"start": True, "sig": True})   # old_count=2 → no pass; count→3
+    sim.tick({"start": True, "sig": True})   # old_count=3 → no pass; count→4
+    out4 = sim.tick({"start": True, "sig": True})  # old_count=4 → no pass; count→5
+    out5 = sim.tick({"start": True, "sig": True})  # old_count=5 → pass
+    assert not out4["pass"], "old_count=4 < 5: no pass"
+    assert out5["pass"], "old_count=5 >= rep_min=5: pass"
+
+
+def test_oracle_nonconsec_rep_never_fails() -> None:
+    """nonconsec_rep [=N]: never asserts fail, only waits."""
+    sim = SVABehavioralSim("nonconsec_rep", {"rep_min": 3, "rep_max": 3})
+    for i in range(20):
+        out = sim.tick({"start": False, "sig": False})
+        assert not out["fail"], f"tick {i}: [=N] should never fail"
+
+
+def test_oracle_nonconsec_rep_no_start_no_pass() -> None:
+    """[=N]: without start, no counting occurs and no pass."""
+    sim = SVABehavioralSim("nonconsec_rep", {"rep_min": 2, "rep_max": 2})
+    for i in range(10):
+        out = sim.tick({"start": False, "sig": True})
+        assert not out["pass"], f"tick {i}: no start → no pass"
+        assert not out["active"], f"tick {i}: no start → not active"
+
+
+def test_oracle_nonconsec_reset_clears() -> None:
+    """reset() clears count for nonconsec_rep."""
+    sim = SVABehavioralSim("nonconsec_rep", {"rep_min": 3, "rep_max": 3})
+    sim.tick({"start": True, "sig": True})
+    sim.tick({"start": True, "sig": True})
+    sim.reset()
+    out = sim.tick({"start": True, "sig": True})
+    assert not out["pass"], "after reset: count restarts"
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# v1.3 Tier 2 — first_match
+# ══════════════════════════════════════════════════════════════════════════════
+
+from sva2rtl.ir import SeqFirstMatch, SeqConcat  # noqa: E402
+
+
+def test_import_first_match() -> None:
+    """Fixture with first_match(a ##1 b) imports as SeqFirstMatch wrapping SeqConcat."""
+    ast = _load_fixture("first_match.json")
+    node, clock, text, label = import_assertion(ast)
+    assert isinstance(node, SeqFirstMatch)
+    assert isinstance(node.body, SeqConcat)
+
+
+def test_import_first_match_text() -> None:
+    """Reconstructed text contains 'first_match' wrapper."""
+    ast = _load_fixture("first_match.json")
+    _node, _clock, text, _label = import_assertion(ast)
+    assert "first_match" in text
+
+
+def test_compose_first_match() -> None:
+    """compose() on SeqFirstMatch returns first_match_top template with child."""
+    ast = _load_fixture("first_match.json")
+    node, clock, text, label = import_assertion(ast)
+    checker = compose(node, clock, label, text)
+    assert checker.template_name == "first_match_top"
+    assert len(checker.children) == 1
+    body = checker.children[0]
+    # Two-element sequence concat → seq_concat_top wrapper (3 children: e0, delay, e1)
+    assert body.template_name == "seq_concat_top"
+    assert checker.params.get("body_tmpl") == "seq_concat_top"
+    assert len(body.children) == 3
+
+
+def test_emit_first_match() -> None:
+    """Full pipeline: first_match.json → emit_all → valid SV with body instantiation."""
+    ast = _load_fixture("first_match.json")
+    node, clock, text, label = import_assertion(ast)
+    checker = compose(node, clock, label, text)
+    modules = emit_all(checker)
+    assert len(modules) >= 2
+    all_sv = "\n".join(modules.values())
+    assert "module " in all_sv
+    assert "locked_q" in all_sv
+    assert "endmodule" in all_sv
+
+
+def test_emit_first_match_golden() -> None:
+    """Emit first_match, write golden file if missing, then assert match."""
+    from tests.conftest import assert_golden
+
+    ast = _load_fixture("first_match.json")
+    node, clock, text, label = import_assertion(ast)
+    checker = compose(node, clock, label, text)
+    modules = emit_all(checker)
+
+    golden_path = _GOLDEN / "sva_first_match.sv"
+    all_sv = "\n".join(modules.values())
+    if not golden_path.exists():
+        golden_path.write_text(all_sv, encoding="utf-8")
+
+    assert_golden(all_sv, golden_path)

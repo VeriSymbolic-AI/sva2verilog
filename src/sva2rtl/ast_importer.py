@@ -17,16 +17,29 @@ Design decisions (from Research Q1, Q6, pitfalls P5.1, P8.1, P8.2, P8.4):
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from sva2rtl.errors import SvaCompileError, UnsupportedConstruct
+
+_LOG = logging.getLogger(__name__)
 from sva2rtl.ir import (
     BoolExpr,
     ClockSpec,
     DisableIff,
+    PropIfElse,
     PropImplication,
+    PropNot,
+    SeqAnd,
     SeqConcat,
+    SeqFirstMatch,
+    SeqGotoRep,
+    SeqIntersect,
+    SeqNonconsecRep,
+    SeqOr,
     SeqRepetition,
+    SeqThroughout,
+    SeqWithin,
     SignalFunc,
     SourceLoc,
     SVANode,
@@ -57,11 +70,11 @@ _UNARY_OPS: dict[str, str] = {
 
 # Supported SVA signal function names (subroutineName in slang CallExpression).
 _SUPPORTED_SIGNAL_FUNCS: frozenset[str] = frozenset(
-    {"$rose", "$fell", "$stable", "$past"}
+    {"$rose", "$fell", "$stable", "$past", "$changed"}
 )
 
 # Phase 1 unsupported node kinds; value is a human-readable construct name.
-UNSUPPORTED_KINDS_PHASE1: dict[str, str] = {}
+UNSUPPORTED_KINDS_PHASE1: dict[str, str] = {"StrongWeakAssertionExpr": "strong()/weak()"}
 
 # Implication operators are now handled natively (Phase 2).
 _UNSUPPORTED_BINARY_OPS: dict[str, str] = {}
@@ -277,8 +290,12 @@ def expr_to_sv(node: dict[str, Any]) -> str:
         case "SequenceExpr":
             return expr_to_sv(node["expr"])
 
-        case "CallExpression":
-            func_name = str(node.get("subroutineName", ""))
+        case "Simple":
+            # v11.0: unwrap Simple wrapper
+            return expr_to_sv(node["expr"])
+
+        case "CallExpression" | "Call":
+            func_name = str(node.get("subroutineName", node.get("subroutine", "")))
             if func_name in _SUPPORTED_SIGNAL_FUNCS:
                 sf = _build_signal_func(node, source_loc)
                 return _reconstruct_signal_func_text(sf)
@@ -324,15 +341,26 @@ def expr_to_sv(node: dict[str, Any]) -> str:
 def extract_source_loc(node: dict[str, Any]) -> SourceLoc:
     """Extract a SourceLoc from a slang JSON node.
 
-    Uses ``source_file_start``, ``source_line_start``, ``source_column_start``
-    fields added by ``--ast-json-source-info``.  Falls back to ``"<unknown>"``
+    Supports both slang v7.0 (``source_file_start`` etc.) and v11.0
+    (``source_file`` etc.) field names.  Falls back to ``"<unknown>"``
     / ``0`` when fields are absent.
     """
-    return SourceLoc(
-        file=str(node.get("source_file_start", "<unknown>")),
-        line=int(node.get("source_line_start", 0)),
-        col=int(node.get("source_column_start", 0)),
+    file = str(
+        node.get("source_file_start")
+        or node.get("source_file")
+        or "<unknown>"
     )
+    line = int(
+        node.get("source_line_start")
+        or node.get("source_line")
+        or 0
+    )
+    col = int(
+        node.get("source_column_start")
+        or node.get("source_column")
+        or 0
+    )
+    return SourceLoc(file=file, line=line, col=col)
 
 
 # ── Private helpers ────────────────────────────────────────────────────────
@@ -377,13 +405,14 @@ def _find_assertion_in_members(
 
     Returns the first found result or None.
     """
+    pending_label: str | None = None
     for member in members:
         kind = member.get("kind", "")
 
         if kind == "ConcurrentAssertion":
             return _import_concurrent_assertion(member, label=None)
 
-        # Labeled block: { "kind": "Block", "block": "ADDRESS my_check", ... }
+        # v7.0: Labeled block: { "kind": "Block", "block": "ADDRESS my_check", ... }
         if kind == "Block":
             label = _extract_label(member)
             body = member.get("body", {})
@@ -397,6 +426,39 @@ def _find_assertion_in_members(
             if result is not None:
                 return result
 
+        # v11.0: StatementBlock carries the label before a ProceduralBlock
+        if kind == "StatementBlock":
+            label = _extract_label(member)
+            if label is not None:
+                pending_label = label
+
+        # ProceduralBlock (slang v11.0): wraps ConcurrentAssertion inside
+        # an always block at the module level.
+        # v7.0: body → ConcurrentAssertion directly.
+        # v11.0: body → Block → body → ConcurrentAssertion.
+        if kind == "ProceduralBlock":
+            proc_body = member.get("body", {})
+            label = pending_label
+            pending_label = None
+            if proc_body.get("kind") == "ConcurrentAssertion":
+                # v7.0: direct wrapping
+                return _import_concurrent_assertion(proc_body, label=label)
+            if proc_body.get("kind") == "Block":
+                # v11.0: Block wrapping
+                block_body = proc_body.get("body", {})
+                if block_body.get("kind") == "ConcurrentAssertion":
+                    return _import_concurrent_assertion(block_body, label=label)
+                # Check statements
+                stmts: list[dict[str, Any]] = proc_body.get("statements", [])
+                for stmt in stmts:
+                    if stmt.get("kind") == "ConcurrentAssertion":
+                        return _import_concurrent_assertion(stmt, label=label)
+                # Recurse into Block members if present
+                sub = proc_body.get("members", [])
+                result = _find_assertion_in_members(sub)
+                if result is not None:
+                    return result
+
     return None
 
 
@@ -405,13 +467,14 @@ def _find_all_assertions_in_members(
 ) -> list[tuple[SVANode, ClockSpec, str, str | None]]:
     """Recursively search *members* and return ALL ConcurrentAssertions found."""
     results: list[tuple[SVANode, ClockSpec, str, str | None]] = []
+    pending_label: str | None = None
     for member in members:
         kind = member.get("kind", "")
 
         if kind == "ConcurrentAssertion":
             results.append(_import_concurrent_assertion(member, label=None))
 
-        # Labeled block: { "kind": "Block", "block": "ADDRESS my_check", ... }
+        # v7.0: Labeled block: { "kind": "Block", "block": "ADDRESS my_check", ... }
         if kind == "Block":
             label = _extract_label(member)
             body = member.get("body", {})
@@ -423,14 +486,53 @@ def _find_all_assertions_in_members(
             sub = body.get("members", [])
             results.extend(_find_all_assertions_in_members(sub))
 
+        # v11.0: StatementBlock carries the label before a ProceduralBlock
+        if kind == "StatementBlock":
+            label = _extract_label(member)
+            if label is not None:
+                pending_label = label
+
+        # ProceduralBlock (slang v11.0): wraps ConcurrentAssertion inside
+        # an always block at the module level.
+        # v7.0: body → ConcurrentAssertion directly.
+        # v11.0: body → Block → body → ConcurrentAssertion.
+        if kind == "ProceduralBlock":
+            proc_body = member.get("body", {})
+            label = pending_label
+            pending_label = None
+            if proc_body.get("kind") == "ConcurrentAssertion":
+                # v7.0: direct wrapping
+                results.append(_import_concurrent_assertion(proc_body, label=label))
+            elif proc_body.get("kind") == "Block":
+                # v11.0: Block wrapping
+                block_body = proc_body.get("body", {})
+                if block_body.get("kind") == "ConcurrentAssertion":
+                    results.append(_import_concurrent_assertion(block_body, label=label))
+                # Check statements
+                stmts: list[dict[str, Any]] = proc_body.get("statements", [])
+                for stmt in stmts:
+                    if stmt.get("kind") == "ConcurrentAssertion":
+                        results.append(_import_concurrent_assertion(stmt, label=label))
+                # Recurse into Block members if present
+                sub = proc_body.get("members", [])
+                results.extend(_find_all_assertions_in_members(sub))
+
     return results
 
 
 def _extract_label(block: dict[str, Any]) -> str | None:
-    """Extract label name from a Block node's ``block`` field."""
+    """Extract label name from a Block/StatementBlock node.
+
+    v7.0 Block: uses ``block`` field (format: ``"ADDRESS label_name"``).
+    v11.0 StatementBlock: uses ``name`` field directly.
+    """
+    # v11.0: StatementBlock uses "name" for the label
+    name = block.get("name", "")
+    if block.get("kind") == "StatementBlock" and name:
+        return name
+    # v7.0: Block uses "block" field with "ADDRESS label_name" format
     raw = block.get("block", "")
     if raw:
-        # Format: "ADDRESS label_name" — we want just the label name
         parts = str(raw).split(" ", 1)
         if len(parts) == 2:
             return parts[1]
@@ -441,25 +543,92 @@ def _import_concurrent_assertion(
     node: dict[str, Any],
     label: str | None,
 ) -> tuple[SVANode, ClockSpec, str, str | None]:
-    """Convert a ConcurrentAssertion node to IR."""
+    """Convert a ConcurrentAssertion node to IR.
+
+    Supports both slang v7.0 (``body`` → ``PropertySpec``) and v11.0
+    (``propertySpec`` → ``Clocking``) AST formats.
+    """
     source_loc = extract_source_loc(node)
-    body = node.get("body", {})
-    if body.get("kind") != "PropertySpec":
+
+    # ── Resolve the property container (v7.0 body vs v11.0 propertySpec) ────
+    body = node.get("body") or node.get("propertySpec")
+    if body is None:
         raise SvaCompileError(
-            message=f"Expected PropertySpec inside ConcurrentAssertion, "
-            f"got '{body.get('kind', '<missing>')}' at {source_loc}"
+            message=f"ConcurrentAssertion at {source_loc} has neither "
+            f"'body' (v7.0) nor 'propertySpec' (v11.0) field"
+        )
+    body_kind = body.get("kind", "")
+
+    # v7.0: body.kind == "PropertySpec", body.clocking
+    # v11.0: body.kind == "Clocking", body.clocking (or body.clk)
+    if body_kind in ("PropertySpec", "Clocking"):
+        clock_spec = _extract_clock(body)
+        expr_node: dict[str, Any] = body.get("expr", {})
+    else:
+        raise SvaCompileError(
+            message=f"Expected PropertySpec or Clocking inside "
+            f"ConcurrentAssertion, got '{body_kind}' at {source_loc}"
         )
 
-    clock_spec = _extract_clock(body)
-    expr_node: dict[str, Any] = body.get("expr", {})
-
     match expr_node.get("kind"):
+        case "Simple":
+            # v11.0: property is wrapped in Simple → unwrap
+            inner = expr_node.get("expr", {})
+            inner_kind = inner.get("kind", "")
+
+            # v11.0: repetition (GoTo/Nonconsecutive) sits directly on
+            # the Simple node, not on a nested SimpleAssertionExpr child.
+            rep = expr_node.get("repetition", {})
+            rep_kind = rep.get("kind", "")
+            if rep_kind == "GoTo":
+                rep_ir = _build_goto_rep(expr_node, source_loc)
+                ir_node = rep_ir
+                text = _reconstruct_rep_text(rep_ir)
+            elif rep_kind == "Nonconsecutive":
+                rep_ir = _build_nonconsec_rep(expr_node, source_loc)
+                ir_node = rep_ir
+                text = _reconstruct_rep_text(rep_ir)
+            elif inner_kind in ("CallExpression", "Call"):
+                # Signal functions can appear as "CallExpression" (v7.0)
+                # or "Call" (v11.0) inside Simple wrappers
+                func_name = str(inner.get("subroutineName", inner.get("subroutine", "")))
+                if func_name in _SUPPORTED_SIGNAL_FUNCS:
+                    sf_ir = _build_signal_func(inner, source_loc)
+                    ir_node = sf_ir
+                    text = _reconstruct_signal_func_text(sf_ir)
+                else:
+                    text = expr_to_sv(inner)
+                    ir_node: SVANode = BoolExpr(text=text, source_loc=source_loc)
+            elif inner_kind == "SimpleAssertionExpr":
+                # v7.0 legacy: repetition inside SimpleAssertionExpr sub-node
+                rep_kind2 = inner.get("repetition", {}).get("kind", "")
+                if rep_kind2 in ("GoTo", "Nonconsecutive"):
+                    if rep_kind2 == "GoTo":
+                        rep_ir = _build_goto_rep(inner, source_loc)
+                    else:
+                        rep_ir = _build_nonconsec_rep(inner, source_loc)
+                    ir_node = rep_ir
+                    text = _reconstruct_rep_text(rep_ir)
+                else:
+                    text = expr_to_sv(inner)
+                    ir_node: SVANode = BoolExpr(text=text, source_loc=source_loc)
+            else:
+                text = expr_to_sv(inner)
+                ir_node: SVANode = BoolExpr(text=text, source_loc=source_loc)
         case "SequenceConcat":
             seq_ir = _build_seq_concat(expr_node, source_loc)
-            ir_node: SVANode = seq_ir
+            ir_node = seq_ir
             text = _reconstruct_seq_text(seq_ir)
         case "SimpleAssertionExpr" if expr_node.get("repetition", {}).get("kind") == "Consecutive":
             rep_ir = _build_seq_repetition(expr_node, source_loc)
+            ir_node = rep_ir
+            text = _reconstruct_rep_text(rep_ir)
+        case "SimpleAssertionExpr" if expr_node.get("repetition", {}).get("kind") == "GoTo":
+            rep_ir = _build_goto_rep(expr_node, source_loc)
+            ir_node = rep_ir
+            text = _reconstruct_rep_text(rep_ir)
+        case "SimpleAssertionExpr" if expr_node.get("repetition", {}).get("kind") == "Nonconsecutive":
+            rep_ir = _build_nonconsec_rep(expr_node, source_loc)
             ir_node = rep_ir
             text = _reconstruct_rep_text(rep_ir)
         case "CallExpression" if expr_node.get("subroutineName") in _SUPPORTED_SIGNAL_FUNCS:
@@ -473,6 +642,43 @@ def _import_concurrent_assertion(
             prop_ir = _build_prop_implication(expr_node, source_loc)
             ir_node = prop_ir
             text = _reconstruct_impl_text(prop_ir)
+        case "BinaryPropertyExpr" if expr_node.get("op") == "And" and not _is_boolean_binary(expr_node):
+            ir_node, text = _build_binary_seq_op(expr_node, source_loc, "and")
+        case "BinaryPropertyExpr" if expr_node.get("op") == "Or" and not _is_boolean_binary(expr_node):
+            ir_node, text = _build_binary_seq_op(expr_node, source_loc, "or")
+        # ── slang v11.0 uses plain Binary/Unary (not *PropertyExpr) for
+        #     simple sequence-level operators.  Children are wrapped in Simple.
+        case "Binary" if expr_node.get("op") == "Or" and not _is_boolean_binary(expr_node):
+            ir_node, text = _build_binary_seq_op(expr_node, source_loc, "or")
+        case "Binary" if expr_node.get("op") == "And" and not _is_boolean_binary(expr_node):
+            ir_node, text = _build_binary_seq_op(expr_node, source_loc, "and")
+        case "Binary" if expr_node.get("op") == "Intersect":
+            ir_node, text = _build_intersect(expr_node, source_loc)
+        case "Binary" if expr_node.get("op") == "Within":
+            ir_node, text = _build_within(expr_node, source_loc)
+        case "Binary" if expr_node.get("op") == "Throughout":
+            ir_node, text = _build_throughout(expr_node, source_loc)
+        case "Unary" if expr_node.get("op") == "Not":
+            ir_node, text = _build_prop_not(expr_node, source_loc)
+        case "Conditional":
+            ir_node, text = _build_prop_if_else(expr_node, source_loc)
+        case "FirstMatch":
+            # v11.0: first_match(seq) wraps a sequence
+            inner_expr = expr_node.get("seq", expr_node.get("expr", {}))
+            inner_ir = _dispatch_expr_to_ir(inner_expr)
+            ir_node = SeqFirstMatch(body=inner_ir, source_loc=source_loc)
+            inner_text = _reconstruct_node_text(inner_ir)
+            text = f"first_match({inner_text})"
+        case "UnaryPropertyExpr" if expr_node.get("op") == "Not":
+            ir_node, text = _build_prop_not(expr_node, source_loc)
+        case "IfElsePropertyExpr" | "ConditionalPropertyExpr":
+            ir_node, text = _build_prop_if_else(expr_node, source_loc)
+        case "IntersectPropertyExpr" | "Intersect":
+            ir_node, text = _build_intersect(expr_node, source_loc)
+        case "WithinPropertyExpr" | "Within":
+            ir_node, text = _build_within(expr_node, source_loc)
+        case "ThroughoutPropertyExpr" | "Throughout":
+            ir_node, text = _build_throughout(expr_node, source_loc)
         case "SequenceInstance":
             expanded = _expand_named_sequence(expr_node, source_loc, frozenset())
             ir_node = expanded
@@ -505,14 +711,39 @@ def _dispatch_expr_to_ir(node: dict[str, Any], _visited: frozenset[str] = frozen
     """
     source_loc = extract_source_loc(node)
     match node.get("kind"):
+        case "Simple":
+            # v11.0: unwrap Simple wrapper, recurse into inner expression
+            return _dispatch_expr_to_ir(node.get("expr", {}), _visited)
         case "SequenceConcat":
             return _build_seq_concat(node, source_loc, _visited)
         case "SimpleAssertionExpr" if node.get("repetition", {}).get("kind") == "Consecutive":
             return _build_seq_repetition(node, source_loc, _visited)
-        case "CallExpression" if node.get("subroutineName") in _SUPPORTED_SIGNAL_FUNCS:
+        case "SimpleAssertionExpr" if node.get("repetition", {}).get("kind") == "GoTo":
+            return _build_goto_rep(node, source_loc)
+        case "SimpleAssertionExpr" if node.get("repetition", {}).get("kind") == "Nonconsecutive":
+            return _build_nonconsec_rep(node, source_loc)
+        case "CallExpression" | "Call" if (node.get("subroutineName") or node.get("subroutine", "")) in _SUPPORTED_SIGNAL_FUNCS:
             return _build_signal_func(node, source_loc)
         case "SequenceInstance":
             return _expand_named_sequence(node, source_loc, _visited)
+        case "BinaryPropertyExpr" if node.get("op") == "And" and not _is_boolean_binary(node):
+            ir_node, _text = _build_binary_seq_op(node, source_loc, "and")
+            return ir_node
+        case "BinaryPropertyExpr" if node.get("op") == "Or" and not _is_boolean_binary(node):
+            ir_node, _text = _build_binary_seq_op(node, source_loc, "or")
+            return ir_node
+        case "UnaryPropertyExpr" if node.get("op") == "Not":
+            ir_node, _text = _build_prop_not(node, source_loc)
+            return ir_node
+        case "IntersectPropertyExpr" | "Intersect":
+            ir_node, _text = _build_intersect(node, source_loc)
+            return ir_node
+        case "WithinPropertyExpr" | "Within":
+            ir_node, _text = _build_within(node, source_loc)
+            return ir_node
+        case "ThroughoutPropertyExpr" | "Throughout":
+            ir_node, _text = _build_throughout(node, source_loc)
+            return ir_node
         case _:
             _check_unsupported(node, source_loc)
             text = expr_to_sv(node)
@@ -556,13 +787,167 @@ def _build_seq_repetition(
             )
         )
     inner_node = node.get("expr", {})
-    inner = _dispatch_expr_to_ir(inner_node, _visited) if inner_node else BoolExpr(
-        text="<expr>", source_loc=source_loc
-    )
+    if not inner_node:
+        raise SvaCompileError(
+            message=(
+                f"SVA-E002: repetition at {source_loc} has no expression. "
+                "Consecutive repetition requires an expression, e.g. sig[*3]."
+            )
+        )
+    inner = _dispatch_expr_to_ir(inner_node, _visited)
     return SeqRepetition(expr=inner, rep_min=rep_min, rep_max=rep_max, source_loc=source_loc)
 
 
-def _reconstruct_rep_text(node: SeqRepetition) -> str:
+def _build_goto_rep(
+    node: dict[str, Any],
+    source_loc: SourceLoc,
+) -> SeqGotoRep:
+    """Build a SeqGotoRep IR node for expr[->N] (GoTo repetition)."""
+    rep = node.get("repetition", {})
+    rep_min = int(rep.get("min", 1))
+    rep_max = int(rep.get("max", 1))
+    inner_node = node.get("expr", {})
+    if not inner_node:
+        raise SvaCompileError(message=f"Goto repetition [->N] requires an expression at {source_loc}")
+    inner = _dispatch_expr_to_ir(inner_node)
+    return SeqGotoRep(expr=inner, rep_min=rep_min, rep_max=rep_max, source_loc=source_loc)
+
+
+def _build_nonconsec_rep(
+    node: dict[str, Any],
+    source_loc: SourceLoc,
+) -> SeqNonconsecRep:
+    """Build a SeqNonconsecRep IR node for expr[=N] (Nonconsecutive repetition)."""
+    rep = node.get("repetition", {})
+    rep_min = int(rep.get("min", 1))
+    rep_max = int(rep.get("max", 1))
+    inner_node = node.get("expr", {})
+    if not inner_node:
+        raise SvaCompileError(message=f"Non-consecutive repetition [=N] requires an expression at {source_loc}")
+    inner = _dispatch_expr_to_ir(inner_node)
+    return SeqNonconsecRep(expr=inner, rep_min=rep_min, rep_max=rep_max, source_loc=source_loc)
+
+
+# ── Phase 3: Complex sequence operator builders (v1.3) ─────────────────────
+
+
+def _build_binary_seq_op(
+    node: dict[str, Any], source_loc: SourceLoc, op_name: str,
+) -> tuple[SVANode, str]:
+    """Build SeqAnd or SeqOr from a BinaryPropertyExpr with And/Or op."""
+    left_node: dict[str, Any] = node.get("left", {})
+    right_node: dict[str, Any] = node.get("right", {})
+    left_ir = _dispatch_expr_to_ir(left_node)
+    right_ir = _dispatch_expr_to_ir(right_node)
+    left_text = _reconstruct_node_text(left_ir)
+    right_text = _reconstruct_node_text(right_ir)
+    text = f"({left_text} {op_name} {right_text})"
+    if op_name == "and":
+        ir_node = SeqAnd(left=left_ir, right=right_ir, source_loc=source_loc)
+    else:
+        ir_node = SeqOr(left=left_ir, right=right_ir, source_loc=source_loc)
+    return ir_node, text
+
+
+def _build_intersect(
+    node: dict[str, Any], source_loc: SourceLoc,
+) -> tuple[SVANode, str]:
+    """Build SeqIntersect from IntersectPropertyExpr."""
+    left_node = node.get("left", node.get("lhs", {}))
+    right_node = node.get("right", node.get("rhs", {}))
+    left_ir = _dispatch_expr_to_ir(left_node)
+    right_ir = _dispatch_expr_to_ir(right_node)
+    left_text = _reconstruct_node_text(left_ir)
+    right_text = _reconstruct_node_text(right_ir)
+    text = f"({left_text} intersect {right_text})"
+    return SeqIntersect(left=left_ir, right=right_ir, source_loc=source_loc), text
+
+
+def _build_within(
+    node: dict[str, Any], source_loc: SourceLoc,
+) -> tuple[SVANode, str]:
+    """Build SeqWithin from WithinPropertyExpr."""
+    inner_node = node.get("left", node.get("inner", node.get("lhs", {})))
+    outer_node = node.get("right", node.get("outer", node.get("rhs", {})))
+    inner_ir = _dispatch_expr_to_ir(inner_node)
+    outer_ir = _dispatch_expr_to_ir(outer_node)
+    inner_text = _reconstruct_node_text(inner_ir)
+    outer_text = _reconstruct_node_text(outer_ir)
+    text = f"({inner_text} within {outer_text})"
+    return SeqWithin(inner=inner_ir, outer=outer_ir, source_loc=source_loc), text
+
+
+def _build_throughout(
+    node: dict[str, Any], source_loc: SourceLoc,
+) -> tuple[SVANode, str]:
+    """Build SeqThroughout from ThroughoutPropertyExpr."""
+    cond_node = node.get("left", node.get("condition", node.get("lhs", {})))
+    body_node = node.get("right", node.get("body", node.get("rhs", {})))
+    cond_ir = _dispatch_expr_to_ir(cond_node)
+    body_ir = _dispatch_expr_to_ir(body_node)
+    cond_text = _reconstruct_node_text(cond_ir)
+    body_text = _reconstruct_node_text(body_ir)
+    text = f"({cond_text} throughout {body_text})"
+    return SeqThroughout(condition=cond_ir, body=body_ir, source_loc=source_loc), text
+
+
+def _build_prop_not(
+    node: dict[str, Any], source_loc: SourceLoc,
+) -> tuple[SVANode, str]:
+    """Build PropNot from UnaryPropertyExpr with Not op."""
+    inner_node = node.get("operand", node.get("expr", {}))
+    inner_ir = _dispatch_expr_to_ir(inner_node)
+    inner_text = _reconstruct_node_text(inner_ir)
+    text = f"not ({inner_text})"
+    return PropNot(body=inner_ir, source_loc=source_loc), text
+
+
+def _build_prop_if_else(
+    node: dict[str, Any], source_loc: SourceLoc,
+) -> tuple[SVANode, str]:
+    """Build PropIfElse from IfElsePropertyExpr or v11 Conditional node."""
+    cond_node = node.get("condition", node.get("cond", {}))
+    true_node = node.get("ifTrue", node.get("trueBranch", node.get("if", {})))
+    false_node = node.get("ifFalse", node.get("falseBranch", node.get("else", None)))
+    cond_ir = _dispatch_expr_to_ir(cond_node)
+    true_ir = _dispatch_expr_to_ir(true_node)
+    false_ir = _dispatch_expr_to_ir(false_node) if false_node else None
+    cond_text = _reconstruct_node_text(cond_ir)
+    true_text = _reconstruct_node_text(true_ir)
+    if false_ir:
+        false_text = _reconstruct_node_text(false_ir)
+        text = f"if ({cond_text}) {true_text} else {false_text}"
+    else:
+        text = f"if ({cond_text}) {true_text}"
+    return PropIfElse(condition=cond_ir, true_branch=true_ir, false_branch=false_ir, source_loc=source_loc), text
+
+
+def _is_boolean_binary(node: dict[str, Any]) -> bool:
+    """Check if a BinaryPropertyExpr And/Or is boolean-level (has SequenceExpr wrapper).
+
+    In slang JSON, boolean-level And/Or operands are always wrapped in
+    SequenceExpr.  Sequence-level And/Or operands are direct sequence nodes
+    (SequenceConcat, Simple, etc.) without the SequenceExpr indirection.
+    """
+    left: dict[str, Any] = node.get("left", {})
+    right: dict[str, Any] = node.get("right", {})
+    lk = left.get("kind", "")
+    rk = right.get("kind", "")
+    # Either operand being SequenceExpr indicates boolean-level
+    if lk == "SequenceExpr" or rk == "SequenceExpr":
+        return True
+    # Either operand being NamedValue means boolean-level
+    if lk == "NamedValue" or rk == "NamedValue":
+        return True
+    # Recursively check nested BinaryPropertyExpr
+    if lk == "BinaryPropertyExpr" and _is_boolean_binary(left):
+        return True
+    if rk == "BinaryPropertyExpr" and _is_boolean_binary(right):
+        return True
+    return False
+
+
+def _reconstruct_rep_text(node: SeqRepetition | SeqGotoRep | SeqNonconsecRep) -> str:
     """Reconstruct an SVA text representation from a SeqRepetition IR node."""
     if isinstance(node.expr, BoolExpr):
         inner_text = node.expr.text
@@ -570,9 +955,16 @@ def _reconstruct_rep_text(node: SeqRepetition) -> str:
         inner_text = _reconstruct_seq_text(node.expr)
     else:
         inner_text = "<expr>"
+    # Determine bracket syntax based on node type
+    if isinstance(node, SeqGotoRep):
+        bracket = "[->"
+    elif isinstance(node, SeqNonconsecRep):
+        bracket = "[="
+    else:
+        bracket = "[*"
     if node.rep_min == node.rep_max:
-        return f"{inner_text} [*{node.rep_min}]"
-    return f"{inner_text} [*{node.rep_min}:{node.rep_max}]"
+        return f"{inner_text} {bracket}{node.rep_min}]"
+    return f"{inner_text} {bracket}{node.rep_min}:{node.rep_max}]"
 
 
 def _build_signal_func(node: dict[str, Any], source_loc: SourceLoc) -> SignalFunc:
@@ -584,7 +976,7 @@ def _build_signal_func(node: dict[str, Any], source_loc: SourceLoc) -> SignalFun
 
     Raises ``SvaCompileError`` when the first argument signal cannot be extracted.
     """
-    raw_name: str = str(node.get("subroutineName", ""))
+    raw_name: str = str(node.get("subroutineName", node.get("subroutine", "")))
     func_name = raw_name.lstrip("$")  # "$rose" -> "rose", "$past" -> "past"
 
     arguments: list[dict[str, Any]] = node.get("arguments", [])
@@ -620,6 +1012,16 @@ def _build_signal_func(node: dict[str, Any], source_loc: SourceLoc) -> SignalFun
                 source_loc=arg1_loc,
             )
         depth = int(arg1.get("value", 1))
+
+    # NYQ-22: warn when $past depth exceeds practical hardware bound
+    if func_name == "past" and depth > 100:
+        _LOG.warning(
+            "$past(%s, %s) at %s — depth > 100 may exceed practical "
+            "hardware depth; consider reducing",
+            signal,
+            depth,
+            source_loc,
+        )
 
     return SignalFunc(
         func_name=func_name,
@@ -755,10 +1157,33 @@ def _reconstruct_node_text(node: SVANode) -> str:
         return _reconstruct_seq_text(node)
     if isinstance(node, SeqRepetition):
         return _reconstruct_rep_text(node)
+    if isinstance(node, (SeqGotoRep, SeqNonconsecRep)):
+        return _reconstruct_rep_text(node)
+    if isinstance(node, SeqFirstMatch):
+        return f"first_match({_reconstruct_node_text(node.body)})"
     if isinstance(node, SignalFunc):
         return _reconstruct_signal_func_text(node)
     if isinstance(node, PropImplication):
         return _reconstruct_impl_text(node)
+    if isinstance(node, SeqAnd):
+        return f"({_reconstruct_node_text(node.left)} and {_reconstruct_node_text(node.right)})"
+    if isinstance(node, SeqOr):
+        return f"({_reconstruct_node_text(node.left)} or {_reconstruct_node_text(node.right)})"
+    if isinstance(node, SeqIntersect):
+        return f"({_reconstruct_node_text(node.left)} intersect {_reconstruct_node_text(node.right)})"
+    if isinstance(node, SeqWithin):
+        return f"({_reconstruct_node_text(node.inner)} within {_reconstruct_node_text(node.outer)})"
+    if isinstance(node, SeqThroughout):
+        return f"({_reconstruct_node_text(node.condition)} throughout {_reconstruct_node_text(node.body)})"
+    if isinstance(node, PropNot):
+        return f"not ({_reconstruct_node_text(node.body)})"
+    if isinstance(node, PropIfElse):
+        cond = _reconstruct_node_text(node.condition)
+        true_t = _reconstruct_node_text(node.true_branch)
+        if node.false_branch is not None:
+            false_t = _reconstruct_node_text(node.false_branch)
+            return f"if ({cond}) {true_t} else {false_t}"
+        return f"if ({cond}) {true_t}"
     return "<expr>"
 
 
@@ -811,7 +1236,9 @@ def _expand_named_sequence(
 def _extract_clock(prop_spec: dict[str, Any]) -> ClockSpec:
     """Extract ClockSpec from a PropertySpec node's ``clocking`` field.
 
-    Raises SvaCompileError when the clocking annotation is absent or malformed.
+    Supports both slang v7.0 (TimingControl wrapper) and v11.0 (SignalEvent
+    directly).  Raises SvaCompileError when the clocking annotation is absent or
+    malformed.
     """
     clocking = prop_spec.get("clocking")
     if clocking is None:
@@ -823,7 +1250,13 @@ def _extract_clock(prop_spec: dict[str, Any]) -> ClockSpec:
             )
         )
 
-    event = clocking.get("event", {})
+    # v7.0: clocking.kind == "TimingControl" → clocking.event is SignalEvent
+    # v11.0: clocking.kind == "SignalEvent" directly
+    if clocking.get("kind") == "SignalEvent":
+        event = clocking
+    else:
+        event = clocking.get("event", {})
+
     if event.get("kind") != "SignalEvent":
         source_loc = extract_source_loc(clocking)
         raise SvaCompileError(
@@ -831,7 +1264,24 @@ def _extract_clock(prop_spec: dict[str, Any]) -> ClockSpec:
             f"got '{event.get('kind', '<missing>')}'"
         )
 
-    edge = str(event.get("edge", "posedge"))
+    edge_raw = event.get("edge")
+    if edge_raw is None:
+        source_loc = extract_source_loc(event)
+        raise SvaCompileError(
+            message=(
+                f"Clock event at {source_loc} has no edge field. "
+                "Use @(posedge clk) or @(negedge clk)."
+            )
+        )
+    edge = str(edge_raw).lower()
+    if edge not in ("posedge", "negedge"):
+        source_loc = extract_source_loc(event)
+        raise SvaCompileError(
+            message=(
+                f"Unsupported clock edge '{edge}' at {source_loc}. "
+                "Expected 'PosEdge' (posedge) or 'NegEdge' (negedge)."
+            )
+        )
     clk_expr: dict[str, Any] = event.get("expr", {})
     signal = clk_expr.get("symbol", " clk").split(" ", 1)[-1]
     clock_source_loc = extract_source_loc(event)
