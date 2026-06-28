@@ -36,3 +36,8 @@ sva_prop_*.sv
 
 # ── Research reports (process artifacts) ──
 research_report_*.md
+
+# ── Development process / planning docs (local-only, not published) ──
+.planning/
+.claude/
+.understand-anything/

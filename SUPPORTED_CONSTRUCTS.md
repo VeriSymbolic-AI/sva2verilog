@@ -1,4 +1,4 @@
-# Supported SVA Constructs — sva2rtl v1.3.0
+# Supported SVA Constructs — sva2rtl v1.3.1
 
 ## Tier 1 Operators (Fully Supported)
 
@@ -115,7 +115,20 @@ Generates an enable gate around the entire monitor. When the disable condition i
 - Active attempts are terminated without generating pass/fail
 - `disabled_o` is asserted
 
-## Known Limitations (v1.3.0)
+## Known Limitations (v1.3.1)
+
+### Semantic boundary: intersect / within with boolean operands
+
+The composed operators `intersect` and `within` are verified correct only for
+the single-completion-time sub-sequence case. With **boolean operands**, the
+behavioral oracle currently does not evaluate the operand values (it models a
+boolean expression as always-passing for timing purposes), so the value-level
+semantics of `a intersect b` / `a within b` are NOT independently guaranteed in
+this release. This boundary is recorded honestly as strict-xfail baseline tests
+in `tests/test_v13_independent_baseline.py`. The fix is the unified timing+data
+oracle planned for the v1.5 NFA composition engine. Use `throughout` (which does
+evaluate its condition) where value-level correctness is required, or wait for
+v1.5 for fully value-aware intersect/within.
 
 ### RTL simulation: multi-module x-propagation
 
@@ -150,6 +163,34 @@ The following temporal operators are not yet supported:
 | Recursive properties | Not supported |
 | Multi-dimensional signals | Array signals not supported in sampled value functions |
 | `$countones`, `$onehot` | System functions beyond $rose/$fell/$stable/$past not supported |
+
+### Multi-clock support: planned scope and verification boundary (v1.4)
+
+Multi-clock properties are planned for v1.4 using a split-and-synchronize
+compilation approach (Gawanmeh & Tahar, 2009): each `@(clk_i)` sub-sequence is
+compiled to a single-clock checker in its own clock domain, and cross-domain
+`##1` boundaries are connected through a standard 2-DFF synchronizer.
+
+Planned supported subset (equals the SVA standard's allowed multi-clock forms):
+- `@(posedge clk1) seq1 ##1 @(posedge clk2) seq2`
+- `@(posedge clk1) antecedent |=> @(posedge clk2) consequent`
+- multi-stage chains of the above
+
+Permanently excluded (with reasons):
+- `##N (N != 1)` or `##[M:N]` across a clock change — forbidden by IEEE 1800
+- multi-clock `intersect`/`within`/`throughout` — require same-start same-clock
+- overlapping implication `|->` across different clocks — race risk
+
+Verification boundary (honesty statement): the single-clock sub-checkers are
+verified by the full triple-oracle stack (dual simulators, behavioral oracle,
+yosys formal equivalence). The cross-clock 2-DFF synchronizer is treated as a
+trusted base component verified by structural checks and protocol assertions,
+NOT by formal equivalence — formal equivalence checking assumes a single clock
+domain and is not applicable to multi-clock designs (an industry-wide
+limitation, not a sva2rtl-specific defect). Users should validate cross-clock
+timing assumptions on FPGA prototypes or in post-silicon testing.
+
+See `.planning/DESIGN-multiclock-risk-D.md` for the full design and references.
 
 ## Error Codes
 

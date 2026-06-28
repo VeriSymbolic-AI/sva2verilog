@@ -109,7 +109,7 @@ module sva_monitor_<name> (
 ## Development
 
 ```bash
-git clone https://github.com/allenli/sva2rtl.git
+git clone https://github.com/sva2rtl/sva2rtl.git
 cd sva2rtl
 uv sync --dev
 ```

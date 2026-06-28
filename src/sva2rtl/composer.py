@@ -744,7 +744,15 @@ def _compute_bv_width(consequent: SVANode) -> int:
         case SignalFunc():
             return 1  # single-cycle evaluation
         case SeqGotoRep() | SeqNonconsecRep():
-            return 8  # occurrence-based — cycle count unbounded; conservative
+            # RISK-04: occurrence-based repetition has an unbounded cycle window
+            # (occurrences need not be consecutive), so the exact bit-vector
+            # width cannot be computed statically.  We size the window to a
+            # conservative lower bound derived from rep_max (each occurrence may
+            # take >= 1 cycle, so at minimum rep_max cycles are needed) and never
+            # below the historical default of 8.  Any runtime overrun is caught
+            # explicitly by the generated ``overflow_flag`` (never silently
+            # truncated), preserving the "never fail silently" contract.
+            return max(consequent.rep_max + 1, 8)
         case PropNot():
             return _compute_bv_width(consequent.body)
         case PropIfElse():

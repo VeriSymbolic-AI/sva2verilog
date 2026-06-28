@@ -731,6 +731,14 @@ class _HierarchicalSim:
         """prop_intersect: both must pass at same cycle (intersection)."""
         if len(node.children) < 2:
             return {"pass": False, "fail": False, "active": False, "overflow": False}
+        # RISK-03: explicit disable handling. Although disable propagates to leaf
+        # oracles (which reset on disable), we return all-zero here as well so the
+        # composed operator's semantics are unambiguous and consistent with
+        # _tick_prop_and. Both children are still ticked to keep their state reset.
+        if signals.get("disable", False):
+            self._tick_node(node.children[0], signals)
+            self._tick_node(node.children[1], signals)
+            return {"pass": False, "fail": False, "active": False, "overflow": False}
         l = self._tick_node(node.children[0], signals)
         r = self._tick_node(node.children[1], signals)
         return {"pass": l["pass"] and r["pass"], "fail": l["fail"] or r["fail"],
@@ -739,6 +747,11 @@ class _HierarchicalSim:
     def _tick_prop_within(self, node: "CheckerNode", signals: dict[str, bool]) -> dict[str, bool]:
         """prop_within: inner pass while outer is still active."""
         if len(node.children) < 2:
+            return {"pass": False, "fail": False, "active": False, "overflow": False}
+        # RISK-03: explicit disable handling (see _tick_prop_intersect).
+        if signals.get("disable", False):
+            self._tick_node(node.children[0], signals)
+            self._tick_node(node.children[1], signals)
             return {"pass": False, "fail": False, "active": False, "overflow": False}
         inner = self._tick_node(node.children[0], signals)
         outer = self._tick_node(node.children[1], signals)
@@ -758,6 +771,12 @@ class _HierarchicalSim:
         expression — see _eval_cond_expr).
         """
         if len(node.children) < 2:
+            return {"pass": False, "fail": False, "active": False, "overflow": False}
+
+        # RISK-03: explicit disable handling (see _tick_prop_intersect).
+        if signals.get("disable", False):
+            self._tick_node(node.children[0], signals)
+            self._tick_node(node.children[1], signals)
             return {"pass": False, "fail": False, "active": False, "overflow": False}
 
         body = self._tick_node(node.children[1], signals)
