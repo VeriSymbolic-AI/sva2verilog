@@ -113,15 +113,18 @@ class TestOverlapBitvecTemplate:
         passed, output = _check_fixture_equiv("implication_overlap")
         assert passed, f"overlap_bitvec FAILED:\n{output}"
 
-    @pytest.mark.xfail(
-        reason="yosys 0.66 SAT model limit — wider BV_WIDTH token-passing state "
-               "representation differs between gold/gate after optimization",
-        strict=True,
-    )
-    def test_implication_bitvec(self) -> None:
-        """Implication with wider BV is equivalent under optimization."""
-        passed, output = _check_fixture_equiv("implication_bitvec")
-        assert passed, f"overlap_bitvec wide FAILED:\n{output}"
+    def test_implication_bitvec_rejected(self) -> None:
+        """`a |-> a ##[2:5] b` (BV_WIDTH>1 sequence consequent) is rejected.
+
+        The legacy bv_q path for multi-cycle sequence consequents is a confirmed
+        correctness defect (BUG-IMPL-01); rather than emit a wrong monitor the
+        compiler raises. A correct implementation requires the v1.5 NFA engine.
+        (Was previously an optimizer-equivalence test; the path no longer compiles.)
+        """
+        from sva2rtl.errors import UnsupportedConstruct
+
+        with pytest.raises(UnsupportedConstruct, match="sequence consequent"):
+            _build_from_fixture("implication_bitvec")
 
 
 # ── nonoverlap template ───────────────────────────────────────────────────

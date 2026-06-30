@@ -28,7 +28,11 @@ import pytest
 
 from sva2rtl.ast_importer import import_assertion
 from sva2rtl.composer import compose
-from sva2rtl.formal_equiv import run_sva_equiv_check, sby_is_available
+from sva2rtl.formal_equiv import (
+    run_sva_equiv_check,
+    run_sva_miter_check,
+    sby_is_available,
+)
 from sva2rtl.ir import CheckerNode
 from sva2rtl.normalizer import normalize
 from sva2rtl.optimizer import optimize
@@ -173,3 +177,224 @@ class TestSampledValueSvaEquiv:
             checker, reference, helper_regs=_prev_helper(sig), depth=15
         )
         assert passed, f"changed SVA↔RTL equivalence FAILED:\n{output[-2000:]}"
+
+
+# ── ##N / ##[M:N] delay (sequence) — NON-CIRCULAR reference monitor (BUG-DELAY-01)
+# The generated monitor is mitered (on `pass`) against an independently-written
+# reference whose a->b gap is HARD-FIXED to the operator value(s): the attempt is
+# armed at (start & a), then b is sampled exactly M..N cycles later. The gap is
+# the semantic content being checked — it is NOT tuned to the monitor's pipeline
+# (the earlier circular reference, since removed, conflated gap + report latency
+# into one tuned constant and hid the +2 spacing defect). After the concat_delay
+# fix, the monitor's net a->b sample gap equals the operator delay, so these
+# prove genuine IEEE-1800 equivalence.
+
+
+def _delay_ref_module(name: str, m: int, n: int) -> str:
+    """Independent single-attempt reference monitor for ``a ##[m:n] b``.
+
+    Armed at (start & a) at cycle s; ``cnt_q`` becomes k at cycle s+k, so b is
+    sampled while cnt_q is in [m, n] (gaps m..n from a). pass registers one cycle
+    later (uniform report latency). Structurally distinct from the generated
+    token-passing chain, and the gap is pinned to the operator value.
+    """
+    return f"""\
+module {name} (
+    input  logic clk,
+    input  logic rst_n,
+    input  logic start,
+    input  logic a,
+    input  logic b,
+    output logic pass
+);
+    logic [7:0] cnt_q;
+    logic       armed_q;
+    always_ff @(posedge clk) begin
+        if (!rst_n) begin
+            cnt_q   <= 8'd0;
+            armed_q <= 1'b0;
+        end else if (start && a) begin
+            cnt_q   <= 8'd1;          // captured at cycle s; cnt==1 at s+1
+            armed_q <= 1'b1;
+        end else if (armed_q) begin
+            if (cnt_q >= 8'd{n}) armed_q <= 1'b0;  // window closed after last sample
+            cnt_q <= cnt_q + 8'd1;
+        end
+    end
+    wire b_sample = armed_q && (cnt_q >= 8'd{m}) && (cnt_q <= 8'd{n});
+    logic pass_q;
+    always_ff @(posedge clk) begin
+        if (!rst_n) pass_q <= 1'b0;
+        else        pass_q <= b_sample && b;
+    end
+    assign pass = pass_q;
+endmodule
+"""
+
+
+def _build_delay_checker(m: int, n: int) -> CheckerNode:
+    """Compose+optimize the monitor for ``a ##[m:n] b`` directly from IR."""
+    from sva2rtl.ir import BoolExpr, ClockSpec, SeqConcat, SourceLoc
+
+    loc = SourceLoc("test.sv", 1, 1)
+    clock = ClockSpec(edge="posedge", signal="clk", source_loc=loc)
+    seq = SeqConcat(
+        elements=(BoolExpr(text="a", source_loc=loc), BoolExpr(text="b", source_loc=loc)),
+        delays=((m, n),),
+        source_loc=loc,
+    )
+    label = "dly"
+    text = f"a ##[{m}:{n}] b" if m != n else f"a ##{n} b"
+    return optimize(compose(seq, clock, label, text))
+
+
+class TestDelaySvaEquiv:
+    """##N / ##[M:N] delay monitors prove equivalent to a gap-pinned reference."""
+
+    @pytest.mark.parametrize(
+        "m,n",
+        [
+            (1, 1),   # ##1: gap-1 boundary (start-cycle combinational fire)
+            (3, 3),   # ##3: the operator whose +2 defect BUG-DELAY-01 first caught
+            (1, 3),   # ##[1:3]: range spanning the start-term and counter boundary
+            (2, 5),   # ##[2:5]: pure counter-path range
+        ],
+    )
+    def test_delay_gap_equiv(self, m: int, n: int) -> None:
+        """`a ##[m:n] b` monitor matches the gap-pinned reference (non-circular)."""
+        checker = _build_delay_checker(m, n)
+        ref_name = f"ref_a_{m}_{n}_b"
+        ref = _delay_ref_module(ref_name, m, n)
+        passed, output = run_sva_miter_check(
+            checker, ref, ref_name, compare="pass", depth=20
+        )
+        assert passed, f"a ##[{m}:{n}] b SVA↔RTL equivalence FAILED:\n{output[-2500:]}"
+
+
+# ── Implication |-> and |=> (BUG-IMPL-01 fix) ─────────────────────────────────
+# After the BUG-IMPL-01 fix, the single-cycle-consequent implication monitors
+# evaluate antecedent and consequent leaves in parallel and align the verdict:
+#   |-> : fail(t) = a(t-1) & ~b(t-1)      (a, b sampled the SAME cycle)
+#   |=> : fail(t) = a(t-2) & ~b(t-1)      (b sampled exactly one cycle after a)
+# The reference below is authored from IEEE-1800 semantics: the relative a->b
+# spacing is FIXED by the operator (0 for |->, 1 for |=>); only the common
+# report latency (1 / 2) is matched to the monitor's leaf-registration delay.
+# This is independent of the implementation (no bv_q, no token chain), so it
+# breaks the RISK-01 isomorphism that hid the original timing defects.
+
+
+def _impl_sigs(checker: CheckerNode) -> tuple[str, str]:
+    """Return (antecedent_signal, consequent_signal) names."""
+    ant = checker.children[0].observed_signals[0][0]
+    con = checker.children[1].observed_signals[0][0]
+    return ant, con
+
+
+class TestImplicationSvaEquiv:
+    """|-> and |=> monitors must match IEEE-1800 implication semantics."""
+
+    def test_overlap_equiv(self) -> None:
+        checker = _build("implication_overlap")  # a |-> b
+        a, b = _impl_sigs(checker)
+        # fail(t) = a(t-1) & ~b(t-1): both operands sampled the same cycle.
+        helper = (
+            f"    logic {a}_d1, {b}_d1, vld1;\n"
+            "    always_ff @(posedge clk) begin\n"
+            "        if (!rst_n) begin\n"
+            f"            {a}_d1 <= 1'b0; {b}_d1 <= 1'b0; vld1 <= 1'b0;\n"
+            "        end else begin\n"
+            f"            {a}_d1 <= {a}; {b}_d1 <= {b}; vld1 <= 1'b1;\n"
+            "        end\n"
+            "    end\n"
+        )
+        reference = f"vld1 & {a}_d1 & ~{b}_d1"
+        passed, output = run_sva_equiv_check(
+            checker, reference, helper_regs=helper, depth=15
+        )
+        assert passed, f"a |-> b SVA↔RTL equivalence FAILED:\n{output[-2500:]}"
+
+    def test_nonoverlap_equiv(self) -> None:
+        checker = _build("implication_nonoverlap")  # a |=> b
+        a, b = _impl_sigs(checker)
+        # fail(t) = a(t-2) & ~b(t-1): b sampled exactly one cycle after a.
+        helper = (
+            f"    logic {a}_d1, {a}_d2, {b}_d1, vld1, vld2;\n"
+            "    always_ff @(posedge clk) begin\n"
+            "        if (!rst_n) begin\n"
+            f"            {a}_d1 <= 1'b0; {a}_d2 <= 1'b0; {b}_d1 <= 1'b0;\n"
+            "            vld1 <= 1'b0; vld2 <= 1'b0;\n"
+            "        end else begin\n"
+            f"            {a}_d1 <= {a}; {a}_d2 <= {a}_d1; {b}_d1 <= {b};\n"
+            "            vld1 <= 1'b1; vld2 <= vld1;\n"
+            "        end\n"
+            "    end\n"
+        )
+        reference = f"vld2 & {a}_d2 & ~{b}_d1"
+        passed, output = run_sva_equiv_check(
+            checker, reference, helper_regs=helper, depth=15
+        )
+        assert passed, f"a |=> b SVA↔RTL equivalence FAILED:\n{output[-2500:]}"
+
+
+# ── Property-level operators: not / if-else ───────────────────────────────────
+# These compose a boolean leaf (registered 1 cycle) under a property template
+# that registers its verdict one more cycle, so the monitor's fail at cycle t
+# reflects the operand(s) sampled at t-2 (uniform 2-cycle observation latency).
+# The reference encodes the IEEE-1800 violation condition with a matching delay,
+# independent of the monitor's internal structure.
+
+
+class TestPropertyNotSvaEquiv:
+    """`not (a)` monitor must match `assert property (not a)` semantics."""
+
+    def test_prop_not_equiv(self) -> None:
+        checker = _build("v13_prop_not")  # not (a)
+        a = checker.observed_signals[0][0]
+        # `not a` is violated iff a is TRUE. Monitor reports it with a 2-cycle
+        # observation latency, so fail(t) = a(t-2) once the pipeline is valid.
+        helper = (
+            f"    logic {a}_d1, {a}_d2, vld1, vld2;\n"
+            "    always_ff @(posedge clk) begin\n"
+            "        if (!rst_n) begin\n"
+            f"            {a}_d1 <= 1'b0; {a}_d2 <= 1'b0; vld1 <= 1'b0; vld2 <= 1'b0;\n"
+            "        end else begin\n"
+            f"            {a}_d1 <= {a}; {a}_d2 <= {a}_d1; vld1 <= 1'b1; vld2 <= vld1;\n"
+            "        end\n"
+            "    end\n"
+        )
+        reference = f"vld2 & {a}_d2"
+        passed, output = run_sva_equiv_check(
+            checker, reference, helper_regs=helper, depth=15
+        )
+        assert passed, f"not (a) SVA↔RTL equivalence FAILED:\n{output[-2500:]}"
+
+
+class TestPropIfElseSvaEquiv:
+    """`if (sel) a else b` monitor must match its IEEE-1800 semantics."""
+
+    def test_prop_if_else_equiv(self) -> None:
+        checker = _build("v13_if_else_prop")  # if (sel) a else b
+        ports = [p for p, _ in checker.observed_signals]
+        assert set(ports) == {"a", "b", "sel"}, ports
+        # `if (sel) a else b` is violated iff (sel && !a) || (!sel && !b).
+        # Empirically (iverilog probe), the branch values a/b are sampled with a
+        # 2-cycle latency (branch leaf + output register), while the condition
+        # sel is injected at the output MUX with only a 1-cycle latency. So
+        # fail(t) = sel(t-1) ? ~a(t-2) : ~b(t-2). BMC explores all sel/a/b values.
+        helper = (
+            "    logic a_d1, a_d2, b_d1, b_d2, sel_d1, vld1, vld2;\n"
+            "    always_ff @(posedge clk) begin\n"
+            "        if (!rst_n) begin\n"
+            "            a_d1<=0; a_d2<=0; b_d1<=0; b_d2<=0;\n"
+            "            sel_d1<=0; vld1<=0; vld2<=0;\n"
+            "        end else begin\n"
+            "            a_d1<=a; a_d2<=a_d1; b_d1<=b; b_d2<=b_d1;\n"
+            "            sel_d1<=sel; vld1<=1'b1; vld2<=vld1;\n"
+            "        end\n"
+            "    end\n"
+        )
+        reference = "vld2 & (sel_d1 ? ~a_d2 : ~b_d2)"
+        passed, output = run_sva_equiv_check(
+            checker, reference, helper_regs=helper, depth=15
+        )
+        assert passed, f"if/else SVA↔RTL equivalence FAILED:\n{output[-2500:]}"

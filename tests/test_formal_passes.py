@@ -9,19 +9,15 @@ When yosys is not installed, tests are skipped.
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
 
 from sva2rtl.ast_importer import import_all_assertions
 from sva2rtl.composer import compose
-from sva2rtl.emitter import emit, emit_all
 from sva2rtl.formal import (
     _yosys_is_available,
     check_optimizer_pass,
-    run_equiv_check,
-    run_equiv_check_multi,
 )
 from sva2rtl.frontend import invoke_slang
 from sva2rtl.ir import CheckerNode
@@ -44,8 +40,8 @@ def _compile_to_checker(sv_text: str, *, optimize_flag: bool = True) -> CheckerN
     Writes the text to a temp file, invokes slang, imports, normalizes,
     composes, and optionally optimizes.
     """
-    import tempfile
     import os
+    import tempfile
 
     tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".sv", delete=False, encoding="utf-8")
     try:
@@ -146,13 +142,16 @@ endmodule
 class TestCSEEquiv:
     """Verify that common subexpression elimination preserves equivalence."""
 
-    @pytest.mark.xfail(
-        reason="yosys 0.66 SAT model limit — CSE-shared delay nodes create wider "
-               "state spaces that yosys cannot prove equivalent via induction",
-        strict=True,
-    )
     def test_duplicate_subsequence_cse_equiv(self) -> None:
-        """``a ##3 b ##1 a ##3 b`` — duplicate subsequence merged by CSE."""
+        """``a ##3 b ##1 a ##3 b`` — duplicate subsequence merged by CSE.
+
+        Previously xfail'd and blamed on a "yosys SAT model limit". The real
+        cause was the CSE module-naming defect (optimizer.cse renamed
+        ``module_name`` but not ``params["module_name"]``), which emitted a
+        shared module whose header kept the OLD name — so yosys saw a malformed
+        design (instantiation of an undefined module) and equivalence induction
+        could not complete. With the names synced, gold≡gate proves cleanly.
+        """
         sv = """
 module test(input logic clk, a, b);
     a_seq: assert property (@(posedge clk) a ##3 b ##1 a ##3 b);

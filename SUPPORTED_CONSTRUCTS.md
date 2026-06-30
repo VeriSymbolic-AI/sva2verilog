@@ -6,8 +6,20 @@
 |----------|----------|-------------|-------------|-------------------|
 | `##N` | Delay | Fixed cycle delay | `a ##2 b` | Shift register (N flip-flops) |
 | `##[M:N]` | Delay | Bounded delay range | `a ##[1:3] b` | Counter with [M,N] window comparator |
-| <code>\|-></code> | Implication | Overlapping implication | <code>req \|-> ack</code> | Antecedent match triggers consequent check (same cycle) |
-| <code>\|=></code> | Implication | Non-overlapping implication | <code>req \|=> ack</code> | Antecedent match triggers consequent check (next cycle) |
+| <code>\|-></code> | Implication | Overlapping implication, **single-cycle consequent only** | <code>req \|-> ack</code> | Antecedent match triggers consequent check (same cycle) |
+| <code>\|=></code> | Implication | Non-overlapping implication, **single-cycle consequent only** | <code>req \|=> ack</code> | Antecedent match triggers consequent check (next cycle) |
+
+> **Implication consequent restriction (v1.3.2).** The consequent of `|->` / `|=>`
+> must be a **single-cycle** expression: a boolean expression or a sampled-value
+> function (`$rose`/`$fell`/`$stable`/`$past`/`$changed`). These single-cycle
+> forms are formally proven equivalent to IEEE-1800 semantics
+> (`tests/test_formal_sva_equiv.py`). A **multi-cycle sequence consequent**
+> (e.g. `a |-> b ##2 c`, `a |-> b[*3]`, `a |-> (b ##[2:5] c)`) is **rejected at
+> compile time** (error SVA-E002): its legacy implementation is a confirmed
+> correctness defect (BUG-IMPL-01) and a correct version requires the v1.5 NFA
+> composition engine. Workaround: move the sequence into the **antecedent**
+> (e.g. `(b ##2 c) |-> d`), or split into separate properties whose consequent
+> is single-cycle.
 | `[*N]` | Repetition | Exact consecutive repetition | `a[*3]` | Counter counts N consecutive matches |
 | `[*M:N]` | Repetition | Bounded consecutive repetition | `a[*1:4]` | Counter with [M,N] range check |
 | `$rose()` | Sampled value | Rising edge (0-to-1 transition) | `$rose(sig)` | Edge detector: `sig & ~sig_prev` |
@@ -116,6 +128,25 @@ Generates an enable gate around the entire monitor. When the disable condition i
 - `disabled_o` is asserted
 
 ## Known Limitations (v1.3.1)
+
+### Cycle-delay spacing (BUG-DELAY-01, RESOLVED v1.4)
+
+The cycle-delay operators `##N` / `##[M:N]` recognize the correct absolute
+inter-element spacing: the generated monitor for `a ##N b` samples `b` exactly
+`N` cycles after `a` (and `a ##[M:N] b` accepts the window `[M, N]`). This is
+proven non-circularly (FPV) in `tests/test_formal_sva_equiv.py`
+(`TestDelaySvaEquiv`, parametrized over `##1`, `##3`, `##[1:3]`, `##[2:5]`).
+
+> A prior release shipped a `+2` absolute-spacing defect in the token-passing
+> `concat_delay` (b sampled at `a+(N+2)`), hidden by an isomorphic oracle and a
+> circular equivalence test. It was found and fixed in v1.4; see
+> `.planning/BUG-delay-spacing.md`.
+
+> **Fusion limitation (`##0`).** `a ##0 b` (and any ranged delay whose lower
+> bound is 0) requires sampling two operands in the SAME cycle, which the
+> registered-leaf token-passing pipeline cannot express; `##0` retains a 1-cycle
+> separation. Use `a && b` for true same-cycle conjunction. This is a structural
+> limitation slated for the v1.5 NFA engine.
 
 ### Semantic boundary: intersect / within with boolean operands
 

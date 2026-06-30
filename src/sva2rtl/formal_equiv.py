@@ -163,6 +163,172 @@ def build_helper_regs(helper_decls: str) -> str:
     return helper_decls
 
 
+def build_miter_harness(
+    monitor_top: str,
+    observed_signals: tuple[tuple[str, str], ...],
+    reference_module: str,
+    reference_top: str,
+    *,
+    clock: str = "clk",
+    has_overflow_flag: bool = True,
+    compare: str = "pass",
+) -> str:
+    """Build a miter harness comparing the monitor against a REFERENCE MONITOR.
+
+    Unlike ``build_harness`` (which compares ``fail`` to a boolean expression),
+    this instantiates BOTH the generated monitor and an independently-written
+    reference monitor module, driving them with identical inputs and a single
+    ``start`` pulse, then asserts their ``compare`` outputs (``pass`` or
+    ``fail``) agree on every cycle. The reference monitor is authored with a
+    structurally different (naive shift-register) implementation, providing
+    genuine implementation independence for sequence operators.
+
+    Parameters
+    ----------
+    monitor_top:
+        Generated monitor top module name.
+    observed_signals:
+        ``(port, signal)`` pairs both monitors observe (free inputs).
+    reference_module:
+        Full SystemVerilog text of the independent reference monitor module.
+    reference_top:
+        Module name of the reference monitor.
+    clock:
+        Clock signal.
+    has_overflow_flag:
+        Whether the generated monitor exposes an overflow_flag port.
+    compare:
+        Which output to compare: ``"pass"`` or ``"fail"``.
+    """
+    input_decls = "\n".join(
+        f"    input logic {port}," for port, _ in observed_signals
+    )
+    port_conns = " ".join(f".{port}({port})," for port, _ in observed_signals)
+    ovf_decl = "    logic m_ovf;\n" if has_overflow_flag else ""
+    ovf_conn = ".overflow_flag(m_ovf), " if has_overflow_flag else ""
+
+    return f"""\
+{reference_module}
+
+// Auto-generated SVA-to-Verilog miter harness (formal_equiv, reference monitor).
+module harness (
+    input logic {clock},
+{input_decls}
+    input logic _unused_pad
+);
+    logic rst_n;
+    // Single-attempt start: pulse start exactly once (cycle 1, after reset).
+    integer _t = 0;
+    always @(posedge {clock}) _t <= _t + 1;
+    wire _in_reset = (_t == 0);
+    assign rst_n = ~_in_reset;
+    wire start_pulse = (_t == 1);
+
+    logic m_active, m_pass, m_fail, m_afired, m_disabled;
+{ovf_decl}    {monitor_top} dut (
+        .{clock}({clock}), .rst_n(rst_n),
+        .start(start_pulse),
+        {port_conns}
+        .disable_i(1'b0),
+        .active(m_active), .pass(m_pass), .fail(m_fail),
+        .attempt_fired(m_afired), {ovf_conn}.disabled_o(m_disabled)
+    );
+
+    logic r_{compare};
+    {reference_top} ref_dut (
+        .{clock}({clock}), .rst_n(rst_n),
+        .start(start_pulse),
+        {port_conns}
+        .{compare}(r_{compare})
+    );
+
+    always @(posedge {clock}) begin
+        if (rst_n) begin
+            equiv_cmp: assert (m_{compare} == r_{compare});
+        end
+    end
+endmodule
+"""
+
+
+def run_sva_miter_check(
+    monitor_root: CheckerNode,
+    reference_module: str,
+    reference_top: str,
+    *,
+    clock: str = "clk",
+    compare: str = "pass",
+    depth: int = 20,
+    timeout: int = 300,
+) -> tuple[bool, str]:
+    """Verify a monitor against an independent reference monitor via BMC miter.
+
+    See ``build_miter_harness``. Returns ``(passed, output)``.
+    """
+    if not sby_is_available():
+        return False, "ERROR: sby (SymbiYosys) not found on PATH"
+
+    modules = emit_all(monitor_root)
+    monitor_top = monitor_root.module_name
+    top_sv = modules.get(monitor_top, "")
+    has_ovf = "overflow_flag" in top_sv
+
+    harness = build_miter_harness(
+        monitor_top,
+        monitor_root.observed_signals,
+        reference_module,
+        reference_top,
+        clock=clock,
+        has_overflow_flag=has_ovf,
+        compare=compare,
+    )
+
+    with tempfile.TemporaryDirectory(prefix="sva2rtl_miter_") as tmpdir:
+        work = Path(tmpdir)
+        read_lines = []
+        file_lines = []
+        for name, sv in modules.items():
+            (work / f"{name}.sv").write_text(sv)
+            read_lines.append(f"read -sv {name}.sv")
+            file_lines.append(f"{name}.sv")
+        (work / "harness.sv").write_text(harness)
+        read_lines.append("read -sv harness.sv")
+        file_lines.append("harness.sv")
+
+        script_reads = "\n".join(read_lines)
+        files_block = "\n".join(file_lines)
+        sby_text = f"""\
+[options]
+mode bmc
+depth {depth}
+
+[engines]
+smtbmc
+
+[script]
+{script_reads}
+prep -top harness
+
+[files]
+{files_block}
+"""
+        (work / "miter.sby").write_text(sby_text)
+
+        try:
+            result = subprocess.run(
+                ["sby", "-f", "miter.sby"],
+                cwd=str(work),
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+            )
+            output = result.stdout + "\n" + result.stderr
+            passed = result.returncode == 0 and "PASS" in output
+            return passed, output
+        except subprocess.TimeoutExpired:
+            return False, f"ERROR: sby miter check timed out after {timeout}s"
+
+
 def run_sva_equiv_check(
     monitor_root: CheckerNode,
     reference_expr: str,
