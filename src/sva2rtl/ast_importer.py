@@ -25,6 +25,7 @@ from sva2rtl.ir import (
     BoolExpr,
     ClockSpec,
     DisableIff,
+    PropBoundedAlways,
     PropBoundedEventually,
     PropIfElse,
     PropImplication,
@@ -739,6 +740,8 @@ def _import_concurrent_assertion(
             ir_node, text = _build_prop_not(expr_node, source_loc)
         case "Unary" if expr_node.get("op") in ("SEventually", "Eventually"):
             ir_node, text = _build_bounded_eventually(expr_node, source_loc)
+        case "Unary" if expr_node.get("op") in ("Always", "SAlways"):
+            ir_node, text = _build_bounded_always(expr_node, source_loc)
         case "Conditional":
             ir_node, text = _build_prop_if_else(expr_node, source_loc)
         case "FirstMatch":
@@ -820,6 +823,9 @@ def _dispatch_expr_to_ir(node: dict[str, Any], _visited: frozenset[str] = frozen
             return ir_node
         case "Unary" if node.get("op") in ("SEventually", "Eventually"):
             ir_node, _text = _build_bounded_eventually(node, source_loc)
+            return ir_node
+        case "Unary" if node.get("op") in ("Always", "SAlways"):
+            ir_node, _text = _build_bounded_always(node, source_loc)
             return ir_node
         case "IntersectPropertyExpr" | "Intersect":
             ir_node, _text = _build_intersect(node, source_loc)
@@ -1028,6 +1034,58 @@ def _build_bounded_eventually(
     text = f"{kw} [{lo}:{hi}] ({body_text})"
     return (
         PropBoundedEventually(
+            body=body_ir, lo=lo, hi=hi, strong=strong, source_loc=source_loc
+        ),
+        text,
+    )
+
+
+def _build_bounded_always(
+    node: dict[str, Any], source_loc: SourceLoc,
+) -> tuple[SVANode, str]:
+    """Build PropBoundedAlways from a v11 Unary Always/SAlways node.
+
+    Bounded form requires ``min``/``max`` (the ``[lo:hi]`` range). Unbounded forms
+    (no range) and non-boolean operands are rejected — honesty-first: unbounded
+    ``always`` is not synthesizable on finite state, and sequence operands need
+    the v1.5 NFA engine. See SUPPORTED_CONSTRUCTS.md.
+    """
+    op = node.get("op", "")
+    strong = op == "SAlways"
+    kw = "s_always" if strong else "always"
+    if "min" not in node or "max" not in node:
+        raise UnsupportedConstruct(
+            message=(
+                f"unbounded '{kw}' is not synthesizable on finite state — use the "
+                f"bounded form '{kw} [m:n] p' with an explicit cycle range."
+            ),
+            construct_name=f"unbounded {kw}",
+            source_loc=source_loc,
+        )
+    lo = int(node["min"])
+    hi = int(node["max"])
+    if lo < 0 or hi < lo:
+        raise SvaCompileError(
+            message=(
+                f"invalid bounded-liveness range [{lo}:{hi}] for '{kw}' at "
+                f"{source_loc}: require 0 <= m <= n."
+            )
+        )
+    body_ir = _dispatch_expr_to_ir(node.get("expr", {}))
+    if not isinstance(body_ir, BoolExpr):
+        raise UnsupportedConstruct(
+            message=(
+                f"'{kw} [m:n]' currently supports only a boolean-expression "
+                "operand; sequence/property operands are deferred to the v1.5 NFA "
+                "engine."
+            ),
+            construct_name=f"{kw} with non-boolean operand",
+            source_loc=source_loc,
+        )
+    body_text = _reconstruct_node_text(body_ir)
+    text = f"{kw} [{lo}:{hi}] ({body_text})"
+    return (
+        PropBoundedAlways(
             body=body_ir, lo=lo, hi=hi, strong=strong, source_loc=source_loc
         ),
         text,

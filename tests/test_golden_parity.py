@@ -66,6 +66,7 @@ _SINGLE_MODULE_CASES: list[tuple[str, str]] = [
     ("rep_fixed.json", "sva_rep_fixed.sv"),
     ("rep_range.json", "sva_rep_range.sv"),
     ("s_eventually_1_3.json", "sva_se_1_3.sv"),
+    ("always_1_3.json", "sva_sa_1_3.sv"),
 ]
 
 

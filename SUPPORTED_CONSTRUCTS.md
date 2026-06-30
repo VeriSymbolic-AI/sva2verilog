@@ -56,6 +56,8 @@ finite state.
 |----------|----------|-------------|-------------|-------------------|
 | `s_eventually [m:n]` | Liveness | Boolean operand must hold at some offset `k ∈ [m,n]` from start; PASS at first in-window hit, FAIL at deadline `n` if never satisfied | `s_eventually [1:3] a` | `s_eventually` — offset counter + satisfied latch + deadline-fail (pass@start+k*+1, fail@start+n+1) |
 | `eventually [m:n]` | Liveness | Weak bounded form; collapses to the same synthesizable monitor as the strong form over a finite window | `eventually [0:4] a` | `s_eventually` (shared) |
+| `always [m:n]` | Liveness | Universal dual: boolean operand must hold at EVERY offset `k ∈ [m,n]`; FAIL at first in-window violation, PASS at deadline `n` if all held | `always [1:3] a` | `s_always` — offset counter + violation latch + deadline-pass (fail@start+k_viol+1, pass@start+n+1) |
+| `s_always [m:n]` | Liveness | Strong bounded form; collapses to the same synthesizable monitor as the weak form over a finite window | `s_always [0:4] a` | `s_always` (shared) |
 
 Notes for v1.4 Part A:
 - The operand must reduce to a **boolean expression** (like `throughout`'s
@@ -64,10 +66,10 @@ Notes for v1.4 Part A:
 - Equivalence is established **non-circularly**: the generated monitor is proven
   by SymbiYosys BMC against an independent IEEE-1800 reference monitor authored
   from `∃ k ∈ [m,n] : a(t0+k)` semantics (not derived from the implementation).
-- Unbounded `s_eventually a` / `s_until` (which require an eventual obligation)
-  raise `UnsupportedConstruct` with a source location and a remediation hint.
-- Bounded `until` and `always [m:n]` / `s_always [m:n]` are the remaining Part A
-  operators (phases A3/A4).
+- Unbounded `s_eventually a` / `always a` / `s_until` (which require an eventual
+  or unbounded obligation) raise `UnsupportedConstruct` with a source location and
+  a remediation hint.
+- Bounded `until` / `until_with` is the remaining Part A operator (phase A4).
 
 ## Composition Model
 
@@ -202,10 +204,10 @@ The following temporal operators are not yet supported:
 | `nexttime` | Temporal | Not supported |
 | `eventually`/`s_eventually` (bounded `[m:n]`) | Liveness | **Supported** (v1.4 Part A) |
 | `eventually`/`s_eventually` (unbounded) | Liveness | Rejected — not synthesizable on finite state |
-| `always [m:n]` / `s_always [m:n]` (bounded) | Liveness | Planned v1.4 Part A (phase A3) |
+| `always [m:n]` / `s_always [m:n]` (bounded) | Liveness | **Supported** (v1.4 Part A) |
 | `until` / `until_with` (bounded, weak) | Liveness | Planned v1.4 Part A (phase A4) |
 | `s_until` (strong) | Liveness | Rejected — requires unbounded eventual obligation |
-| `always` (unbounded) | Temporal | Not supported |
+| `always` (unbounded) | Temporal | Rejected — not synthesizable on finite state |
 | `intersect`/`within` with local variables | Sequence | Not supported |
 | Nested multi-path operators | Sequence | Not supported (single-level only) |
 | Multi-clock properties | Clocking | Not supported (planned v1.4.1 Part B) |

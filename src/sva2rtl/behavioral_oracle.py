@@ -643,6 +643,8 @@ class _HierarchicalSim:
             return self._tick_prop_if_else(node, signals)
         if tname == "s_eventually":
             return self._tick_s_eventually(node, signals)
+        if tname == "s_always":
+            return self._tick_s_always(node, signals)
         if node.children:
             return self._tick_node(node.children[0], signals)
         return {"pass": False, "fail": False, "active": False, "overflow": False}
@@ -924,6 +926,59 @@ class _HierarchicalSim:
             if k >= hi:
                 if not bool(st["sat"]) and not hit:
                     nxt_fail = True
+                st["armed"] = False
+            st["off"] = k + 1
+
+        st["o_pass"] = nxt_pass
+        st["o_fail"] = nxt_fail
+        return out
+
+    def _tick_s_always(
+        self, node: CheckerNode, signals: dict[str, bool]
+    ) -> dict[str, bool]:
+        """Bounded always ``always [lo:hi] p`` — the universal dual of eventually.
+
+        Independent contract model (derived from IEEE 1800 semantics, NOT from the
+        RTL template — RISK-01): armed at the ``start`` cycle t0 (offset 0), the
+        operand p must hold at EVERY offset k in [lo,hi].  Registered outputs
+        (latency 1): FAIL at t0 + k_viol + 1 where k_viol is the first in-window
+        offset where p is false; PASS at t0 + hi + 1 if every in-window offset
+        holds.  ``active`` is the registered ``armed`` state.
+        """
+        lo = int(node.params.get("lo", 0))
+        hi = int(node.params.get("hi", 0))
+        key = node.module_name
+        if not hasattr(self, "_sa_state"):
+            self._sa_state: dict[str, dict[str, object]] = {}
+        st = self._sa_state.setdefault(
+            key, {"armed": False, "off": 0, "viol": False, "o_pass": False, "o_fail": False}
+        )
+
+        # Registered outputs: emit what was scheduled at the previous tick.
+        out = {
+            "pass": bool(st["o_pass"]),
+            "fail": bool(st["o_fail"]),
+            "active": bool(st["armed"]),
+            "overflow": False,
+        }
+        nxt_pass = False
+        nxt_fail = False
+
+        p = self._eval_operand(node, signals)
+        if signals.get("start", False):
+            st["armed"] = True
+            st["off"] = 0
+            st["viol"] = False
+        if st["armed"]:
+            k = int(st["off"])
+            in_window = lo <= k <= hi
+            miss = in_window and (not p) and not bool(st["viol"])
+            if miss:
+                nxt_fail = True
+                st["viol"] = True
+            if k >= hi:
+                if not bool(st["viol"]) and not miss:
+                    nxt_pass = True
                 st["armed"] = False
             st["off"] = k + 1
 

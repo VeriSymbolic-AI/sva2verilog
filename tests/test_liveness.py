@@ -16,7 +16,12 @@ import pytest
 
 from sva2rtl.ast_importer import _dispatch_expr_to_ir
 from sva2rtl.errors import SvaCompileError, UnsupportedConstruct
-from sva2rtl.ir import BoolExpr, PropBoundedEventually, SourceLoc
+from sva2rtl.ir import (
+    BoolExpr,
+    PropBoundedAlways,
+    PropBoundedEventually,
+    SourceLoc,
+)
 from sva2rtl.normalizer import normalize
 
 # ── slang AST node builders (v11.0.0 shapes) ───────────────────────────────
@@ -29,6 +34,20 @@ def _bool_operand(sig: str = "a") -> dict:
 
 def _eventually_node(
     op: str = "SEventually",
+    lo: int | None = 1,
+    hi: int | None = 3,
+    operand: dict | None = None,
+) -> dict:
+    node: dict = {"kind": "Unary", "op": op, "expr": operand or _bool_operand()}
+    if lo is not None:
+        node["min"] = lo
+    if hi is not None:
+        node["max"] = hi
+    return node
+
+
+def _always_node(
+    op: str = "Always",
     lo: int | None = 1,
     hi: int | None = 3,
     operand: dict | None = None,
@@ -108,3 +127,65 @@ def test_normalize_bounded_eventually_idempotent() -> None:
     assert once == node
     assert normalize(once) == once
     assert isinstance(once, PropBoundedEventually)
+
+
+# ── LIVE-02 frontend: bounded always imports correctly ─────────────────────
+
+
+def test_always_bounded_imports() -> None:
+    ir = _dispatch_expr_to_ir(_always_node("Always", 1, 3))
+    assert isinstance(ir, PropBoundedAlways)
+    assert (ir.lo, ir.hi, ir.strong) == (1, 3, False)
+    assert isinstance(ir.body, BoolExpr)
+    assert ir.body.text == "a"
+
+
+def test_s_always_strong_bounded_imports() -> None:
+    ir = _dispatch_expr_to_ir(_always_node("SAlways", 2, 4))
+    assert isinstance(ir, PropBoundedAlways)
+    assert (ir.lo, ir.hi, ir.strong) == (2, 4, True)
+
+
+def test_always_single_offset() -> None:
+    ir = _dispatch_expr_to_ir(_always_node("Always", 2, 2))
+    assert isinstance(ir, PropBoundedAlways)
+    assert (ir.lo, ir.hi) == (2, 2)
+
+
+def test_unbounded_always_rejected() -> None:
+    with pytest.raises(UnsupportedConstruct, match="unbounded"):
+        _dispatch_expr_to_ir(_always_node("Always", None, None))
+
+
+def test_unbounded_s_always_rejected() -> None:
+    with pytest.raises(UnsupportedConstruct, match="unbounded"):
+        _dispatch_expr_to_ir(_always_node("SAlways", None, None))
+
+
+def test_always_inverted_bounds_rejected() -> None:
+    with pytest.raises(SvaCompileError, match=r"\[4:2\]"):
+        _dispatch_expr_to_ir(_always_node("Always", 4, 2))
+
+
+def test_always_non_boolean_operand_rejected() -> None:
+    sig_call = {
+        "kind": "Simple",
+        "expr": {
+            "kind": "CallExpression",
+            "subroutineName": "$rose",
+            "arguments": [{"kind": "NamedValue", "symbol": "1 a"}],
+        },
+    }
+    with pytest.raises(UnsupportedConstruct, match="boolean-expression operand"):
+        _dispatch_expr_to_ir(_always_node("Always", 1, 3, operand=sig_call))
+
+
+def test_normalize_bounded_always_idempotent() -> None:
+    loc = SourceLoc("t.sv", 1, 1)
+    node = PropBoundedAlways(
+        body=BoolExpr(text="a", source_loc=loc), lo=1, hi=3, strong=False, source_loc=loc
+    )
+    once = normalize(node)
+    assert once == node
+    assert normalize(once) == once
+    assert isinstance(once, PropBoundedAlways)

@@ -495,3 +495,100 @@ class TestSEventuallySvaEquiv:
             f"s_eventually[{lo}:{hi}] {compare} SVA↔RTL equivalence FAILED:\n"
             f"{output[-2500:]}"
         )
+
+
+# ── Bounded always always [lo:hi] p (v1.4 Part A) ─────────────────────────────
+# The UNIVERSAL dual of bounded eventually. The generated monitor
+# (templates/s_always.sv.j2) is proven against an INDEPENDENT reference monitor
+# authored from IEEE-1800 semantics (forall k in [lo,hi] : p holds at offset k).
+# The reference uses an offset counter ``o`` and a structurally distinct decision:
+# FAIL at the first in-window violating offset, PASS at the deadline offset hi
+# only if no offset violated. Both outputs are compared by BMC miter — a source
+# of truth separate from the implementation (breaks RISK-01).
+
+
+def _sa_ref_module(name: str, lo: int, hi: int) -> str:
+    """Independent reference monitor for ``always [lo:hi] a`` (single attempt)."""
+    return f"""\
+module {name} (
+    input  logic clk,
+    input  logic rst_n,
+    input  logic start,
+    input  logic a,
+    output logic pass,
+    output logic fail
+);
+    // o counts cycles since start (o==0 at the start cycle). The operand must
+    // hold at EVERY offset in [{lo},{hi}]. Derived from IEEE-1800 semantics,
+    // independently of the generated counter+latch monitor (universal dual).
+    logic [7:0] o;
+    logic       armed, viol, pass_q, fail_q;
+    wire in_win   = armed && (o >= 8'd{lo}) && (o <= 8'd{hi});
+    wire miss     = in_win && !a && !viol;
+    wire deadline = armed && (o == 8'd{hi});
+    always_ff @(posedge clk) begin
+        if (!rst_n) begin
+            o <= 8'd0; armed <= 1'b0; viol <= 1'b0; pass_q <= 1'b0; fail_q <= 1'b0;
+        end else begin
+            pass_q <= 1'b0;
+            fail_q <= 1'b0;
+            if (start) begin
+                o <= 8'd1; armed <= 1'b1; viol <= 1'b0;
+                if (({lo} == 0) && !a) begin fail_q <= 1'b1; viol <= 1'b1; end
+                if ({hi} == 0) begin
+                    if (!(({lo} == 0) && !a)) pass_q <= 1'b1;
+                    armed <= 1'b0;
+                end
+            end else if (armed) begin
+                if (miss)                   fail_q <= 1'b1;
+                else if (deadline && !viol) pass_q <= 1'b1;
+                if (miss) viol <= 1'b1;
+                if (o == 8'd{hi}) armed <= 1'b0;
+                o <= o + 8'd1;
+            end
+        end
+    end
+    assign pass = pass_q;
+    assign fail = fail_q;
+endmodule
+"""
+
+
+def _build_sa_checker(lo: int, hi: int) -> CheckerNode:
+    """Compose+optimize the monitor for ``always [lo:hi] a`` directly from IR."""
+    from sva2rtl.ir import BoolExpr, ClockSpec, PropBoundedAlways, SourceLoc
+
+    loc = SourceLoc("test.sv", 1, 1)
+    clock = ClockSpec(edge="posedge", signal="clk", source_loc=loc)
+    node = PropBoundedAlways(
+        body=BoolExpr(text="a", source_loc=loc), lo=lo, hi=hi, strong=False, source_loc=loc
+    )
+    return optimize(compose(node, clock, "sa", f"always [{lo}:{hi}] a"))
+
+
+class TestSAlwaysSvaEquiv:
+    """``always [lo:hi] a`` monitor proven equiv to an independent reference."""
+
+    @pytest.mark.parametrize(
+        "lo,hi",
+        [
+            (1, 1),   # single offset, gap-1
+            (1, 3),   # range spanning start-relative window
+            (2, 2),   # single offset, deeper
+            (2, 5),   # wider counter range
+            (0, 2),   # lo==0: start-cycle offset included
+        ],
+    )
+    @pytest.mark.parametrize("compare", ["pass", "fail"])
+    def test_s_always_equiv(self, lo: int, hi: int, compare: str) -> None:
+        """Monitor's pass/fail matches the independent reference (non-circular BMC)."""
+        checker = _build_sa_checker(lo, hi)
+        ref_name = f"ref_sa_{lo}_{hi}"
+        ref = _sa_ref_module(ref_name, lo, hi)
+        passed, output = run_sva_miter_check(
+            checker, ref, ref_name, compare=compare, depth=20
+        )
+        assert passed, (
+            f"always[{lo}:{hi}] {compare} SVA↔RTL equivalence FAILED:\n"
+            f"{output[-2500:]}"
+        )

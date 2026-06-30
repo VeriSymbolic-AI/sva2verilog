@@ -25,6 +25,7 @@ from sva2rtl.ir import (
     CheckerNode,
     ClockSpec,
     DisableIff,
+    PropBoundedAlways,
     PropBoundedEventually,
     PropIfElse,
     PropImplication,
@@ -498,6 +499,8 @@ def compose(
             return _compose_prop_if_else(node, clock, label, original_text, cse_origin)
         case PropBoundedEventually():
             return _compose_bounded_eventually(node, clock, label, original_text, cse_origin)
+        case PropBoundedAlways():
+            return _compose_bounded_always(node, clock, label, original_text, cse_origin)
         case _:
             raise UnsupportedConstruct(
                 message=(
@@ -1274,6 +1277,52 @@ def _compose_bounded_eventually(
     }
     return CheckerNode(
         template_name="s_eventually",
+        module_name=module_name,
+        params=params,
+        observed_signals=observed,
+        source_loc=node.source_loc,
+        children=(),
+        cse_origin=cse_origin,
+    )
+
+
+def _compose_bounded_always(
+    node: PropBoundedAlways, clock: ClockSpec, label: str | None,
+    original_text: str, cse_origin: str | None = None,
+) -> CheckerNode:
+    """Compose bounded always ``always [lo:hi] p`` as a leaf monitor.
+
+    The universal dual of :func:`_compose_bounded_eventually`: the operand must
+    hold at EVERY in-window offset.  Counter sizing mirrors the existential form
+    (``cnt_q == k-1`` at offset k).
+    """
+    if not isinstance(node.body, BoolExpr):
+        raise UnsupportedConstruct(
+            message=(
+                "bounded always currently supports only a boolean-expression "
+                "operand; sequence/property operands are deferred to v1.5."
+            ),
+            construct_name="s_always with non-boolean operand",
+            source_loc=node.source_loc,
+        )
+    module_name = module_name_from_label(label, original_text)
+    observed = extract_signals(node.body.text)
+    cnt_width = max(1, math.ceil(math.log2(node.hi + 1))) if node.hi > 0 else 1
+    params: dict[str, str] = {
+        "module_name": module_name,
+        "bool_expr": node.body.text,
+        "lo": str(node.lo),
+        "hi": str(node.hi),
+        "cnt_width": str(cnt_width),
+        "strong": "1" if node.strong else "0",
+        "clock_signal": clock.signal,
+        "clock_edge": clock.edge,
+        "source_loc": str(node.source_loc),
+        "sva2rtl_version": __version__,
+        "original_text": original_text,
+    }
+    return CheckerNode(
+        template_name="s_always",
         module_name=module_name,
         params=params,
         observed_signals=observed,

@@ -371,6 +371,38 @@ class PropBoundedEventually(SVANode):
     strong: bool = True
 
 
+@dataclass(frozen=True)
+class PropBoundedAlways(SVANode):
+    """Bounded always: ``always [lo:hi] p`` / ``s_always [lo:hi] p``.
+
+    A deadline-bounded UNIVERSAL obligation (the dual of
+    :class:`PropBoundedEventually`): starting at the evaluation (``start``) cycle,
+    the boolean property *body* must hold at EVERY cycle offset k with
+    ``lo <= k <= hi``.  FAIL fires at the first in-window cycle where body is
+    false; PASS fires when the window closes (offset ``hi``) with no violating
+    cycle.
+
+    Over a finite window the weak (``always``) and strong (``s_always``) forms
+    collapse to the same synthesizable monitor (the window always completes under
+    continuous clocking); ``strong`` is retained only for faithful text
+    reconstruction.  The operand *body* must reduce to a boolean expression
+    (``BoolExpr``) in v1.4 Part A; sequence/property operands are rejected
+    (deferred to the v1.5 NFA engine).  Unbounded forms (no range) are rejected at
+    import time — not synthesizable on finite state.
+
+    Attributes:
+        body:    Boolean expression that must hold throughout the window (BoolExpr).
+        lo:      Lower window bound (cycles from start), >= 0.
+        hi:      Upper window bound (cycles from start), >= lo.
+        strong:  True for ``s_always``, False for ``always``.
+    """
+
+    body: SVANode
+    lo: int
+    hi: int
+    strong: bool = False
+
+
 # ── Clocking ───────────────────────────────────────────────────────────────
 
 

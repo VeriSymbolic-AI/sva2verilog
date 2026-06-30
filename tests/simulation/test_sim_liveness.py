@@ -126,3 +126,57 @@ class TestSEventually13:
         rtl = _run(checker, stim, tmp_path, simulator)
         for t, r in enumerate(rtl):
             assert not r["pass"] and not r["fail"] and not r["active"], f"disabled @t{t}"
+
+
+class TestAlways13:
+    """``always [1:3] a`` — universal dual: a must hold at offsets 1..3."""
+
+    def test_pass_when_all_hold(self, tmp_path: Path) -> None:
+        """a high at every in-window offset 1..3 -> pass at t4 (= t0 + hi(3) + 1)."""
+        checker = _build_checker("always_1_3")
+        stim = [
+            {"start": True, "a": True}, {"start": False, "a": True},
+            {"start": False, "a": True}, {"start": False, "a": True},
+            {"start": False, "a": False}, {"start": False, "a": False},
+        ]
+        rtl = _run(checker, stim, tmp_path)
+        assert rtl[4]["pass"] and not rtl[4]["fail"], "pass at t4"
+        assert not any(r["fail"] for r in rtl), "no fail when all hold"
+        _assert_rtl_matches_oracle(checker, stim, rtl)
+
+    def test_fail_at_first_violation(self, tmp_path: Path) -> None:
+        """a false at offset 2 (t2) -> fail at t3 (= t0 + k_viol(2) + 1)."""
+        checker = _build_checker("always_1_3")
+        stim = [
+            {"start": True, "a": True}, {"start": False, "a": True},
+            {"start": False, "a": False}, {"start": False, "a": True},
+            {"start": False, "a": True}, {"start": False, "a": False},
+        ]
+        rtl = _run(checker, stim, tmp_path)
+        assert rtl[3]["fail"] and not rtl[3]["pass"], "fail at t3"
+        assert not any(rtl[t]["fail"] for t in (0, 1, 2)), "no early fail"
+        assert not any(r["pass"] for r in rtl), "no pass once violated"
+        _assert_rtl_matches_oracle(checker, stim, rtl)
+
+    def test_fail_only_once(self, tmp_path: Path) -> None:
+        """Multiple in-window violations -> fail fires once (at the first)."""
+        checker = _build_checker("always_1_3")
+        stim = [
+            {"start": True, "a": False}, {"start": False, "a": False},
+            {"start": False, "a": False}, {"start": False, "a": False},
+            {"start": False, "a": False}, {"start": False, "a": False},
+        ]
+        rtl = _run(checker, stim, tmp_path)
+        # First in-window offset is 1 (t1) -> fail at t2.
+        assert rtl[2]["fail"], "fail at t2 (first violation offset 1)"
+        assert sum(1 for r in rtl if r["fail"]) == 1, "fail fires exactly once"
+        assert not any(r["pass"] for r in rtl), "no pass on violated attempt"
+        _assert_rtl_matches_oracle(checker, stim, rtl)
+
+    def test_disable_gates_outputs(self, tmp_path: Path, simulator: str) -> None:
+        """disable_i=1 gates pass/fail/active to 0."""
+        checker = _build_checker("always_1_3")
+        stim = [{"start": t == 0, "a": False, "disable_i": True} for t in range(6)]
+        rtl = _run(checker, stim, tmp_path, simulator)
+        for t, r in enumerate(rtl):
+            assert not r["pass"] and not r["fail"] and not r["active"], f"disabled @t{t}"
