@@ -61,8 +61,26 @@ module {{ module_name }} #(
 
 {{ attempt_fired_logic(verilog_mode, clock_edge, clock_signal, "start") }}
 
+{# BUG-DELAY-01 fix: the net a->b sample gap must equal the operator delay N.
+   In the chain bool_expr(a) -> concat_delay -> bool_expr(b), the a-leaf registers
+   (a-token arrives 1 cycle after a is sampled) and b is sampled on the cycle THIS
+   module asserts pass, so gap = (pass_cycle - start_cycle) + 1. To make gap = N we
+   assert pass at start+(N-1). count_q == k is visible at start+1+k, so a target
+   cycle start+(N-1) is count_q == N-2; ranged delays use count_q in [M-2, N-2]. A
+   target at the start cycle itself (M<=1<=N) is fired combinationally. The genuine
+   fusion case (gap 0: ##0 or M==0) is unreachable through registered leaves and
+   retains the legacy +1 (documented limitation). Inlined as a continuous assign —
+   a `logic x = expr;` declaration would be a one-time initial value, not a
+   continuous assignment. #}
+{% set _emin = delay_min | int %}
+{% set _emax = delay_max | int %}
+{% set _cmin = [_emin - 2, 0] | max %}
+{% set _cmax = [_emax - 2, 0] | max %}
     assign active        = disable_i ? 1'b0 : running_q;
-    assign pass          = disable_i ? 1'b0 : (running_q && (count_q >= {{ cnt_width }}'d{{ delay_min }}) && (count_q <= {{ cnt_width }}'d{{ delay_max }}));
+    assign pass          = disable_i ? 1'b0 : (
+                               (start && ({{ _emin }} <= 1) && ({{ _emax }} >= 1))
+{% if _emax >= 2 %}                               || (running_q && (count_q >= {{ cnt_width }}'d{{ _cmin }}) && (count_q <= {{ cnt_width }}'d{{ _cmax }}))
+{% endif %}                           );
     assign fail          = 1'b0;
     assign attempt_fired = attempt_fired_q;
     assign disabled_o    = disable_i;

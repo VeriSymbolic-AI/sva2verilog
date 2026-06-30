@@ -48,7 +48,9 @@ always_ff @(posedge clk) begin
     end
 
     assign active        = disable_i ? 1'b0 : running_q;
-    assign pass          = disable_i ? 1'b0 : (running_q && (count_q >= 1'd1) && (count_q <= 1'd1));
+    assign pass          = disable_i ? 1'b0 : (
+                               (start && (1 <= 1) && (1 >= 1))
+                           );
     assign fail          = 1'b0;
     assign attempt_fired = attempt_fired_q;
     assign disabled_o    = disable_i;

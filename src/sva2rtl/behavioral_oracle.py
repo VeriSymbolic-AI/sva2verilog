@@ -177,14 +177,31 @@ class SVABehavioralSim:
             else:
                 self._counter = old_count + 1
 
-        # Outputs derived from OLD registered state (combinational in RTL):
-        #   active = running_q (old)
-        #   pass   = running_q && count_q in [delay_min, delay_max] (old)
-        # On the start cycle old_running is False, so active=False, pass=False.
-        # Pass first fires at the cycle where old_count == delay_min (i.e.,
-        # delay_min cycles after start).
+        # BUG-DELAY-01 corrected outputs. Derivation (from the chain contract,
+        # NOT copied from the RTL comparator — see .planning/BUG-delay-spacing.md):
+        # in the chain bool_expr(a) -> concat_delay -> bool_expr(b), the previous
+        # element's match arrives as ``start`` one cycle after a was sampled, and
+        # the next element samples its signal on the cycle concat_delay asserts
+        # ``pass``. For the net a->b sample gap to equal the operator delay N, this
+        # component must assert ``pass`` at start+(N-1). Since old_count == k is the
+        # registered value visible at cycle start+1+k, a target cycle start+(N-1)
+        # corresponds to old_count == N-2; a ranged delay [M,N] uses old_count in
+        # [M-2, N-2]. A target AT the start cycle itself (when the window includes a
+        # gap of 1, i.e. delay_min<=1<=delay_max) is produced combinationally from
+        # the current ``start``. The fusion gap-0 case is the ##0 branch above; a
+        # window whose lower bound is 0 cannot reach gap 0 through registered leaves
+        # and so simply starts at gap 1 (documented limitation).
+        cmin = max(delay_min - 2, 0)
+        cmax = max(delay_max - 2, 0)
+        pass_at_start = start and (delay_min <= 1) and (delay_max >= 1)
+        pass_counter = (
+            delay_max >= 2
+            and old_running
+            and (old_count >= cmin)
+            and (old_count <= cmax)
+        )
         active_val = old_running
-        pass_val = old_running and (old_count >= delay_min) and (old_count <= delay_max)
+        pass_val = pass_at_start or pass_counter
 
         return {
             "active": active_val,
@@ -411,6 +428,15 @@ class SVABehavioralSim:
         The antecedent pass is inserted into bit[MSB] on the same cycle it
         fires.  All bits shift right each cycle.  The consequent is evaluated
         when bv[MSB] is set.
+
+        NOTE (BUG-IMPL-01): this standalone token-passing model corresponds to
+        the multi-cycle (sequence-consequent, BV_WIDTH>1) RTL path.  The
+        single-cycle-consequent implication (BV_WIDTH==1) was switched to a
+        parallel-consequent design whose correctness is established by the
+        SymbiYosys formal-equivalence proofs in tests/test_formal_sva_equiv.py,
+        not by this model.  This method is exercised only by the oracle's own
+        unit tests (tests/test_behavioral_oracle.py); the hierarchical RTL
+        cross-check uses ``_tick_implication``.
         """
         ant_pass: bool = bool(signals.get("ant_pass", False))
         con_pass: bool = bool(signals.get("con_pass", False))
@@ -467,7 +493,14 @@ class SVABehavioralSim:
     # ── Non-overlapping implication model (|=>)  ──────────────────────────
 
     def _tick_nonoverlap(self, signals: dict[str, bool]) -> dict[str, bool]:
-        """Model |=> semantics: antecedent pass delayed 1 cycle before insertion."""
+        """Model |=> semantics: antecedent pass delayed 1 cycle before insertion.
+
+        NOTE (BUG-IMPL-01): like ``_tick_overlap``, this standalone token-passing
+        model corresponds to the multi-cycle (BV_WIDTH>1) RTL path.  The
+        single-cycle-consequent |=> (BV_WIDTH==1) now uses con_start=ant_pass_w
+        (parallel consequent), proven correct in tests/test_formal_sva_equiv.py.
+        This method is exercised only by the oracle's own unit tests.
+        """
         ant_pass: bool = bool(signals.get("ant_pass", False))
         con_pass: bool = bool(signals.get("con_pass", False))
 

@@ -110,11 +110,21 @@ def test_codegen_deterministic_nonoverlap() -> None:
         assert results[i] == results[0], f"Run {i} output differs from run 0"
 
 
-def test_codegen_deterministic_bitvec() -> None:
-    """TEST-02: Compiling the bitvec (|-> with delay) fixture 5× produces identical output."""
-    results = [_compile_fixture(_FIXTURES / "implication_bitvec.json") for _ in range(5)]
-    for i in range(1, 5):
-        assert results[i] == results[0], f"Run {i} output differs from run 0"
+def test_bitvec_sequence_consequent_implication_rejected() -> None:
+    """BV_WIDTH>1 sequence-consequent implication (`a |-> a ##[2:5] b`) is rejected
+    at compile time rather than emitting a wrong monitor.
+
+    The legacy bv_q token-passing path for multi-cycle sequence consequents is a
+    confirmed correctness defect (BUG-IMPL-01); a correct implementation needs the
+    v1.5 NFA composition engine. Until then the compiler must error (never fail
+    silently), not emit a monitor whose pass never fires.
+    """
+    from sva2rtl.errors import UnsupportedConstruct
+
+    ast = json.loads((_FIXTURES / "implication_bitvec.json").read_text())
+    node, clock, label, text = import_assertion(ast)
+    with pytest.raises(UnsupportedConstruct, match="sequence consequent"):
+        compose(node, clock, label, text)
 
 
 # ── OUT-06: Debug output verification ─────────────────────────────────────
@@ -127,7 +137,6 @@ def test_codegen_deterministic_bitvec() -> None:
         "delay_range.json",
         "implication_overlap.json",
         "implication_nonoverlap.json",
-        "implication_bitvec.json",
     ],
 )
 def test_attempt_fired_in_all_modules(fixture_name: str) -> None:
@@ -144,7 +153,6 @@ def test_attempt_fired_in_all_modules(fixture_name: str) -> None:
     [
         "implication_overlap.json",
         "implication_nonoverlap.json",
-        "implication_bitvec.json",
     ],
 )
 def test_overflow_flag_in_implication_modules(fixture_name: str) -> None:
@@ -173,10 +181,23 @@ def _get_bv_width(fixture_name: str) -> int:
     return int(m.group(1))
 
 
-def test_bv_width_sufficient_for_max_concurrent() -> None:
-    """TEST-05: |-> ##[2:5] b has BV_WIDTH=6 (max_delay=5, width=5+1=6)."""
-    bv_width = _get_bv_width("implication_bitvec.json")
-    assert bv_width >= 6, f"Expected BV_WIDTH >= 6 for ##[2:5], got {bv_width}"
+def test_bv_width_computation_for_ranged_consequent() -> None:
+    """TEST-05: _compute_bv_width(a ##[2:5] b) == 6 (max_delay=5, width=5+1=6).
+
+    The ranged sequence consequent itself is rejected for use in an implication
+    (BV_WIDTH>1, v1.5 boundary); this verifies the width computation that gates
+    that rejection decision.
+    """
+    from sva2rtl.composer import _compute_bv_width
+    from sva2rtl.ir import BoolExpr, SeqConcat, SourceLoc
+
+    loc = SourceLoc("test.sv", 1, 1)
+    seq = SeqConcat(
+        elements=(BoolExpr(text="a", source_loc=loc), BoolExpr(text="b", source_loc=loc)),
+        delays=((2, 5),),
+        source_loc=loc,
+    )
+    assert _compute_bv_width(seq) == 6
 
 
 @pytest.mark.parametrize(
@@ -184,78 +205,37 @@ def test_bv_width_sufficient_for_max_concurrent() -> None:
     [
         ("implication_overlap.json", 1),       # a |-> b: single-cycle, width=1
         ("implication_nonoverlap.json", 1),    # a |=> b: single-cycle, width=1
-        ("implication_bitvec.json", 6),        # a |-> ##[2:5] b: width=6
     ],
 )
 def test_concurrent_threads_structural_capacity(fixture_name: str, expected_min_bv: int) -> None:
-    """TEST-05: BV_WIDTH is sufficient to handle the maximum concurrent threads."""
+    """TEST-05: BV_WIDTH is sufficient to handle the maximum concurrent threads.
+
+    Only single-cycle-consequent implications (BV_WIDTH==1) remain supported;
+    multi-cycle sequence consequents (BV_WIDTH>1) are rejected at compile time.
+    """
     bv_width = _get_bv_width(fixture_name)
     assert bv_width >= expected_min_bv, (
         f"{fixture_name}: expected BV_WIDTH >= {expected_min_bv}, got {bv_width}"
     )
 
 
-def test_overflow_flag_structure_present() -> None:
-    """TEST-05: Generated RTL for |-> ##[2:5] b contains all overflow-detection structures."""
-    modules = _compile_fixture(_FIXTURES / "implication_bitvec.json")
-    top_sv = list(modules.values())[-1]
-
-    # Overflow detection conditional must be present
-    assert "overflow_flag" in top_sv, "Missing overflow_flag signal"
-    # Overflow event logic
-    assert "overflow_event" in top_sv, "Missing overflow_event signal"
-    # Sticky flag register must be reset in rst_n branch
-    assert "overflow_flag_q <= 1'b0" in top_sv, "Missing overflow_flag_q reset in rst_n branch"
-    # Halt state logic
-    assert "HARD HALT" in top_sv or "overflow_flag_q" in top_sv, "Missing halt logic"
-
-
-def test_overflow_halt_prevents_output() -> None:
-    """TEST-05: Generated RTL gates active/pass/fail to 0 when overflow_flag is set."""
-    modules = _compile_fixture(_FIXTURES / "implication_overlap.json")
-    top_sv = list(modules.values())[-1]
-
-    # active, pass, fail must all be gated by overflow_flag_q
-    assert "overflow_flag_q ? 1'b0" in top_sv, (
-        "Expected overflow_flag_q-gated output assignments"
-    )
-    # At least two gating occurrences (active and pass)
-    assert top_sv.count("overflow_flag_q ? 1'b0") >= 2, (
-        "Expected at least 2 overflow_flag_q-gated assignments (active, pass)"
-    )
-
-
 def test_reset_during_active_threads() -> None:
     """TEST-05 [REVIEW FIX]: rst_n clears ALL state registers unconditionally.
 
-    Expected behavior: rst_n asserts while threads active -> all state clears
-    atomically in one cycle, no residual thread state after reset.
+    Single-cycle-consequent |=> (BV_WIDTH==1): the parallel design has no bv_q
+    or ant_pass_delayed_q; the ##1 alignment is con_start_w = ant_pass_w. The
+    leaf children (ant/con) own their reset; the only top-level state is
+    attempt_fired_q, which must reset to 0. (The BV_WIDTH>1 sequence-consequent
+    path that used bv_q is now rejected at compile time, BUG-IMPL-01 / v1.5.)
     """
-    # Test overlap (|->): bv_q and overflow_flag_q must reset
-    modules_ov = _compile_fixture(_FIXTURES / "implication_overlap.json")
-    top_sv_ov = list(modules_ov.values())[-1]
-
-    # All state cleared in rst_n branch
-    assert "bv_q            <= '0" in top_sv_ov, "bv_q not cleared in rst_n branch (overlap)"
-    assert "overflow_flag_q <= 1'b0" in top_sv_ov, (
-        "overflow_flag_q not cleared in rst_n branch (overlap)"
-    )
-    assert ("attempt_fired_q <= 1'b0" in top_sv_ov or "attempt_fired_q <= '0" in top_sv_ov), (
-        "attempt_fired_q not cleared in rst_n branch (overlap)"
-    )
-
-    # Test nonoverlap (|=>): also requires ant_pass_delayed_q to reset
     modules_nn = _compile_fixture(_FIXTURES / "implication_nonoverlap.json")
     top_sv_nn = list(modules_nn.values())[-1]
 
-    assert "ant_pass_delayed_q <= 1'b0" in top_sv_nn, (
-        "ant_pass_delayed_q not cleared in rst_n branch (nonoverlap)"
+    assert "con_start_w = ant_pass_w" in top_sv_nn, (
+        "con_start_w not driven by ant_pass_w (nonoverlap |=> ##1 alignment)"
     )
-    assert "bv_q               <= '0" in top_sv_nn, (
-        "bv_q not cleared in rst_n branch (nonoverlap)"
-    )
-    assert "overflow_flag_q    <= 1'b0" in top_sv_nn, (
-        "overflow_flag_q not cleared in rst_n branch (nonoverlap)"
+    assert ("attempt_fired_q <= 1'b0" in top_sv_nn or "attempt_fired_q <= '0" in top_sv_nn), (
+        "attempt_fired_q not cleared in rst_n branch (nonoverlap)"
     )
 
 
@@ -285,47 +265,6 @@ def _compile_delay(delay_min: int, delay_max: int) -> str:
     delay_key = f"sva_delay_{delay_min}_{delay_max}"
     assert delay_key in modules, f"Expected module '{delay_key}' in {list(modules.keys())}"
     return modules[delay_key]
-
-
-def _compile_impl_delay(delay_min: int, delay_max: int) -> str:
-    """Build a PropImplication with SeqConcat consequent and return the top SV text."""
-    from sva2rtl.composer import compose
-    from sva2rtl.emitter import emit_all
-    from sva2rtl.ir import BoolExpr, ClockSpec, PropImplication, SeqConcat, SourceLoc
-
-    loc = SourceLoc("test.sv", 1, 1)
-    clock = ClockSpec(edge="posedge", signal="clk", source_loc=loc)
-    a_expr = BoolExpr(text="a", source_loc=loc)
-    b_expr = BoolExpr(text="b", source_loc=loc)
-
-    if delay_min == 0 and delay_max == 0:
-        # Simple implication: a |-> b
-        impl = PropImplication(
-            antecedent=a_expr,
-            consequent=b_expr,
-            overlapping=True,
-            source_loc=loc,
-        )
-        orig = "a |-> b"
-    else:
-        con_seq = SeqConcat(
-            elements=(a_expr, b_expr),
-            delays=((delay_min, delay_max),),
-            source_loc=loc,
-        )
-        impl = PropImplication(
-            antecedent=a_expr,
-            consequent=con_seq,
-            overlapping=True,
-            source_loc=loc,
-        )
-        orig = f"a |-> ##[{delay_min}:{delay_max}] b"
-
-    # Use an explicit label to avoid name collision between the top implication
-    # module and its bool_expr children (both would otherwise hash "None + orig").
-    checker = compose(impl, clock, "test_impl", orig)
-    modules = emit_all(checker)
-    return list(modules.values())[-1]  # top is last
 
 
 @pytest.mark.parametrize(
@@ -364,22 +303,29 @@ def test_delay_cnt_width_boundary_values(delay: int, expected_cnt_width: int) ->
     ],
 )
 def test_delay_window_comparator_boundaries(delay_min: int, delay_max: int) -> None:
-    """TEST-06: Emitted RTL contains comparison values matching delay_min and delay_max."""
+    """TEST-06 / BUG-DELAY-01: emitted RTL encodes the CORRECTED (shifted) window.
+
+    The pass logic now asserts at start+(N-1): a start-cycle combinational term
+    ``(start && (delay_min <= 1) && (delay_max >= 1))`` plus, when delay_max>=2, a
+    counter term over the SHIFTED window ``count_q in [max(min-2,0), max(max-2,0)]``
+    so the net chain a->b gap equals the operator window.
+    """
+    import re
+
     sv = _compile_delay(delay_min, delay_max)
-    # Both boundary values must appear as numeric literals in the comparisons
-    assert f"d{delay_min}" in sv or f"d{delay_min})" in sv or str(delay_min) in sv, (
-        f"delay_min={delay_min} not found in emitted RTL"
-    )
-    assert f"d{delay_max}" in sv or f"d{delay_max})" in sv or str(delay_max) in sv, (
-        f"delay_max={delay_max} not found in emitted RTL"
-    )
-    # The pass assignment window contains both boundary values
-    pass_line = [ln for ln in sv.splitlines() if "assign pass" in ln]
-    assert pass_line, "No 'assign pass' line found"
-    # delay_min and delay_max both appear in pass logic
-    assert str(delay_min) in pass_line[0] and str(delay_max) in pass_line[0], (
-        f"Expected both {delay_min} and {delay_max} in assign pass line: {pass_line[0]}"
-    )
+    # Start-cycle term references the operator boundaries verbatim.
+    assert f"({delay_min} <= 1)" in sv, f"start-term delay_min={delay_min} missing"
+    assert f"({delay_max} >= 1)" in sv, f"start-term delay_max={delay_max} missing"
+    # Counter term (only present for delay_max>=2) uses the down-shifted bounds.
+    if delay_max >= 2:
+        cmin = max(delay_min - 2, 0)
+        cmax = max(delay_max - 2, 0)
+        assert re.search(rf"count_q >= \d+'d{cmin}\b", sv), (
+            f"shifted lower bound {cmin} not found for ##[{delay_min}:{delay_max}]"
+        )
+        assert re.search(rf"count_q <= \d+'d{cmax}\b", sv), (
+            f"shifted upper bound {cmax} not found for ##[{delay_min}:{delay_max}]"
+        )
 
 
 def test_delay_zero_special_case() -> None:
@@ -401,24 +347,27 @@ def test_delay_single_cycle_fixed() -> None:
 
 
 def test_delay_range_window_width() -> None:
-    """TEST-06: delay_min and delay_max structural parameters are correctly encoded."""
+    """TEST-06 / BUG-DELAY-01: the counter window is the operator window shifted -2.
+
+    The corrected concat_delay compares count_q against [max(min-2,0), max(max-2,0)]
+    (the start-cycle term covers the gap-1 boundary), so the net chain gap spans
+    the operator window [min, max].
+    """
     import re
 
-    # ##[2:5]
+    # ##[2:5] -> shifted counter window [0, 3]
     sv25 = _compile_delay(2, 5)
-    assert "2'd2" in sv25 or "3'd2" in sv25, "##[2:5]: delay_min=2 not found"
-    assert "3'd5" in sv25, "##[2:5]: delay_max=5 not found"
-
-    # ##[0:15]: window width 16
-    sv015 = _compile_delay(0, 15)
-    assert "'d0" in sv015 or "0" in sv015, "##[0:15]: delay_min=0 not found"
-    assert "'d15" in sv015, "##[0:15]: delay_max=15 not found"
-
-    # Verify params match expectations
     m_min = re.search(r"count_q >= \d+'d(\d+)", sv25)
     m_max = re.search(r"count_q <= \d+'d(\d+)", sv25)
-    assert m_min and int(m_min.group(1)) == 2, "##[2:5]: expected delay_min=2"
-    assert m_max and int(m_max.group(1)) == 5, "##[2:5]: expected delay_max=5"
+    assert m_min and int(m_min.group(1)) == 0, "##[2:5]: expected shifted lower bound 0"
+    assert m_max and int(m_max.group(1)) == 3, "##[2:5]: expected shifted upper bound 3"
+
+    # ##[0:15] -> shifted counter window [0, 13]
+    sv015 = _compile_delay(0, 15)
+    m015_min = re.search(r"count_q >= \d+'d(\d+)", sv015)
+    m015_max = re.search(r"count_q <= \d+'d(\d+)", sv015)
+    assert m015_min and int(m015_min.group(1)) == 0, "##[0:15]: expected shifted lower 0"
+    assert m015_max and int(m015_max.group(1)) == 13, "##[0:15]: expected shifted upper 13"
 
 
 @pytest.mark.parametrize(
@@ -434,13 +383,26 @@ def test_delay_range_window_width() -> None:
 def test_bv_width_boundary_for_implication(
     delay_min: int, delay_max: int, expected_bv_width: int
 ) -> None:
-    """TEST-06: BV_WIDTH = max_delay_in_consequent + 1 for each boundary case."""
-    import re
+    """TEST-06: BV_WIDTH = max_delay_in_consequent + 1 for each boundary case.
 
-    sv = _compile_impl_delay(delay_min, delay_max)
-    m = re.search(r"parameter BV_WIDTH\s*=\s*(\d+)", sv)
-    assert m, f"BV_WIDTH not found for ##[{delay_min}:{delay_max}]"
-    actual = int(m.group(1))
+    Computed directly via ``_compute_bv_width`` because an implication whose
+    consequent yields BV_WIDTH>1 is now rejected at compose time (v1.5 boundary);
+    only the width computation that gates that decision is exercised here.
+    """
+    from sva2rtl.composer import _compute_bv_width
+    from sva2rtl.ir import BoolExpr, SeqConcat, SourceLoc
+
+    loc = SourceLoc("test.sv", 1, 1)
+    consequent: BoolExpr | SeqConcat
+    if delay_min == 0 and delay_max == 0:
+        consequent = BoolExpr(text="b", source_loc=loc)
+    else:
+        consequent = SeqConcat(
+            elements=(BoolExpr(text="a", source_loc=loc), BoolExpr(text="b", source_loc=loc)),
+            delays=((delay_min, delay_max),),
+            source_loc=loc,
+        )
+    actual = _compute_bv_width(consequent)
     assert actual == expected_bv_width, (
         f"|-> ##[{delay_min}:{delay_max}] b: expected BV_WIDTH={expected_bv_width}, got {actual}"
     )
@@ -493,12 +455,15 @@ def test_e2e_implication_overlap_compiles() -> None:
         assert "endmodule" in sv_text, f"'{mod_name}': missing endmodule"
 
 
-def test_e2e_complex_impl_delay() -> None:
-    """TEST-02: PropImplication with SeqConcat consequent (a |-> ##[2:5] b) compiles fully.
+def test_e2e_complex_impl_delay_rejected() -> None:
+    """TEST-02: PropImplication with a multi-cycle SeqConcat consequent
+    (`a |-> ##[2:5] b`) is rejected at compile time.
 
-    This tests the most complex composition path: implication wrapping a delay
-    sequence, producing a multi-level module hierarchy.
+    This is the sequence-consequent path whose bv_q implementation is a confirmed
+    correctness defect (BUG-IMPL-01); a correct implementation needs the v1.5 NFA
+    engine. Until then compose must raise rather than emit a wrong monitor.
     """
+    from sva2rtl.errors import UnsupportedConstruct
     from sva2rtl.ir import BoolExpr, ClockSpec, PropImplication, SeqConcat, SourceLoc
 
     loc = SourceLoc("test.sv", 1, 1)
@@ -516,19 +481,8 @@ def test_e2e_complex_impl_delay() -> None:
         overlapping=True,
         source_loc=loc,
     )
-    checker = compose(impl, clock, "complex_test", "a |-> ##[2:5] b")
-    modules = emit_all(checker)
-
-    # Note: ant (BoolExpr "a") and con (SeqConcat starting with "a") both hash to
-    # the same module name when composed with label=None + same original_text, so
-    # emit_all deduplicates them and returns ≥ 2 modules (not ≥ 3).
-    assert len(modules) >= 2, (
-        f"Expected ≥ 2 modules for a |-> ##[2:5] b, got {list(modules.keys())}"
-    )
-    top_sv = list(modules.values())[-1]
-    assert "BV_WIDTH" in top_sv, "Top module must have BV_WIDTH parameter"
-    assert "6" in top_sv,        "BV_WIDTH should be 6 for ##[2:5]"
-    assert "overflow_flag" in top_sv, "Top module must have overflow detection"
+    with pytest.raises(UnsupportedConstruct, match="sequence consequent"):
+        compose(impl, clock, "complex_test", "a |-> ##[2:5] b")
 
 
 # ── Structural soundness tests ─────────────────────────────────────────────────
@@ -539,7 +493,6 @@ _PHASE2_FIXTURES = [
     "delay_range.json",
     "implication_overlap.json",
     "implication_nonoverlap.json",
-    "implication_bitvec.json",
 ]
 
 _STANDARD_PORT_STRINGS = ["clk", "rst_n", "active", "pass", "fail"]

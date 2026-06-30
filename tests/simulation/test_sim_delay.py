@@ -176,52 +176,48 @@ class TestDelayZero:
 class TestDelayFixed:
     """Tests for ``a ##3 b`` — fixed 3-cycle delay."""
 
-    def test_pass_fires_at_t6(self, tmp_path: Path) -> None:
-        """a ##3 b: pass fires at t=6 (N+3=6) when a=1 at t=0, b=1 at t=5 (N+2).
+    def test_pass_fires_at_t4(self, tmp_path: Path) -> None:
+        """a ##3 b: pass fires at t=4 when a=1 at t=0, b=1 at t=3 (gap=3).
 
-        Timing breakdown:
+        Corrected timing (BUG-DELAY-01 fix): a sampled at t=0, b sampled exactly
+        N=3 cycles later (t=3), pass registered one cycle after the b-sample (t=4).
           t=0: start=1, a=1 → bool_expr_a registered
-          t=1: a_pass=1 → delay starts (count=0 at end of t=1)
-          t=2..4: count increments (0→1→2→3)
-          t=5: count=3 → delay_pass=1 → bool_expr_b gets start; b=1 → b_pass←1
-          t=6: b_pass=1 → top-level pass=1
+          t=1: a_pass=1 → delay starts
+          t=3: delay asserts pass (start+(N-1)) → bool_expr_b sees b=1
+          t=4: b_pass=1 → top-level pass=1
         """
         checker = _build_checker("delay_fixed")
         stimulus = [
             {"start": True,  "a": True,  "b": False},  # t=0
             {"start": False, "a": False, "b": False},  # t=1
             {"start": False, "a": False, "b": False},  # t=2
-            {"start": False, "a": False, "b": False},  # t=3
-            {"start": False, "a": False, "b": False},  # t=4
-            {"start": False, "a": False, "b": True},   # t=5: b needed here
-            {"start": False, "a": False, "b": False},  # t=6: pass fires
+            {"start": False, "a": False, "b": True},   # t=3: b needed here (gap=3)
+            {"start": False, "a": False, "b": False},  # t=4: pass fires
         ]
         rtl_out = _run_stimulus(checker, stimulus, tmp_path)
 
         assert len(rtl_out) == len(stimulus)
-        for i in range(6):
+        for i in range(4):
             assert not rtl_out[i]["pass"], f"t={i}: pass too early"
-        assert rtl_out[6]["pass"], "t=6: pass fires (a=1 at t=0, b=1 at t=5)"
-        assert not rtl_out[6]["fail"], "t=6: not fail"
+        assert rtl_out[4]["pass"], "t=4: pass fires (a=1 at t=0, b=1 at t=3)"
+        assert not rtl_out[4]["fail"], "t=4: not fail"
 
     def test_no_pass_when_b_misses_window(self, tmp_path: Path, simulator: str) -> None:
-        """a ##3 b: pass does NOT fire when b=0 at t=5 (the only firing window)."""
+        """a ##3 b: pass does NOT fire when b=0 at t=3 (the only firing window)."""
         checker = _build_checker("delay_fixed")
         stimulus = [
             {"start": True,  "a": True,  "b": False},  # t=0
             {"start": False, "a": False, "b": False},  # t=1
             {"start": False, "a": False, "b": False},  # t=2
-            {"start": False, "a": False, "b": False},  # t=3
-            {"start": False, "a": False, "b": False},  # t=4
-            {"start": False, "a": False, "b": False},  # t=5: b=0 when delay fires
-            {"start": False, "a": False, "b": False},  # t=6: fail fires (b=0 at t=5)
-            {"start": False, "a": False, "b": True},   # t=7: too late
+            {"start": False, "a": False, "b": False},  # t=3: b=0 when delay fires
+            {"start": False, "a": False, "b": False},  # t=4: fail fires (b=0 at t=3)
+            {"start": False, "a": False, "b": True},   # t=5: too late
         ]
         rtl_out = _run_stimulus(checker, stimulus, tmp_path)
 
-        assert not rtl_out[6]["pass"], "t=6: b=0 at t=5 → no pass"
-        assert     rtl_out[6]["fail"], "t=6: b=0 when delay fires → fail"
-        assert not rtl_out[7]["pass"], "t=7: b=1 but window already closed"
+        assert not rtl_out[4]["pass"], "t=4: b=0 at t=3 → no pass"
+        assert     rtl_out[4]["fail"], "t=4: b=0 when delay fires → fail"
+        assert not rtl_out[5]["pass"], "t=5: b=1 but window already closed"
 
     def test_fail_when_a_false_at_start(self, tmp_path: Path, simulator: str) -> None:
         """a ##3 b: bool_expr_a fails immediately when start=1 but a=0."""
@@ -307,49 +303,51 @@ class TestDelayRange:
         assert rtl_out[5]["pass"], "t=5: pass fires at min delay (b=1 at t=4)"
 
     def test_pass_at_max_delay(self, tmp_path: Path, simulator: str) -> None:
-        """a ##[2:5] b: pass fires when b=1 at t=7 (max_delay=5 → t=5+2=7)."""
-        checker = _build_checker("delay_range")
-        stimulus = [
-            {"start": True,  "a": True,  "b": False},  # t=0
-            {"start": False, "a": False, "b": False},  # t=1: delay starts
-            {"start": False, "a": False, "b": False},  # t=2: count=0
-            {"start": False, "a": False, "b": False},  # t=3: count=1
-            {"start": False, "a": False, "b": False},  # t=4: count=2 (delay fires, b=0)
-            {"start": False, "a": False, "b": False},  # t=5: count=3 (b=0)
-            {"start": False, "a": False, "b": False},  # t=6: count=4 (b=0)
-            {"start": False, "a": False, "b": True},   # t=7: count=5 → last chance; b=1
-            {"start": False, "a": False, "b": False},  # t=8: pass fires
-        ]
-        rtl_out = _run_stimulus(checker, stimulus, tmp_path)
+        """a ##[2:5] b: pass fires when b=1 at t=5 (max gap=5 → pass at t=6).
 
-        # pass fires at t=8 (b=1 at t=7 when count=5)
-        assert rtl_out[8]["pass"], "t=8: pass fires at max delay (b=1 at t=7)"
-        for i in range(8):
-            assert not rtl_out[i]["pass"], f"t={i}: no pass before t=8"
-
-    def test_pass_across_multiple_delay_cycles(self, tmp_path: Path, simulator: str) -> None:
-        """a ##[2:5] b: pass fires on each cycle within the window where b=1."""
+        Corrected timing (BUG-DELAY-01): the b window is t=2..5 (gaps 2..5 from
+        a@0); the latest is b@5 → pass at t=6.
+        """
         checker = _build_checker("delay_range")
-        # b=1 on all cycles t=4..7 → pass on t=5..8
         stimulus = [
             {"start": True,  "a": True,  "b": False},  # t=0
             {"start": False, "a": False, "b": False},  # t=1
-            {"start": False, "a": False, "b": False},  # t=2
+            {"start": False, "a": False, "b": False},  # t=2: window opens (gap2), b=0
             {"start": False, "a": False, "b": False},  # t=3
-            {"start": False, "a": False, "b": True},   # t=4: first delay cycle
-            {"start": False, "a": False, "b": True},   # t=5: pass + next delay start
-            {"start": False, "a": False, "b": True},   # t=6: pass
-            {"start": False, "a": False, "b": True},   # t=7: pass (last window)
-            {"start": False, "a": False, "b": False},  # t=8: pass then stops
-            {"start": False, "a": False, "b": False},  # t=9: idle
+            {"start": False, "a": False, "b": False},  # t=4
+            {"start": False, "a": False, "b": True},   # t=5: b at max gap=5
+            {"start": False, "a": False, "b": False},  # t=6: pass fires
         ]
         rtl_out = _run_stimulus(checker, stimulus, tmp_path)
 
-        for i in range(5):
+        assert rtl_out[6]["pass"], "t=6: pass fires at max delay (b=1 at t=5)"
+        for i in range(6):
+            assert not rtl_out[i]["pass"], f"t={i}: no pass before t=6"
+
+    def test_pass_across_multiple_delay_cycles(self, tmp_path: Path, simulator: str) -> None:
+        """a ##[2:5] b: pass fires on each cycle within the window where b=1.
+
+        Corrected window is b at t=2..5 → pass at t=3..6 (BUG-DELAY-01).
+        """
+        checker = _build_checker("delay_range")
+        # b=1 on all cycles t=2..5 → pass on t=3..6
+        stimulus = [
+            {"start": True,  "a": True,  "b": False},  # t=0
+            {"start": False, "a": False, "b": False},  # t=1
+            {"start": False, "a": False, "b": True},   # t=2: first window cycle (gap2)
+            {"start": False, "a": False, "b": True},   # t=3
+            {"start": False, "a": False, "b": True},   # t=4
+            {"start": False, "a": False, "b": True},   # t=5: last window cycle (gap5)
+            {"start": False, "a": False, "b": False},  # t=6: last pass
+            {"start": False, "a": False, "b": False},  # t=7: idle
+        ]
+        rtl_out = _run_stimulus(checker, stimulus, tmp_path)
+
+        for i in range(3):
             assert not rtl_out[i]["pass"], f"t={i}: no pass yet"
-        for i in range(5, 9):
+        for i in range(3, 7):
             assert rtl_out[i]["pass"], f"t={i}: pass fires (b=1 at t={i-1})"
-        assert not rtl_out[9]["pass"], "t=9: window closed (delay stopped)"
+        assert not rtl_out[7]["pass"], "t=7: window closed (delay stopped)"
 
     def test_no_pass_when_b_missed_window(self, tmp_path: Path, simulator: str) -> None:
         """a ##[2:5] b: no pass when b is always 0 in the window (t=4..7)."""
@@ -392,55 +390,44 @@ class TestDelayRange:
 class TestDelayThreeElement:
     """Tests for ``a ##1 b ##2 c`` — two-delay three-element sequence.
 
-    Timing analysis (a=1 at t=0):
+    Corrected timing (BUG-DELAY-01 fix), a=1 at t=0:
       t=0: start=1, a=1 → a_pass registered
-      t=1: a_pass=1 → delay_1 starts
-      t=2: count=0 (no pass)
-      t=3: count=1 → delay_1 passes → b_pass starts; b=1 → b_pass←b(t=3)
-      t=4: b_pass=b(t=3) → delay_2 starts (if b=1 at t=3)
-      t=5: count=0 (no pass)
-      t=6: count=1 (no pass)
-      t=7: count=2 → delay_2 passes → c_pass starts; c=1 → c_pass←c(t=7)
-      t=8: c_pass=c(t=7) → top-level pass fires
+      t=1: delay_1 (##1) asserts pass → b sampled here (gap 1 from a)
+      t=2: b_pass → delay_2 (##2) starts
+      t=3: delay_2 asserts pass → c sampled here (gap 2 from b)
+      t=4: c_pass → top-level pass fires
     """
 
-    def test_pass_fires_at_t8(self, tmp_path: Path) -> None:
-        """a ##1 b ##2 c: pass fires at t=8 with correct timing for a, b, c."""
+    def test_pass_fires_at_t4(self, tmp_path: Path) -> None:
+        """a ##1 b ##2 c: pass fires at t=4 (a@0, b@1, c@3 — corrected gaps 1, 2)."""
         checker = _build_checker("delay_three_element")
         stimulus = [
-            {"start": True,  "a": True,  "b": False, "c": False},  # t=0
-            {"start": False, "a": False, "b": False, "c": False},  # t=1
+            {"start": True,  "a": True,  "b": False, "c": False},  # t=0: a
+            {"start": False, "a": False, "b": True,  "c": False},  # t=1: b (gap1 from a)
             {"start": False, "a": False, "b": False, "c": False},  # t=2
-            {"start": False, "a": False, "b": True,  "c": False},  # t=3: b needed here
-            {"start": False, "a": False, "b": False, "c": False},  # t=4
-            {"start": False, "a": False, "b": False, "c": False},  # t=5
-            {"start": False, "a": False, "b": False, "c": False},  # t=6
-            {"start": False, "a": False, "b": False, "c": True},   # t=7: c needed here
-            {"start": False, "a": False, "b": False, "c": False},  # t=8: pass fires
+            {"start": False, "a": False, "b": False, "c": True},   # t=3: c (gap2 from b)
+            {"start": False, "a": False, "b": False, "c": False},  # t=4: pass fires
         ]
         rtl_out = _run_stimulus(checker, stimulus, tmp_path)
 
         assert len(rtl_out) == len(stimulus)
-        for i in range(8):
+        for i in range(4):
             assert not rtl_out[i]["pass"], f"t={i}: pass too early"
-        assert rtl_out[8]["pass"], "t=8: full chain completes → pass"
-        assert not rtl_out[8]["fail"], "t=8: not fail"
+        assert rtl_out[4]["pass"], "t=4: full chain completes → pass"
+        assert not rtl_out[4]["fail"], "t=4: not fail"
 
     def test_fail_at_middle_when_b_false(self, tmp_path: Path, simulator: str) -> None:
-        """a ##1 b ##2 c: chain fails at the bool_expr_b stage when b=0."""
+        """a ##1 b ##2 c: chain fails at the bool_expr_b stage when b=0 at t=1."""
         checker = _build_checker("delay_three_element")
         stimulus = [
             {"start": True,  "a": True,  "b": False, "c": False},  # t=0
-            {"start": False, "a": False, "b": False, "c": False},  # t=1
-            {"start": False, "a": False, "b": False, "c": False},  # t=2
-            {"start": False, "a": False, "b": False, "c": False},  # t=3: b=0 → fail
-            {"start": False, "a": False, "b": False, "c": False},  # t=4: fail fires
+            {"start": False, "a": False, "b": False, "c": False},  # t=1: b=0 → fail
+            {"start": False, "a": False, "b": False, "c": False},  # t=2: fail fires
         ]
         rtl_out = _run_stimulus(checker, stimulus, tmp_path)
 
-        assert not rtl_out[3]["fail"], "t=3: b=0 delay fires, fail not yet registered"
-        assert     rtl_out[4]["fail"], "t=4: b=0 at t=3 → bool_expr_b fail"
-        assert not rtl_out[4]["pass"], "t=4: no pass"
+        assert     rtl_out[2]["fail"], "t=2: b=0 at t=1 → bool_expr_b fail"
+        assert not rtl_out[2]["pass"], "t=2: no pass"
 
     def test_fail_from_a(self, tmp_path: Path, simulator: str) -> None:
         """a ##1 b ##2 c: fails at bool_expr_a when start fires with a=0."""
@@ -454,27 +441,22 @@ class TestDelayThreeElement:
         assert rtl_out[1]["fail"], "t=1: a=0 at start → fail"
 
     def test_active_across_full_chain(self, tmp_path: Path, simulator: str) -> None:
-        """a ##1 b ##2 c: active=1 throughout the 8-cycle evaluation."""
+        """a ##1 b ##2 c: active=1 while the (corrected) chain is in progress."""
         checker = _build_checker("delay_three_element")
         stimulus = [
-            {"start": True,  "a": True,  "b": False, "c": False},  # t=0
-            {"start": False, "a": False, "b": False, "c": False},  # t=1
+            {"start": True,  "a": True,  "b": False, "c": False},  # t=0: a
+            {"start": False, "a": False, "b": True,  "c": False},  # t=1: b (gap1)
             {"start": False, "a": False, "b": False, "c": False},  # t=2
-            {"start": False, "a": False, "b": True,  "c": False},  # t=3: b
-            {"start": False, "a": False, "b": False, "c": False},  # t=4
-            {"start": False, "a": False, "b": False, "c": False},  # t=5
-            {"start": False, "a": False, "b": False, "c": False},  # t=6
-            {"start": False, "a": False, "b": False, "c": True},   # t=7: c
-            {"start": False, "a": False, "b": False, "c": False},  # t=8: pass
+            {"start": False, "a": False, "b": False, "c": True},   # t=3: c (gap2)
+            {"start": False, "a": False, "b": False, "c": False},  # t=4: pass
         ]
         rtl_out = _run_stimulus(checker, stimulus, tmp_path)
 
-        # At t=2..7, some part of the chain should be active
-        # (delay counters running)
-        for i in range(2, 8):
-            assert rtl_out[i]["active"], f"t={i}: chain still in progress → active=1"
-        # t=8: pass fires; both delays done
-        assert rtl_out[8]["pass"], "t=8: pass fires"
+        # The chain is active while delay_2 is counting (t=2..3).
+        assert rtl_out[2]["active"], "t=2: delay_2 counting → active"
+        assert rtl_out[3]["active"], "t=3: delay_2 completes → active"
+        # t=4: pass fires.
+        assert rtl_out[4]["pass"], "t=4: pass fires"
 
     def test_disable_mid_chain(self, tmp_path: Path, simulator: str) -> None:
         """a ##1 b ##2 c: disable_i=1 mid-chain clears state, no pass at end."""
@@ -521,17 +503,14 @@ class TestDelayOracleCrosscheck:
     def test_fixed_delay_oracle_event_pattern(self, tmp_path: Path, simulator: str) -> None:
         """a ##3 b: both RTL and oracle produce pass events when timing is correct."""
         checker = _build_checker("delay_fixed")
-        # b=1 held from t=4 through t=6 to cover both oracle (pass at ~t=4)
-        # and RTL (pass at ~t=6) timing windows
+        # Corrected window is b at gap 3 (t=3); hold b over t=2..4 to cover it.
         stimulus = [
             {"start": True,  "a": True,  "b": False},  # t=0
             {"start": False, "a": False, "b": False},  # t=1
-            {"start": False, "a": False, "b": False},  # t=2
-            {"start": False, "a": False, "b": False},  # t=3
+            {"start": False, "a": False, "b": True},   # t=2
+            {"start": False, "a": False, "b": True},   # t=3: gap=3 window
             {"start": False, "a": False, "b": True},   # t=4
-            {"start": False, "a": False, "b": True},   # t=5
-            {"start": False, "a": False, "b": True},   # t=6
-            {"start": False, "a": False, "b": False},  # t=7
+            {"start": False, "a": False, "b": False},  # t=5
         ]
         rtl_out = _run_stimulus(checker, stimulus, tmp_path, simulator)
         oracle_out = simulate_checker_hierarchy(checker, stimulus)
@@ -589,19 +568,14 @@ class TestDelayOracleCrosscheck:
     def test_three_element_oracle_event_pattern(self, tmp_path: Path, simulator: str) -> None:
         """a ##1 b ##2 c: both RTL and oracle produce pass events."""
         checker = _build_checker("delay_three_element")
-        # c=1 held from t=6 through t=9 to cover both timing domains
+        # Corrected timing: b at gap1 (t=1), c at gap2 from b (t=3).
         stimulus = [
             {"start": True,  "a": True,  "b": False, "c": False},  # t=0
-            {"start": False, "a": False, "b": False, "c": False},  # t=1
+            {"start": False, "a": False, "b": True,  "c": False},  # t=1: b
             {"start": False, "a": False, "b": False, "c": False},  # t=2
-            {"start": False, "a": False, "b": True,  "c": False},  # t=3
-            {"start": False, "a": False, "b": False, "c": False},  # t=4
+            {"start": False, "a": False, "b": False, "c": True},   # t=3: c
+            {"start": False, "a": False, "b": False, "c": True},   # t=4
             {"start": False, "a": False, "b": False, "c": False},  # t=5
-            {"start": False, "a": False, "b": False, "c": True},   # t=6
-            {"start": False, "a": False, "b": False, "c": True},   # t=7
-            {"start": False, "a": False, "b": False, "c": True},   # t=8
-            {"start": False, "a": False, "b": False, "c": True},   # t=9
-            {"start": False, "a": False, "b": False, "c": False},  # t=10
         ]
         rtl_out = _run_stimulus(checker, stimulus, tmp_path, simulator)
         oracle_out = simulate_checker_hierarchy(checker, stimulus)
