@@ -20,6 +20,7 @@ from sva2rtl.ir import (
     BoolExpr,
     PropBoundedAlways,
     PropBoundedEventually,
+    PropUntil,
     SourceLoc,
 )
 from sva2rtl.normalizer import normalize
@@ -58,6 +59,19 @@ def _always_node(
     if hi is not None:
         node["max"] = hi
     return node
+
+
+def _until_node(
+    op: str = "Until",
+    left: dict | None = None,
+    right: dict | None = None,
+) -> dict:
+    return {
+        "kind": "Binary",
+        "op": op,
+        "left": left or _bool_operand("a"),
+        "right": right or _bool_operand("b"),
+    }
 
 
 # ── LIVE-01 frontend: bounded eventually imports correctly ─────────────────
@@ -189,3 +203,57 @@ def test_normalize_bounded_always_idempotent() -> None:
     assert once == node
     assert normalize(once) == once
     assert isinstance(once, PropBoundedAlways)
+
+
+# ── LIVE-03 frontend: weak until / until_with imports; strong rejected ──────
+
+
+def test_until_weak_imports() -> None:
+    ir = _dispatch_expr_to_ir(_until_node("Until"))
+    assert isinstance(ir, PropUntil)
+    assert ir.with_ is False
+    assert isinstance(ir.left, BoolExpr) and isinstance(ir.right, BoolExpr)
+    assert (ir.left.text, ir.right.text) == ("a", "b")
+
+
+def test_until_with_weak_imports() -> None:
+    ir = _dispatch_expr_to_ir(_until_node("UntilWith"))
+    assert isinstance(ir, PropUntil)
+    assert ir.with_ is True
+
+
+def test_strong_s_until_rejected() -> None:
+    with pytest.raises(UnsupportedConstruct, match="strong"):
+        _dispatch_expr_to_ir(_until_node("SUntil"))
+
+
+def test_strong_s_until_with_rejected() -> None:
+    with pytest.raises(UnsupportedConstruct, match="strong"):
+        _dispatch_expr_to_ir(_until_node("SUntilWith"))
+
+
+def test_until_non_boolean_operand_rejected() -> None:
+    sig_call = {
+        "kind": "Simple",
+        "expr": {
+            "kind": "CallExpression",
+            "subroutineName": "$rose",
+            "arguments": [{"kind": "NamedValue", "symbol": "1 b"}],
+        },
+    }
+    with pytest.raises(UnsupportedConstruct, match="boolean-expression operand"):
+        _dispatch_expr_to_ir(_until_node("Until", right=sig_call))
+
+
+def test_normalize_until_idempotent() -> None:
+    loc = SourceLoc("t.sv", 1, 1)
+    node = PropUntil(
+        left=BoolExpr(text="a", source_loc=loc),
+        right=BoolExpr(text="b", source_loc=loc),
+        with_=False,
+        source_loc=loc,
+    )
+    once = normalize(node)
+    assert once == node
+    assert normalize(once) == once
+    assert isinstance(once, PropUntil)

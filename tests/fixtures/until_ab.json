@@ -1,0 +1,239 @@
+{
+  "design": {
+    "name": "$root",
+    "kind": "Root",
+    "addr": 4351811296,
+    "members": [
+      {
+        "name": "",
+        "kind": "CompilationUnit",
+        "addr": 6338700054992
+      },
+      {
+        "name": "u",
+        "kind": "Instance",
+        "source_file": "until_ab.sv",
+        "source_line": 1,
+        "source_column": 8,
+        "addr": 6338700055768,
+        "body": {
+          "name": "u",
+          "kind": "InstanceBody",
+          "source_file": "until_ab.sv",
+          "source_line": 1,
+          "source_column": 8,
+          "addr": 6338700055272,
+          "members": [
+            {
+              "name": "clk",
+              "kind": "Port",
+              "source_file": "until_ab.sv",
+              "source_line": 1,
+              "source_column": 22,
+              "addr": 6338700055904,
+              "type": "logic",
+              "direction": "In",
+              "internalSymbol": "6338700056024 clk"
+            },
+            {
+              "name": "clk",
+              "kind": "Variable",
+              "source_file": "until_ab.sv",
+              "source_line": 1,
+              "source_column": 22,
+              "addr": 6338700056024,
+              "type": "logic",
+              "lifetime": "Static"
+            },
+            {
+              "name": "a",
+              "kind": "Port",
+              "source_file": "until_ab.sv",
+              "source_line": 1,
+              "source_column": 26,
+              "addr": 6338700056160,
+              "type": "logic",
+              "direction": "In",
+              "internalSymbol": "6338700056280 a"
+            },
+            {
+              "name": "a",
+              "kind": "Variable",
+              "source_file": "until_ab.sv",
+              "source_line": 1,
+              "source_column": 26,
+              "addr": 6338700056280,
+              "type": "logic",
+              "lifetime": "Static"
+            },
+            {
+              "name": "b",
+              "kind": "Port",
+              "source_file": "until_ab.sv",
+              "source_line": 1,
+              "source_column": 28,
+              "addr": 6338700056416,
+              "type": "logic",
+              "direction": "In",
+              "internalSymbol": "6338700056536 b"
+            },
+            {
+              "name": "b",
+              "kind": "Variable",
+              "source_file": "until_ab.sv",
+              "source_line": 1,
+              "source_column": 28,
+              "addr": 6338700056536,
+              "type": "logic",
+              "lifetime": "Static"
+            },
+            {
+              "name": "u_ab",
+              "kind": "StatementBlock",
+              "source_file": "until_ab.sv",
+              "source_line": 2,
+              "source_column": 3,
+              "addr": 6338700055616
+            },
+            {
+              "name": "",
+              "kind": "ProceduralBlock",
+              "source_file": "until_ab.sv",
+              "source_line": 2,
+              "source_column": 3,
+              "addr": 6338700055512,
+              "procedureKind": "Always",
+              "body": {
+                "source_file_start": "until_ab.sv",
+                "source_file_end": "until_ab.sv",
+                "source_line_start": 2,
+                "source_line_end": 2,
+                "source_column_start": 3,
+                "source_column_end": 51,
+                "kind": "Block",
+                "blockKind": "Sequential",
+                "block": "6338700055616 u_ab",
+                "body": {
+                  "source_file_start": "until_ab.sv",
+                  "source_file_end": "until_ab.sv",
+                  "source_line_start": 2,
+                  "source_line_end": 2,
+                  "source_column_start": 3,
+                  "source_column_end": 51,
+                  "kind": "ConcurrentAssertion",
+                  "propertySpec": {
+                    "source_file_start": "until_ab.sv",
+                    "source_file_end": "until_ab.sv",
+                    "source_line_start": 2,
+                    "source_line_end": 2,
+                    "source_column_start": 25,
+                    "source_column_end": 49,
+                    "kind": "Clocking",
+                    "clocking": {
+                      "source_file_start": "until_ab.sv",
+                      "source_file_end": "until_ab.sv",
+                      "source_line_start": 2,
+                      "source_line_end": 2,
+                      "source_column_start": 27,
+                      "source_column_end": 38,
+                      "kind": "SignalEvent",
+                      "expr": {
+                        "source_file_start": "until_ab.sv",
+                        "source_file_end": "until_ab.sv",
+                        "source_line_start": 2,
+                        "source_line_end": 2,
+                        "source_column_start": 35,
+                        "source_column_end": 38,
+                        "kind": "NamedValue",
+                        "type": "logic",
+                        "symbol": "6338700056024 clk"
+                      },
+                      "edge": "PosEdge"
+                    },
+                    "expr": {
+                      "source_file_start": "until_ab.sv",
+                      "source_file_end": "until_ab.sv",
+                      "source_line_start": 2,
+                      "source_line_end": 2,
+                      "source_column_start": 40,
+                      "source_column_end": 49,
+                      "kind": "Binary",
+                      "op": "Until",
+                      "left": {
+                        "source_file_start": "until_ab.sv",
+                        "source_file_end": "until_ab.sv",
+                        "source_line_start": 2,
+                        "source_line_end": 2,
+                        "source_column_start": 40,
+                        "source_column_end": 41,
+                        "kind": "Simple",
+                        "expr": {
+                          "source_file_start": "until_ab.sv",
+                          "source_file_end": "until_ab.sv",
+                          "source_line_start": 2,
+                          "source_line_end": 2,
+                          "source_column_start": 40,
+                          "source_column_end": 41,
+                          "kind": "NamedValue",
+                          "type": "logic",
+                          "symbol": "6338700056280 a"
+                        }
+                      },
+                      "right": {
+                        "source_file_start": "until_ab.sv",
+                        "source_file_end": "until_ab.sv",
+                        "source_line_start": 2,
+                        "source_line_end": 2,
+                        "source_column_start": 48,
+                        "source_column_end": 49,
+                        "kind": "Simple",
+                        "expr": {
+                          "source_file_start": "until_ab.sv",
+                          "source_file_end": "until_ab.sv",
+                          "source_line_start": 2,
+                          "source_line_end": 2,
+                          "source_column_start": 48,
+                          "source_column_end": 49,
+                          "kind": "NamedValue",
+                          "type": "logic",
+                          "symbol": "6338700056536 b"
+                        }
+                      }
+                    }
+                  },
+                  "ifTrue": {
+                    "source_file_start": "until_ab.sv",
+                    "source_file_end": "until_ab.sv",
+                    "source_line_start": 2,
+                    "source_line_end": 2,
+                    "source_column_start": 50,
+                    "source_column_end": 51,
+                    "kind": "Empty"
+                  },
+                  "assertionKind": "Assert"
+                }
+              }
+            }
+          ],
+          "definition": "4352793984 u"
+        },
+        "connections": []
+      }
+    ]
+  },
+  "definitions": [
+    {
+      "name": "u",
+      "kind": "Definition",
+      "source_file": "until_ab.sv",
+      "source_line": 1,
+      "source_column": 8,
+      "addr": 4352793984,
+      "defaultNetType": "4351809056 wire",
+      "definitionKind": "Module",
+      "defaultLifetime": "Static",
+      "unconnectedDrive": "None",
+      "cellDefine": false
+    }
+  ]
+}

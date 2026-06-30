@@ -30,6 +30,7 @@ from sva2rtl.ir import (
     PropIfElse,
     PropImplication,
     PropNot,
+    PropUntil,
     SeqAnd,
     SeqConcat,
     SeqFirstMatch,
@@ -501,6 +502,8 @@ def compose(
             return _compose_bounded_eventually(node, clock, label, original_text, cse_origin)
         case PropBoundedAlways():
             return _compose_bounded_always(node, clock, label, original_text, cse_origin)
+        case PropUntil():
+            return _compose_until(node, clock, label, original_text, cse_origin)
         case _:
             raise UnsupportedConstruct(
                 message=(
@@ -1326,6 +1329,60 @@ def _compose_bounded_always(
         module_name=module_name,
         params=params,
         observed_signals=observed,
+        source_loc=node.source_loc,
+        children=(),
+        cse_origin=cse_origin,
+    )
+
+
+def _compose_until(
+    node: PropUntil, clock: ClockSpec, label: str | None,
+    original_text: str, cse_origin: str | None = None,
+) -> CheckerNode:
+    """Compose weak ``a until b`` / ``a until_with b`` as a leaf safety monitor.
+
+    Both operands are boolean expressions embedded directly (v1.4 Part A). The
+    monitor decides each cycle from ``start`` onward: PASS when the obligation is
+    discharged, FAIL when ``a`` drops before ``b`` (see :class:`PropUntil`). No
+    counter is needed — the property is a pure safety FSM.
+    """
+    if not isinstance(node.left, BoolExpr) or not isinstance(node.right, BoolExpr):
+        raise UnsupportedConstruct(
+            message=(
+                "until currently supports only boolean-expression operands; "
+                "sequence/property operands are deferred to v1.5."
+            ),
+            construct_name="until with non-boolean operand",
+            source_loc=node.source_loc,
+        )
+    module_name = module_name_from_label(label, original_text)
+    left_obs = extract_signals(node.left.text)
+    right_obs = extract_signals(node.right.text)
+    # Ordered union (left first), preserving first-appearance order.
+    seen: set[str] = set()
+    observed: list[tuple[str, str]] = []
+    for port, sig in (*left_obs, *right_obs):
+        if port not in seen:
+            seen.add(port)
+            observed.append((port, sig))
+    params: dict[str, str] = {
+        "module_name": module_name,
+        "left_expr": node.left.text,
+        "right_expr": node.right.text,
+        "left_signals": ",".join(p for p, _ in left_obs),
+        "right_signals": ",".join(p for p, _ in right_obs),
+        "with_": "1" if node.with_ else "0",
+        "clock_signal": clock.signal,
+        "clock_edge": clock.edge,
+        "source_loc": str(node.source_loc),
+        "sva2rtl_version": __version__,
+        "original_text": original_text,
+    }
+    return CheckerNode(
+        template_name="until",
+        module_name=module_name,
+        params=params,
+        observed_signals=tuple(observed),
         source_loc=node.source_loc,
         children=(),
         cse_origin=cse_origin,

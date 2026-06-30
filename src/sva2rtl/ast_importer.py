@@ -30,6 +30,7 @@ from sva2rtl.ir import (
     PropIfElse,
     PropImplication,
     PropNot,
+    PropUntil,
     SeqAnd,
     SeqConcat,
     SeqFirstMatch,
@@ -742,6 +743,10 @@ def _import_concurrent_assertion(
             ir_node, text = _build_bounded_eventually(expr_node, source_loc)
         case "Unary" if expr_node.get("op") in ("Always", "SAlways"):
             ir_node, text = _build_bounded_always(expr_node, source_loc)
+        case "Binary" if expr_node.get("op") in (
+            "Until", "UntilWith", "SUntil", "SUntilWith"
+        ):
+            ir_node, text = _build_until(expr_node, source_loc)
         case "Conditional":
             ir_node, text = _build_prop_if_else(expr_node, source_loc)
         case "FirstMatch":
@@ -826,6 +831,11 @@ def _dispatch_expr_to_ir(node: dict[str, Any], _visited: frozenset[str] = frozen
             return ir_node
         case "Unary" if node.get("op") in ("Always", "SAlways"):
             ir_node, _text = _build_bounded_always(node, source_loc)
+            return ir_node
+        case "Binary" if node.get("op") in (
+            "Until", "UntilWith", "SUntil", "SUntilWith"
+        ):
+            ir_node, _text = _build_until(node, source_loc)
             return ir_node
         case "IntersectPropertyExpr" | "Intersect":
             ir_node, _text = _build_intersect(node, source_loc)
@@ -1087,6 +1097,57 @@ def _build_bounded_always(
     return (
         PropBoundedAlways(
             body=body_ir, lo=lo, hi=hi, strong=strong, source_loc=source_loc
+        ),
+        text,
+    )
+
+
+def _build_until(
+    node: dict[str, Any], source_loc: SourceLoc,
+) -> tuple[SVANode, str]:
+    """Build PropUntil from a v11 Binary Until/UntilWith node (weak forms only).
+
+    Strong forms (``s_until`` / ``s_until_with``) are rejected — honesty-first:
+    they impose an unbounded eventual obligation (the right operand MUST eventually
+    hold), which is not synthesizable on finite state.  Both operands must reduce
+    to boolean expressions (sequence/property operands → v1.5 NFA engine).
+    """
+    op = node.get("op", "")
+    strong = op in ("SUntil", "SUntilWith")
+    with_ = op in ("UntilWith", "SUntilWith")
+    kw = {
+        "Until": "until",
+        "UntilWith": "until_with",
+        "SUntil": "s_until",
+        "SUntilWith": "s_until_with",
+    }.get(op, op)
+    if strong:
+        raise UnsupportedConstruct(
+            message=(
+                f"strong '{kw}' imposes an unbounded eventual obligation (the "
+                "right-hand side must eventually hold) and is not synthesizable on "
+                f"finite state — use the weak form '{kw.replace('s_', '', 1)}'."
+            ),
+            construct_name=f"strong {kw}",
+            source_loc=source_loc,
+        )
+    left_ir = _dispatch_expr_to_ir(node.get("left", {}))
+    right_ir = _dispatch_expr_to_ir(node.get("right", {}))
+    if not isinstance(left_ir, BoolExpr) or not isinstance(right_ir, BoolExpr):
+        raise UnsupportedConstruct(
+            message=(
+                f"'{kw}' currently supports only boolean-expression operands; "
+                "sequence/property operands are deferred to the v1.5 NFA engine."
+            ),
+            construct_name=f"{kw} with non-boolean operand",
+            source_loc=source_loc,
+        )
+    left_text = _reconstruct_node_text(left_ir)
+    right_text = _reconstruct_node_text(right_ir)
+    text = f"({left_text}) {kw} ({right_text})"
+    return (
+        PropUntil(
+            left=left_ir, right=right_ir, with_=with_, source_loc=source_loc
         ),
         text,
     )

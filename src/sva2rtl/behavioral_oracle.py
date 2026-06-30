@@ -645,6 +645,8 @@ class _HierarchicalSim:
             return self._tick_s_eventually(node, signals)
         if tname == "s_always":
             return self._tick_s_always(node, signals)
+        if tname == "until":
+            return self._tick_until_prop(node, signals)
         if node.children:
             return self._tick_node(node.children[0], signals)
         return {"pass": False, "fail": False, "active": False, "overflow": False}
@@ -981,6 +983,66 @@ class _HierarchicalSim:
                     nxt_pass = True
                 st["armed"] = False
             st["off"] = k + 1
+
+        st["o_pass"] = nxt_pass
+        st["o_fail"] = nxt_fail
+        return out
+
+    def _tick_until_prop(
+        self, node: CheckerNode, signals: dict[str, bool]
+    ) -> dict[str, bool]:
+        """Weak ``a until b`` / ``a until_with b`` — safety FSM.
+
+        Independent contract model (derived from IEEE 1800 semantics, NOT from the
+        RTL template — RISK-01).  Armed at ``start``; each active cycle samples
+        a (left) and b (right):
+
+        * ``until``      : PASS when b; FAIL when ~b & ~a (a dropped before b).
+        * ``until_with`` : PASS when a & b; FAIL when ~a (a required at b-cycle).
+
+        Registered outputs (latency 1).  ``active`` is the registered armed state.
+        Once decided, the attempt stops; an undecided attempt stays pending (no
+        verdict), faithfully modelling the weak (no-liveness) semantics.
+        """
+        with_ = str(node.params.get("with_", "0")) == "1"
+        key = node.module_name
+        if not hasattr(self, "_until_state"):
+            self._until_state: dict[str, dict[str, object]] = {}
+        st = self._until_state.setdefault(
+            key, {"armed": False, "o_pass": False, "o_fail": False}
+        )
+
+        out = {
+            "pass": bool(st["o_pass"]),
+            "fail": bool(st["o_fail"]),
+            "active": bool(st["armed"]),
+            "overflow": False,
+        }
+        nxt_pass = False
+        nxt_fail = False
+
+        left_sigs = [s for s in str(node.params.get("left_signals", "")).split(",") if s]
+        right_sigs = [s for s in str(node.params.get("right_signals", "")).split(",") if s]
+        a = all(bool(signals.get(s, False)) for s in left_sigs) if left_sigs else False
+        b = all(bool(signals.get(s, False)) for s in right_sigs) if right_sigs else False
+
+        if signals.get("start", False):
+            st["armed"] = True
+        if st["armed"]:
+            if with_:
+                if not a:
+                    nxt_fail = True
+                    st["armed"] = False
+                elif b:
+                    nxt_pass = True
+                    st["armed"] = False
+            else:
+                if b:
+                    nxt_pass = True
+                    st["armed"] = False
+                elif not a:
+                    nxt_fail = True
+                    st["armed"] = False
 
         st["o_pass"] = nxt_pass
         st["o_fail"] = nxt_fail

@@ -403,6 +403,41 @@ class PropBoundedAlways(SVANode):
     strong: bool = False
 
 
+@dataclass(frozen=True)
+class PropUntil(SVANode):
+    """Until: ``a until b`` / ``a until_with b`` (weak forms only, v1.4 Part A).
+
+    A SAFETY property: the left boolean operand must hold at every cycle from the
+    evaluation (``start``) cycle until the right operand holds.  Two flavours:
+
+    * ``until`` (``with_=False``): ``a`` must hold at every cycle strictly before
+      the first cycle where ``b`` holds.  PASS when ``b`` first holds (``a`` having
+      held throughout); FAIL at the first cycle where ``b`` is false and ``a`` is
+      also false (``a`` dropped before ``b``).
+    * ``until_with`` (``with_=True``): ``a`` must additionally hold at the cycle
+      where ``b`` first holds.  PASS when ``a & b`` first holds; FAIL at the first
+      cycle where ``a`` is false (whether or not ``b`` holds that cycle).
+
+    Only the WEAK forms are accepted: they carry no liveness obligation (``b`` is
+    not required to ever hold), so they are synthesizable as finite-state safety
+    monitors.  The STRONG forms (``s_until`` / ``s_until_with``) additionally
+    require ``b`` to eventually hold — an unbounded eventual obligation that is not
+    synthesizable on finite state — and are rejected at import time.
+
+    Both operands must reduce to boolean expressions (``BoolExpr``) in v1.4 Part A;
+    sequence/property operands are rejected (deferred to the v1.5 NFA engine).
+
+    Attributes:
+        left:   Boolean expression that must hold until ``right`` (BoolExpr).
+        right:  Boolean expression whose first occurrence discharges the obligation.
+        with_:  True for ``until_with`` (``left`` required at the ``right`` cycle).
+    """
+
+    left: SVANode
+    right: SVANode
+    with_: bool = False
+
+
 # ── Clocking ───────────────────────────────────────────────────────────────
 
 

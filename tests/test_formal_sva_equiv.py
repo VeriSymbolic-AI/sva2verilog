@@ -592,3 +592,87 @@ class TestSAlwaysSvaEquiv:
             f"always[{lo}:{hi}] {compare} SVA↔RTL equivalence FAILED:\n"
             f"{output[-2500:]}"
         )
+
+
+# ── Weak until / until_with a until b (v1.4 Part A) ───────────────────────────
+# Safety properties (no liveness obligation). The generated monitor
+# (templates/until.sv.j2) is proven against an INDEPENDENT reference monitor
+# authored from IEEE-1800 weak-until semantics. The reference uses a two-register
+# started/decided live-window encoding — structurally distinct from the monitor's
+# single running_q FSM — so it is a separate source of truth (breaks RISK-01).
+
+
+def _until_ref_module(name: str, with_: bool) -> str:
+    """Independent reference monitor for weak ``until`` / ``until_with``."""
+    if with_:
+        sat = "live &  a &  b"
+        vio = "live & ~a"
+    else:
+        sat = "live &  b"
+        vio = "live & ~b & ~a"
+    return f"""\
+module {name} (
+    input  logic clk,
+    input  logic rst_n,
+    input  logic start,
+    input  logic a,
+    input  logic b,
+    output logic pass,
+    output logic fail
+);
+    // Two sticky registers (started/decided) gate a live window — distinct from
+    // the monitor's single running_q FSM. Authored from IEEE-1800 weak-until
+    // safety semantics ({"until_with" if with_ else "until"}).
+    logic started, decided, pass_q, fail_q;
+    wire live = (start | started) & ~decided;
+    wire sat  = {sat};
+    wire vio  = {vio};
+    always_ff @(posedge clk) begin
+        if (!rst_n) begin
+            started <= 1'b0; decided <= 1'b0; pass_q <= 1'b0; fail_q <= 1'b0;
+        end else begin
+            if (start) started <= 1'b1;
+            pass_q <= sat;
+            fail_q <= vio;
+            if (sat | vio) decided <= 1'b1;
+        end
+    end
+    assign pass = pass_q;
+    assign fail = fail_q;
+endmodule
+"""
+
+
+def _build_until_checker(with_: bool) -> CheckerNode:
+    """Compose+optimize the monitor for weak ``a until[_with] b`` from IR."""
+    from sva2rtl.ir import BoolExpr, ClockSpec, PropUntil, SourceLoc
+
+    loc = SourceLoc("test.sv", 1, 1)
+    clock = ClockSpec(edge="posedge", signal="clk", source_loc=loc)
+    kw = "until_with" if with_ else "until"
+    node = PropUntil(
+        left=BoolExpr(text="a", source_loc=loc),
+        right=BoolExpr(text="b", source_loc=loc),
+        with_=with_,
+        source_loc=loc,
+    )
+    return optimize(compose(node, clock, "u", f"a {kw} b"))
+
+
+class TestUntilSvaEquiv:
+    """Weak ``until`` / ``until_with`` proven equiv to an independent reference."""
+
+    @pytest.mark.parametrize("with_", [False, True], ids=["until", "until_with"])
+    @pytest.mark.parametrize("compare", ["pass", "fail"])
+    def test_until_equiv(self, with_: bool, compare: str) -> None:
+        """Monitor's pass/fail matches the independent reference (non-circular BMC)."""
+        checker = _build_until_checker(with_)
+        ref_name = f"ref_u_{'w' if with_ else 'u'}"
+        ref = _until_ref_module(ref_name, with_)
+        passed, output = run_sva_miter_check(
+            checker, ref, ref_name, compare=compare, depth=20
+        )
+        kw = "until_with" if with_ else "until"
+        assert passed, (
+            f"{kw} {compare} SVA↔RTL equivalence FAILED:\n{output[-2500:]}"
+        )

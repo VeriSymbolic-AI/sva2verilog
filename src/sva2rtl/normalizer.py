@@ -26,6 +26,7 @@ from sva2rtl.ir import (
     PropIfElse,
     PropImplication,
     PropNot,
+    PropUntil,
     SeqAnd,
     SeqConcat,
     SeqFirstMatch,
@@ -180,6 +181,17 @@ def normalize(node: SVANode) -> SVANode:
                     lo=node.lo,
                     hi=node.hi,
                     strong=node.strong,
+                    source_loc=node.source_loc,
+                )
+            )
+        case PropUntil():
+            new_left = normalize(node.left)
+            new_right = normalize(node.right)
+            return _normalize_node(
+                PropUntil(
+                    left=new_left,
+                    right=new_right,
+                    with_=node.with_,
                     source_loc=node.source_loc,
                 )
             )

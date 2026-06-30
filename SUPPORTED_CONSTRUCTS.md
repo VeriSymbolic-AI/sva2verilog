@@ -58,6 +58,8 @@ finite state.
 | `eventually [m:n]` | Liveness | Weak bounded form; collapses to the same synthesizable monitor as the strong form over a finite window | `eventually [0:4] a` | `s_eventually` (shared) |
 | `always [m:n]` | Liveness | Universal dual: boolean operand must hold at EVERY offset `k ∈ [m,n]`; FAIL at first in-window violation, PASS at deadline `n` if all held | `always [1:3] a` | `s_always` — offset counter + violation latch + deadline-pass (fail@start+k_viol+1, pass@start+n+1) |
 | `s_always [m:n]` | Liveness | Strong bounded form; collapses to the same synthesizable monitor as the weak form over a finite window | `s_always [0:4] a` | `s_always` (shared) |
+| `until` | Safety | Weak until: `a` holds until `b`; PASS when `b` first holds, FAIL when `a` drops before `b` (`b` not required to ever hold) | `a until b` | `until` — safety FSM (no counter); pass@b, fail@(~a & ~b) |
+| `until_with` | Safety | Weak until-with: `a` must also hold at the `b` cycle; PASS when `a & b`, FAIL when `a` drops | `a until_with b` | `until` (with_ flag) |
 
 Notes for v1.4 Part A:
 - The operand must reduce to a **boolean expression** (like `throughout`'s
@@ -66,10 +68,11 @@ Notes for v1.4 Part A:
 - Equivalence is established **non-circularly**: the generated monitor is proven
   by SymbiYosys BMC against an independent IEEE-1800 reference monitor authored
   from `∃ k ∈ [m,n] : a(t0+k)` semantics (not derived from the implementation).
-- Unbounded `s_eventually a` / `always a` / `s_until` (which require an eventual
-  or unbounded obligation) raise `UnsupportedConstruct` with a source location and
-  a remediation hint.
-- Bounded `until` / `until_with` is the remaining Part A operator (phase A4).
+- Unbounded `s_eventually a` / `always a` / `s_until` / `s_until_with` (which
+  require an eventual or unbounded obligation) raise `UnsupportedConstruct` with a
+  source location and a remediation hint.
+- Weak `until` / `until_with` are safety properties (no liveness obligation) and
+  are fully supported; the strong `s_until` / `s_until_with` forms are rejected.
 
 ## Composition Model
 
@@ -205,8 +208,8 @@ The following temporal operators are not yet supported:
 | `eventually`/`s_eventually` (bounded `[m:n]`) | Liveness | **Supported** (v1.4 Part A) |
 | `eventually`/`s_eventually` (unbounded) | Liveness | Rejected — not synthesizable on finite state |
 | `always [m:n]` / `s_always [m:n]` (bounded) | Liveness | **Supported** (v1.4 Part A) |
-| `until` / `until_with` (bounded, weak) | Liveness | Planned v1.4 Part A (phase A4) |
-| `s_until` (strong) | Liveness | Rejected — requires unbounded eventual obligation |
+| `until` / `until_with` (weak) | Safety | **Supported** (v1.4 Part A) |
+| `s_until` / `s_until_with` (strong) | Liveness | Rejected — requires unbounded eventual obligation |
 | `always` (unbounded) | Temporal | Rejected — not synthesizable on finite state |
 | `intersect`/`within` with local variables | Sequence | Not supported |
 | Nested multi-path operators | Sequence | Not supported (single-level only) |

@@ -180,3 +180,67 @@ class TestAlways13:
         rtl = _run(checker, stim, tmp_path, simulator)
         for t, r in enumerate(rtl):
             assert not r["pass"] and not r["fail"] and not r["active"], f"disabled @t{t}"
+
+
+class TestUntilWeak:
+    """``a until b`` — weak safety: a holds until b (b not required of a)."""
+
+    def test_pass_when_b_arrives(self, tmp_path: Path) -> None:
+        """a holds, b at t2 -> pass at t3."""
+        checker = _build_checker("until_ab")
+        stim = [
+            {"start": True, "a": True, "b": False},
+            {"start": False, "a": True, "b": False},
+            {"start": False, "a": True, "b": True},
+            {"start": False, "a": False, "b": False},
+            {"start": False, "a": False, "b": False},
+        ]
+        rtl = _run(checker, stim, tmp_path)
+        assert rtl[3]["pass"] and not rtl[3]["fail"], "pass at t3"
+        assert not any(r["fail"] for r in rtl), "no fail when b arrives with a held"
+        _assert_rtl_matches_oracle(checker, stim, rtl)
+
+    def test_fail_when_a_drops(self, tmp_path: Path) -> None:
+        """a drops at t1 before b -> fail at t2."""
+        checker = _build_checker("until_ab")
+        stim = [
+            {"start": True, "a": True, "b": False},
+            {"start": False, "a": False, "b": False},
+            {"start": False, "a": True, "b": True},
+            {"start": False, "a": False, "b": False},
+        ]
+        rtl = _run(checker, stim, tmp_path)
+        assert rtl[2]["fail"] and not rtl[2]["pass"], "fail at t2"
+        _assert_rtl_matches_oracle(checker, stim, rtl)
+
+    def test_pending_when_b_never(self, tmp_path: Path) -> None:
+        """a holds forever, b never -> no verdict (weak: stays pending)."""
+        checker = _build_checker("until_ab")
+        stim = [{"start": t == 0, "a": True, "b": False} for t in range(6)]
+        rtl = _run(checker, stim, tmp_path)
+        assert not any(r["pass"] for r in rtl), "no pass (b never holds)"
+        assert not any(r["fail"] for r in rtl), "no fail (weak: a held throughout)"
+        _assert_rtl_matches_oracle(checker, stim, rtl)
+
+    def test_pass_immediately_when_b_at_start(self, tmp_path: Path) -> None:
+        """b true at the start cycle (offset 0) -> pass at t1 (vacuous)."""
+        checker = _build_checker("until_ab")
+        stim = [
+            {"start": True, "a": False, "b": True},
+            {"start": False, "a": False, "b": False},
+            {"start": False, "a": False, "b": False},
+        ]
+        rtl = _run(checker, stim, tmp_path)
+        assert rtl[1]["pass"] and not rtl[1]["fail"], "pass at t1 (b at offset 0)"
+        _assert_rtl_matches_oracle(checker, stim, rtl)
+
+    def test_disable_gates_outputs(self, tmp_path: Path, simulator: str) -> None:
+        """disable_i=1 gates pass/fail/active to 0."""
+        checker = _build_checker("until_ab")
+        stim = [
+            {"start": t == 0, "a": False, "b": False, "disable_i": True}
+            for t in range(6)
+        ]
+        rtl = _run(checker, stim, tmp_path, simulator)
+        for t, r in enumerate(rtl):
+            assert not r["pass"] and not r["fail"] and not r["active"], f"disabled @t{t}"
