@@ -1,7 +1,8 @@
 """Regenerate all golden files after template changes."""
 import json
 from pathlib import Path
-from sva2rtl.ast_importer import import_assertion, import_all_assertions
+
+from sva2rtl.ast_importer import import_all_assertions, import_assertion
 from sva2rtl.composer import compose
 from sva2rtl.emitter import emit_all
 

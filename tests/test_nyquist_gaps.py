@@ -12,7 +12,6 @@ Dedicated tests for each of the 6 remaining Nyquist BLOCKING gaps:
 from __future__ import annotations
 
 import logging
-import re
 
 import pytest
 
@@ -21,8 +20,6 @@ from sva2rtl.ast_importer import (
     import_assertion,
 )
 from sva2rtl.errors import SvaCompileError, UnsupportedConstruct
-from sva2rtl.ir import SourceLoc
-
 
 # ── NYQ-02: strong() produces clear compile error ─────────────────────────
 

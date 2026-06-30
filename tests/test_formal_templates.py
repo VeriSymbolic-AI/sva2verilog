@@ -29,6 +29,7 @@ import pytest
 from sva2rtl.ast_importer import import_assertion
 from sva2rtl.composer import compose
 from sva2rtl.formal import _yosys_is_available, check_optimizer_pass
+from sva2rtl.ir import CheckerNode
 from sva2rtl.normalizer import normalize
 from sva2rtl.optimizer import optimize
 
@@ -40,7 +41,7 @@ pytestmark = pytest.mark.skipif(
 _FIXTURES = Path(__file__).parent / "fixtures"
 
 
-def _build_from_fixture(name: str, *, optimize_flag: bool = True):
+def _build_from_fixture(name: str, *, optimize_flag: bool = True) -> CheckerNode:
     """Load a fixture JSON, compile to CheckerNode with/without optimization."""
     ast = json.loads((_FIXTURES / f"{name}.json").read_text(encoding="utf-8"))
     node, clock, label, original_text = import_assertion(ast)

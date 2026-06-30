@@ -568,7 +568,10 @@ def test_emit_nonconsec_rep_golden() -> None:
 
 
 def test_oracle_nonconsec_rep_pass_at_5() -> None:
-    """nonconsec_rep [=5]: passes when old_count >= 5 (OLD-state semantics, start-driven counting)."""
+    """nonconsec_rep [=5]: passes when old_count >= 5.
+
+    OLD-state semantics, start-driven counting.
+    """
     sim = SVABehavioralSim("nonconsec_rep", {"rep_min": 5, "rep_max": 5})
     # Oracle increments count on (start=True, sig=True).
     # After 5 such cycles: old_count=5 → pass_val=True
@@ -613,7 +616,7 @@ def test_oracle_nonconsec_reset_clears() -> None:
 # v1.3 Tier 2 — first_match
 # ══════════════════════════════════════════════════════════════════════════════
 
-from sva2rtl.ir import SeqFirstMatch, SeqConcat  # noqa: E402
+from sva2rtl.ir import SeqConcat, SeqFirstMatch  # noqa: E402
 
 
 def test_import_first_match() -> None:

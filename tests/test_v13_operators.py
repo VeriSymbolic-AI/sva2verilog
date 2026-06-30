@@ -15,15 +15,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
-
-from sva2rtl.ast_importer import import_assertion
-from sva2rtl.behavioral_oracle import SVABehavioralSim, simulate_checker_hierarchy
+from sva2rtl.behavioral_oracle import simulate_checker_hierarchy
 from sva2rtl.composer import compose
 from sva2rtl.emitter import emit_all
 from sva2rtl.ir import (
     BoolExpr,
-    CheckerNode,
     ClockSpec,
     PropIfElse,
     PropNot,

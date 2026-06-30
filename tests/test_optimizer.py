@@ -943,7 +943,9 @@ def test_optimization_parity(fixture_name: str, tmp_path: Path) -> None:
     extra_inputs = extra_inputs_from_checker(unopt)
     stimulus = _make_generic_stimulus(extra_inputs, n_cycles=20)
 
-    def _simulate(checker: CheckerNode, work_subdir: str, simulator: str = "iverilog") -> list[dict[str, bool]]:
+    def _simulate(
+        checker: CheckerNode, work_subdir: str, simulator: str = "iverilog"
+    ) -> list[dict[str, bool]]:
         modules = emit_all(checker)
         has_overflow = checker.template_name in TEMPLATES_WITH_OVERFLOW
         tb = generate_testbench(

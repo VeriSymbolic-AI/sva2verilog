@@ -35,7 +35,6 @@ def build_modules() -> tuple[str, dict[str, str], tuple[tuple[str, str], ...]]:
 
 def run_trace(b_cycle: int, n: int = 16) -> None:
     top, mods, sigs = build_modules()
-    ports = [p for p, _ in sigs]  # e.g. ['a', 'b']
     with tempfile.TemporaryDirectory() as d:
         work = Path(d)
         files = []

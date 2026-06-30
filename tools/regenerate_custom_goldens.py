@@ -1,14 +1,15 @@
 """Regenerate custom-named golden files for test_sequential, test_emitter, etc."""
 import json
 from pathlib import Path
-from sva2rtl.ast_importer import import_assertion, import_all_assertions
+
+from sva2rtl.ast_importer import import_all_assertions, import_assertion
 from sva2rtl.composer import compose
 from sva2rtl.emitter import emit_all
 
 GOLDEN = Path('tests/golden')
 FIXTURES = Path('tests/fixtures')
 
-def write_sv(mod_name, mod_src):
+def write_sv(mod_name: str, mod_src: str) -> None:
     p = GOLDEN / f'{mod_name}.sv'
     p.write_text(mod_src.rstrip('\n') + '\n', encoding='utf-8')
     print(f'Wrote {p}')

@@ -174,7 +174,9 @@ class TestRepFixed:
         assert     rtl_out[2]["fail"], "t=2: a=0 while count < 3 → fail"
         assert not rtl_out[3]["fail"], "t=3: running already cleared"
 
-    def test_start_with_a_false_does_not_start_running(self, tmp_path: Path, simulator: str) -> None:
+    def test_start_with_a_false_does_not_start_running(
+        self, tmp_path: Path, simulator: str
+    ) -> None:
         """a[*3]: start with a=0 fires attempt_fired but does NOT set running_q.
 
         Because the RTL condition is ``(start && sig_eval)`` to set running_q,

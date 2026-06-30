@@ -9,20 +9,21 @@ from pathlib import Path
 from sva2rtl.ast_importer import import_assertion
 from sva2rtl.composer import compose
 from sva2rtl.emitter import emit_all
+from sva2rtl.ir import CheckerNode
 from sva2rtl.normalizer import normalize
 from sva2rtl.optimizer import optimize
 
 _FIX = Path(__file__).resolve().parents[2] / "tests/fixtures"
 
 
-def build(name):
+def build(name: str) -> tuple[CheckerNode, str]:
     ast = json.loads((_FIX / f"{name}.json").read_text())
     node, clock, label, text = import_assertion(ast)
     node = normalize(node)
     return optimize(compose(node, clock, label, text)), text
 
 
-def run(name, n=12):
+def run(name: str, n: int = 12) -> None:
     checker, text = build(name)
     mods = emit_all(checker)
     top = checker.module_name
@@ -68,7 +69,8 @@ endmodule
         cr = subprocess.run(["iverilog", "-g2012", "-o", "s.out", *files],
                             cwd=str(work), capture_output=True, text=True)
         if cr.returncode:
-            print(f"\n### {name}: COMPILE ERR\n", cr.stdout, cr.stderr); return
+            print(f"\n### {name}: COMPILE ERR\n", cr.stdout, cr.stderr)
+            return
         out = subprocess.run(["vvp", "s.out"], cwd=str(work), capture_output=True, text=True)
         print(f"\n### {name}: '{text}'  sigs={sigs}")
         print(out.stdout)

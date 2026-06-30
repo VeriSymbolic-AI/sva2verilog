@@ -51,7 +51,8 @@ endmodule
     cr = subprocess.run(["iverilog", "-g2012", "-o", "s.out", *files],
                         cwd=str(work), capture_output=True, text=True)
     if cr.returncode:
-        print("ERR", cr.stdout, cr.stderr); return
+        print("ERR", cr.stdout, cr.stderr)
+        return
     print(f"\n=== start/a @ t=3 (driven _t==2), b @ t={b_cycle} ===")
     print(subprocess.run(["vvp", "s.out"], cwd=str(work), capture_output=True, text=True).stdout)
 

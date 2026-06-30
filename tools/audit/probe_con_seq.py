@@ -20,7 +20,7 @@ from sva2rtl.optimizer import optimize
 _FIX = Path(__file__).resolve().parents[2] / "tests/fixtures/implication_bitvec.json"
 
 
-def build():
+def build() -> dict[str, str]:
     ast = json.loads(_FIX.read_text())
     node, clock, label, text = import_assertion(ast)
     node = normalize(node)
@@ -63,7 +63,8 @@ endmodule
         cr = subprocess.run(["iverilog", "-g2012", "-o", "s.out", *files],
                             cwd=str(work), capture_output=True, text=True)
         if cr.returncode:
-            print("COMPILE ERR", cr.stdout, cr.stderr); return
+            print("COMPILE ERR", cr.stdout, cr.stderr)
+            return
         out = subprocess.run(["vvp", "s.out"], cwd=str(work), capture_output=True, text=True)
         print(f"\n=== con `a ##[2:5] b`: start@{start_cycle}, b@{b_cycle} ===")
         print(out.stdout)

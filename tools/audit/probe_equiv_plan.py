@@ -6,6 +6,7 @@ from pathlib import Path
 
 from sva2rtl.ast_importer import import_assertion
 from sva2rtl.composer import compose
+from sva2rtl.ir import CheckerNode
 from sva2rtl.normalizer import normalize
 from sva2rtl.optimizer import optimize
 
@@ -23,7 +24,7 @@ CANDIDATES = [
 ]
 
 
-def describe(node, depth=0):
+def describe(node: CheckerNode, depth: int = 0) -> None:
     pad = "  " * depth
     tn = getattr(node, "template_name", "?")
     mn = getattr(node, "module_name", "?")

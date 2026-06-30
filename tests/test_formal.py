@@ -19,8 +19,6 @@ from __future__ import annotations
 import subprocess
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from sva2rtl.formal import (
     _extract_top_module_names,
     _yosys_is_available,
@@ -92,8 +90,14 @@ class TestYosysAvailability:
 class TestRunEquivCheck:
     """Tests for single-module equivalence checking."""
 
-    GOLD_SV = "module checker_foo (input logic clk, rst_n, a, b);\n  output logic pass, fail;\nendmodule\n"
-    GATE_SV = "module checker_foo (input logic clk, rst_n, a, b);\n  output logic pass, fail;\n  // optimized\nendmodule\n"
+    GOLD_SV = (
+        "module checker_foo (input logic clk, rst_n, a, b);\n"
+        "  output logic pass, fail;\nendmodule\n"
+    )
+    GATE_SV = (
+        "module checker_foo (input logic clk, rst_n, a, b);\n"
+        "  output logic pass, fail;\n  // optimized\nendmodule\n"
+    )
 
     def test_passed(self) -> None:
         mock_result = MagicMock(
@@ -127,7 +131,10 @@ class TestRunEquivCheck:
 
     def test_timeout(self) -> None:
         with patch("sva2rtl.formal._yosys_is_available", return_value=True):
-            with patch("subprocess.run", side_effect=subprocess.TimeoutExpired(cmd="yosys", timeout=300)):
+            with patch(
+                "subprocess.run",
+                side_effect=subprocess.TimeoutExpired(cmd="yosys", timeout=300),
+            ):
                 passed, output = run_equiv_check(self.GOLD_SV, self.GATE_SV)
                 assert passed is False
                 assert "timed out" in output.lower()
@@ -139,7 +146,10 @@ class TestRunEquivCheck:
 
     def test_tcl_script_uses_correct_top(self) -> None:
         """Verify that the generated Tcl script uses the first module as top."""
-        sv = "module checker_a (input logic clk);\nendmodule\nmodule checker_b (input logic clk);\nendmodule\n"
+        sv = (
+            "module checker_a (input logic clk);\nendmodule\n"
+            "module checker_b (input logic clk);\nendmodule\n"
+        )
         mock_result = MagicMock(returncode=0, stdout="PASS\n", stderr="")
         with patch("sva2rtl.formal._yosys_is_available", return_value=True):
             with patch("subprocess.run", return_value=mock_result) as mock_run:
