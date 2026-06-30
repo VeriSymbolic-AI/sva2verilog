@@ -786,6 +786,33 @@ def _compose_implication(
     con_checker = compose(node.consequent, clock, f"{base}_con", original_text)
 
     bv_width = _compute_bv_width(node.consequent)
+
+    # v1.5 boundary (BUG-IMPL-01): only a SINGLE-CYCLE consequent (BV_WIDTH==1 —
+    # a boolean expression or sampled-value function) is formally proven correct
+    # against IEEE-1800 semantics (tests/test_formal_sva_equiv.py). A multi-cycle
+    # SEQUENCE consequent compiles to BV_WIDTH>1 and would use the legacy bv_q
+    # token-passing path, which is CONFIRMED (iverilog trace, 2026-06-30) to
+    # mishandle the existential "∃ match within the window" obligation: pass
+    # never fires and fail is unrelated to the consequent (see
+    # .planning/BUG-implication-timing.md). Emitting it would be a silent
+    # correctness failure, so we reject it explicitly instead. A correct
+    # implementation requires the v1.5 NFA composition engine.
+    if bv_width > 1:
+        raise UnsupportedConstruct(
+            message=(
+                "implication ('|->' / '|=>') with a multi-cycle sequence "
+                "consequent is not yet supported: the consequent must be a "
+                "single-cycle boolean expression or sampled-value function "
+                "($rose/$fell/$stable/$past/$changed). Multi-cycle sequence "
+                "consequents (e.g. 'a |-> b ##2 c', 'a |-> b[*3]', "
+                "'a |-> (b ##[2:5] c)') are deferred to the v1.5 NFA composition "
+                "engine. Workaround: move the sequence into the antecedent, or "
+                "split into separate properties with a single-cycle consequent."
+            ),
+            construct_name="implication with sequence consequent",
+            source_loc=node.source_loc,
+        )
+
     all_signals = _collect_signals([ant_checker, con_checker])
 
     params: dict[str, str] = {

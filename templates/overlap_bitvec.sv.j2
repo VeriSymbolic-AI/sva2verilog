@@ -30,9 +30,20 @@ module {{ module_name }} #(
     {{ wire_type(verilog_mode) }} con_fail_w;
     {{ wire_type(verilog_mode) }} con_afired_w;
 
-    // ── Consequent start: driven from bit-vector oldest thread ────────────────
+    // ── Consequent start ──────────────────────────────────────────────────────
     {{ wire_type(verilog_mode) }} con_start_w;
+{% if bv_width | int == 1 %}
+    // BUG-IMPL-01 fix: single-cycle (boolean / sampled-value) consequent.
+    // Evaluate the consequent leaf IN PARALLEL with the antecedent
+    // (con_start = start) so a and b are sampled on the same cycle, matching
+    // IEEE-1800 |-> semantics.  Formally proven equivalent (see
+    // test_formal_sva_equiv).  The previous bv_q-gated con_start mis-timed b by
+    // two cycles and the gate dropped valid passes / raised spurious fails for
+    // non-continuous antecedents.
+    assign con_start_w = start;
+{% else %}
     assign con_start_w = bv_q[BV_WIDTH-1];
+{% endif %}
 
     // ── Antecedent child instantiation ───────────────────────────────────────
     {{ children[0].module_name }} u_{{ children[0].module_name }} (
@@ -66,6 +77,23 @@ module {{ module_name }} #(
         .disabled_o    ()
     );
 
+{% if bv_width | int == 1 %}
+    // ── HARDEN-01: attempt_fired_q never cleared by disable_i ──────────
+    {{ wire_type(verilog_mode) }} attempt_fired_q;
+
+{{ attempt_fired_logic(verilog_mode, clock_edge, clock_signal, "ant_pass_w") }}
+
+    // ── Output assignments (|-> single-cycle consequent) ──────────────────────
+    // ant_pass_w and con_pass_w are both registered one cycle by their leaves,
+    // so combining them at the same cycle pairs a(t) with b(t) — overlapping
+    // implication semantics.
+    assign active        = disable_i ? 1'b0 : (ant_active_w | con_active_w);
+    assign pass          = disable_i ? 1'b0 : (ant_pass_w & con_pass_w);
+    assign fail          = disable_i ? 1'b0 : (ant_pass_w & con_fail_w);
+    assign attempt_fired = attempt_fired_q;
+    assign overflow_flag = 1'b0;
+    assign disabled_o    = disable_i;
+{% else %}
     // ── Bit-vector shift register (thread tracker) ────────────────────────────
     {% if verilog_mode %}
     reg [BV_WIDTH-1:0] bv_q;
@@ -111,5 +139,6 @@ module {{ module_name }} #(
     assign attempt_fired = attempt_fired_q;
     assign overflow_flag = overflow_flag_q;
     assign disabled_o    = disable_i;
+{% endif %}
 
 endmodule

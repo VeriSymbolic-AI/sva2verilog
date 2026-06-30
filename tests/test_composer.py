@@ -528,30 +528,29 @@ def test_compose_implication_bv_width_bool_consequent() -> None:
     assert checker.params["bv_width"] == "1"
 
 
-def test_compose_implication_bv_width_delay_consequent() -> None:
-    """SeqConcat consequent with delays=((2,5),) produces bv_width='6'."""
+def test_compose_implication_delay_consequent_rejected() -> None:
+    """SeqConcat consequent with delays=((2,5),) (BV_WIDTH=6>1) is rejected.
+
+    Multi-cycle sequence consequents use the legacy bv_q path, a confirmed
+    correctness defect (BUG-IMPL-01); compose raises rather than emit a wrong
+    monitor. A correct implementation needs the v1.5 NFA engine.
+    """
+    from sva2rtl.errors import UnsupportedConstruct
+
     node = _make_impl_node(consequent_delays=((2, 5),))
     clock = _make_clock()
-    checker = compose(node, clock, "impl_check", "a |-> a ##[2:5] b")
-    assert checker.params["bv_width"] == "6"
+    with pytest.raises(UnsupportedConstruct, match="sequence consequent"):
+        compose(node, clock, "impl_check", "a |-> a ##[2:5] b")
 
 
-def test_compose_implication_bv_width_multi_delay() -> None:
-    """SeqConcat consequent with delays=((2,2),(3,3)) -> bv_width='6'."""
+def test_compose_implication_multi_delay_consequent_rejected() -> None:
+    """SeqConcat consequent with delays=((2,2),(3,3)) (BV_WIDTH=6>1) is rejected."""
+    from sva2rtl.errors import UnsupportedConstruct
+
     node = _make_impl_node(consequent_delays=((2, 2), (3, 3)))
     clock = _make_clock()
-    checker = compose(node, clock, "impl_check", "a |-> a ##2 b ##3 c")
-    assert checker.params["bv_width"] == "6"
-
-
-def test_compose_implication_with_delay_consequent_has_seq_children() -> None:
-    """PropImplication with SeqConcat consequent: second child is seq_concat_top."""
-    node = _make_impl_node(consequent_delays=((2, 5),))
-    clock = _make_clock()
-    checker = compose(node, clock, "impl_check", "a |-> a ##[2:5] b")
-    # consequent child should be seq_concat_top with its own sub-children
-    assert checker.children[1].template_name == "seq_concat_top"
-    assert len(checker.children[1].children) > 0
+    with pytest.raises(UnsupportedConstruct, match="sequence consequent"):
+        compose(node, clock, "impl_check", "a |-> a ##2 b ##3 c")
 
 
 def test_compose_implication_does_not_raise() -> None:

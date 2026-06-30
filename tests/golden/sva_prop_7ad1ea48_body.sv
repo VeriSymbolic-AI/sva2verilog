@@ -27,9 +27,16 @@ output  logic disabled_o
     logic con_fail_w;
     logic con_afired_w;
 
-    // ── Consequent start: driven from bit-vector oldest thread ────────────────
+    // ── Consequent start ──────────────────────────────────────────────────────
     logic con_start_w;
-    assign con_start_w = bv_q[BV_WIDTH-1];
+    // BUG-IMPL-01 fix: single-cycle (boolean / sampled-value) consequent.
+    // Evaluate the consequent leaf IN PARALLEL with the antecedent
+    // (con_start = start) so a and b are sampled on the same cycle, matching
+    // IEEE-1800 |-> semantics.  Formally proven equivalent (see
+    // test_formal_sva_equiv).  The previous bv_q-gated con_start mis-timed b by
+    // two cycles and the gate dropped valid passes / raised spurious fails for
+    // non-continuous antecedents.
+    assign con_start_w = start;
 
     // ── Antecedent child instantiation ───────────────────────────────────────
     sva_prop_7ad1ea48_body_ant u_sva_prop_7ad1ea48_body_ant (
@@ -59,28 +66,6 @@ output  logic disabled_o
         .disabled_o    ()
     );
 
-    // ── Bit-vector shift register (thread tracker) ────────────────────────────
-    logic [BV_WIDTH-1:0] bv_q;
-    logic                overflow_flag_q;
-
-    logic overflow_event;
-    assign overflow_event = ant_pass_w && (&bv_q) && !overflow_flag_q;
-
-always_ff @(posedge clk) begin
-        if (!rst_n || disable_i) begin
-            bv_q            <= '0;
-            overflow_flag_q <= 1'b0;
-        end else begin
-            if (overflow_flag_q) begin
-                bv_q            <= bv_q;
-                overflow_flag_q <= 1'b1;
-            end else begin
-                overflow_flag_q <= overflow_flag_q | overflow_event;
-                bv_q <= ant_pass_w;
-            end
-        end
-    end
-
     // ── HARDEN-01: attempt_fired_q never cleared by disable_i ──────────
     logic attempt_fired_q;
 
@@ -92,14 +77,15 @@ always_ff @(posedge clk) begin
         end
     end
 
-    // ── Output assignments ────────────────────────────────────────────────────
-    assign active        = disable_i ? 1'b0 : (overflow_flag_q ? 1'b0 : (ant_active_w | con_active_w | (|bv_q)));
-    assign pass          = disable_i ? 1'b0 : (overflow_flag_q ? 1'b0 : (bv_q[BV_WIDTH-1] & con_pass_w));
-    assign fail          = disable_i ? 1'b0 : (overflow_event  ? 1'b1 :
-                           overflow_flag_q ? 1'b0 :
-                           (bv_q[BV_WIDTH-1] & ~con_pass_w & con_start_w));
+    // ── Output assignments (|-> single-cycle consequent) ──────────────────────
+    // ant_pass_w and con_pass_w are both registered one cycle by their leaves,
+    // so combining them at the same cycle pairs a(t) with b(t) — overlapping
+    // implication semantics.
+    assign active        = disable_i ? 1'b0 : (ant_active_w | con_active_w);
+    assign pass          = disable_i ? 1'b0 : (ant_pass_w & con_pass_w);
+    assign fail          = disable_i ? 1'b0 : (ant_pass_w & con_fail_w);
     assign attempt_fired = attempt_fired_q;
-    assign overflow_flag = overflow_flag_q;
+    assign overflow_flag = 1'b0;
     assign disabled_o    = disable_i;
 
 endmodule

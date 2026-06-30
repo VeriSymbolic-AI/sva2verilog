@@ -429,15 +429,6 @@ def test_emit_overlap_bitvec_contains_bv_register() -> None:
     assert "bv_q" in top_sv
 
 
-def test_emit_overlap_bitvec_contains_halt_gating() -> None:
-    """Emitted overlap_bitvec module gates active/pass/fail to 0 when halted."""
-    checker = _load_impl_checker("implication_overlap")
-    modules = emit_all(checker)
-    top_sv = modules[checker.module_name]
-    # The halt gating pattern: overflow_flag_q ? 1'b0 : ...
-    assert "overflow_flag_q ? 1'b0" in top_sv
-
-
 def test_emit_overlap_bitvec_contains_endmodule() -> None:
     """Emitted overlap_bitvec module ends with 'endmodule'."""
     checker = _load_impl_checker("implication_overlap")
@@ -455,11 +446,18 @@ def test_emit_overlap_bitvec_bv_width_param() -> None:
 
 
 def test_emit_nonoverlap_contains_delay_register() -> None:
-    """Emitted nonoverlap module contains 'ant_pass_delayed_q' 1-cycle register."""
+    """Emitted nonoverlap module implements the |=> ##1 via con_start=ant_pass_w.
+
+    BUG-IMPL-01: the single-cycle-consequent |=> no longer uses a separate
+    ant_pass_delayed_q register. Instead the consequent leaf is started exactly
+    when the antecedent matches (con_start_w = ant_pass_w); because the leaf
+    samples its operand on its start cycle, b is checked exactly one cycle after
+    a — the ##1 of |=>.
+    """
     checker = _load_impl_checker("implication_nonoverlap")
     modules = emit_all(checker)
     top_sv = modules[checker.module_name]
-    assert "ant_pass_delayed" in top_sv
+    assert "con_start_w = ant_pass_w" in top_sv
 
 
 def test_emit_nonoverlap_contains_overflow_flag() -> None:
@@ -470,24 +468,9 @@ def test_emit_nonoverlap_contains_overflow_flag() -> None:
     assert "overflow_flag" in top_sv
 
 
-def test_emit_bitvec_impl_bv_width_six() -> None:
-    """Emitted bitvec implication module for 'a |-> a ##[2:5] b' has BV_WIDTH = 6."""
-    checker = _load_impl_checker("implication_bitvec")
-    modules = emit_all(checker)
-    top_sv = modules[checker.module_name]
-    assert "BV_WIDTH = 6" in top_sv
-
-
 def test_emit_all_implication_overlap_module_count() -> None:
     """emit_all for 'a |-> b' returns at least 2 modules (top + children)."""
     checker = _load_impl_checker("implication_overlap")
-    modules = emit_all(checker)
-    assert len(modules) >= 2
-
-
-def test_emit_all_implication_bitvec_module_count() -> None:
-    """emit_all for 'a |-> a ##[2:5] b' returns at least 2 modules (top + child)."""
-    checker = _load_impl_checker("implication_bitvec")
     modules = emit_all(checker)
     assert len(modules) >= 2
 
@@ -500,7 +483,6 @@ def test_emit_all_implication_bitvec_module_count() -> None:
     [
         ("implication_overlap", "overlap_impl", "module_name"),
         ("implication_nonoverlap", "nonoverlap_impl", "module_name"),
-        ("implication_bitvec", "sva_bitvec_impl", "module_name"),
     ],
 )
 def test_emit_implication_golden_match(

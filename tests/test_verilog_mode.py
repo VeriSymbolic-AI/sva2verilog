@@ -99,7 +99,6 @@ _ALL_FIXTURES: list[tuple[str, bool]] = [
     ("delay_three_element.json", True),
     ("implication_overlap.json", True),
     ("implication_nonoverlap.json", True),
-    ("implication_bitvec.json", True),
     ("disable_iff.json", True),
 ]
 

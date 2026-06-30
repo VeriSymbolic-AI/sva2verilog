@@ -21,7 +21,17 @@ output  logic disabled_o
     logic ant_pass_w, ant_active_w, ant_fail_w, ant_afired_w;
     logic con_pass_w, con_active_w, con_fail_w, con_afired_w;
     logic con_start_w;
-    assign con_start_w = bv_q[BV_WIDTH-1];
+    // BUG-IMPL-01 fix: single-cycle (boolean / sampled-value) consequent.
+    // Start the consequent leaf exactly when the antecedent matches
+    // (con_start = ant_pass_w).  Because the consequent leaf samples its operand
+    // on its own start cycle, this checks `b` exactly one cycle after `a` — the
+    // ##1 of |=> — and works for both continuous (start≡1) and pulsed/composed
+    // start.  con_pass_w / con_fail_w then carry the fully-aligned verdict, so
+    // no bv_q thread tracker or extra gate is needed.  Formally proven
+    // equivalent to IEEE-1800 |=> (see tests/test_formal_sva_equiv).  The
+    // previous bv_q-gated con_start mis-timed b by two cycles and the
+    // bv_q[MSB] gate dropped valid passes / raised spurious fails.
+    assign con_start_w = ant_pass_w;
 
     // ── Child instantiations ─────────────────────────────────────────────────
     sva_nonoverlap_check_ant u_sva_nonoverlap_check_ant (
@@ -37,29 +47,6 @@ output  logic disabled_o
         .fail(con_fail_w), .attempt_fired(con_afired_w), .disabled_o()
     );
 
-    // ── Bit-vector shift register + delay for |=> ─────────────────────────────
-    logic ant_pass_delayed_q;
-    logic [BV_WIDTH-1:0] bv_q;
-    logic overflow_flag_q;
-    logic overflow_event;
-    assign overflow_event = ant_pass_delayed_q && (&bv_q) && !overflow_flag_q;
-
-always_ff @(posedge clk) begin
-        if (!rst_n || disable_i) begin
-            ant_pass_delayed_q <= 1'b0;
-            bv_q               <= '0;
-            overflow_flag_q    <= 1'b0;
-        end else begin
-            ant_pass_delayed_q <= ant_pass_w;
-            if (overflow_flag_q) begin
-                bv_q <= bv_q; overflow_flag_q <= 1'b1;
-            end else begin
-                overflow_flag_q <= overflow_flag_q | overflow_event;
-                bv_q <= ant_pass_delayed_q;
-            end
-        end
-    end
-
     // ── HARDEN-01: attempt_fired_q never cleared by disable_i ──────────
     logic attempt_fired_q;
 always_ff @(posedge clk) begin
@@ -70,11 +57,13 @@ always_ff @(posedge clk) begin
         end
     end
 
-    assign active        = disable_i ? 1'b0 : (overflow_flag_q ? 1'b0 : (ant_active_w | con_active_w | (|bv_q)));
-    assign pass          = disable_i ? 1'b0 : (overflow_flag_q ? 1'b0 : (bv_q[BV_WIDTH-1] & con_pass_w));
-    assign fail          = disable_i ? 1'b0 : (overflow_event ? 1'b1 :
-                           overflow_flag_q ? 1'b0 : (bv_q[BV_WIDTH-1] & ~con_pass_w & con_start_w));
+    // ── Output assignments (|=> single-cycle consequent) ──────────────────────
+    // con_start_w = ant_pass_w, so con_pass_w / con_fail_w already encode
+    // "antecedent matched AND b held/failed one cycle later" — the |=> verdict.
+    assign active        = disable_i ? 1'b0 : (ant_active_w | con_active_w);
+    assign pass          = disable_i ? 1'b0 : con_pass_w;
+    assign fail          = disable_i ? 1'b0 : con_fail_w;
     assign attempt_fired = attempt_fired_q;
-    assign overflow_flag = overflow_flag_q;
+    assign overflow_flag = 1'b0;
     assign disabled_o    = disable_i;
 endmodule

@@ -27,7 +27,7 @@ output  logic disabled_o
     logic con_fail_w;
     logic con_afired_w;
 
-    // ── Consequent start: driven from bit-vector oldest thread ────────────────
+    // ── Consequent start ──────────────────────────────────────────────────────
     logic con_start_w;
     assign con_start_w = bv_q[BV_WIDTH-1];
 

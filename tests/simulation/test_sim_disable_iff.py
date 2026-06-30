@@ -11,11 +11,12 @@ The body (overlap_bitvec) is passed ``effective_disable`` instead of
 ``disable_i``.  When the disable condition is true — i.e. when ``rst_n=0`` —
 the body is effectively disabled and all outputs are gated to 0.
 
-RTL timing for the wrapped ``a |-> b`` (BV_WIDTH=1):
-    Antecedent and consequent are each bool_expr modules (registered, 1 cycle).
-    With BV_WIDTH=1, pass NEVER fires for a single-cycle antecedent (thread
-    leaves MSB before consequent registers).  Fail fires at t+2 after the
-    antecedent fires.
+RTL timing for the wrapped ``a |-> b`` (BV_WIDTH=1, BUG-IMPL-01 fixed):
+    Antecedent and consequent are each bool_expr modules (registered, 1 cycle)
+    evaluated in parallel (con_start = start). The same-cycle check a(t)&b(t)
+    is reported one cycle later, so fail (or pass) fires at t+1 after the
+    antecedent. The disable_iff wrapper forwards the body outputs combinationally
+    and adds no extra latency.
 
 Requirements covered: TEST-03, TEST-04
 """
@@ -89,30 +90,27 @@ def _run_stimulus(
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-def test_fail_fires_at_t2_when_b_false(tmp_path: Path) -> None:
+def test_fail_fires_at_t1_when_b_false(tmp_path: Path) -> None:
     """disable_iff: when condition is false (rst_n=1 after reset), body runs normally.
 
-    Body is a |-> b (BV_WIDTH=1).  With bool_expr children (registered, 1-cycle):
-      t=0: start=1, a=1, b=0 → antecedent pipeline starts
-      t=1: ant_pass_w=1 → bv_q<=1; con has no start yet → con_pass_w=0
-      t=2: bv_q=1 → con_start_w=1; con_pass_w=0 (registered from t=1)
-           → fail=1 (bv_q[0]=1 & !con_pass_w & con_start_w)
+    Body is a |-> b (BV_WIDTH=1, BUG-IMPL-01 fixed). Parallel leaves report the
+    same-cycle check a(0)&~b(0) one cycle later, so fail fires at t=1.
     """
     checker = _build_checker()
     stimulus = [
         {"start": True,  "a": True,  "b": False},  # t=0
-        {"start": False, "a": False, "b": False},  # t=1
-        {"start": False, "a": False, "b": False},  # t=2: fail fires
-        {"start": False, "a": False, "b": False},  # t=3: no more activity
+        {"start": False, "a": False, "b": False},  # t=1: fail fires
+        {"start": False, "a": False, "b": False},  # t=2: no more activity
+        {"start": False, "a": False, "b": False},  # t=3
     ]
     rtl_out = _run_stimulus(checker, stimulus, tmp_path)
 
     assert len(rtl_out) == len(stimulus)
 
-    assert not rtl_out[0]["fail"], "t=0: start cycle — not yet active"
-    assert not rtl_out[1]["fail"], "t=1: antecedent thread inserted into bv"
-    assert     rtl_out[2]["fail"], "t=2: thread matures, b=0 → fail"
-    assert not rtl_out[3]["fail"], "t=3: thread already consumed"
+    assert not rtl_out[0]["fail"], "t=0: leaves not yet registered"
+    assert     rtl_out[1]["fail"], "t=1: a(0) & ~b(0) → fail"
+    assert not rtl_out[2]["fail"], "t=2: attempt consumed"
+    assert not rtl_out[3]["fail"], "t=3: idle"
 
 
 def test_no_outputs_when_start_false(tmp_path: Path, simulator: str) -> None:
@@ -134,27 +132,27 @@ def test_no_outputs_when_start_false(tmp_path: Path, simulator: str) -> None:
 def test_multiple_starts_produce_multiple_fails(tmp_path: Path, simulator: str) -> None:
     """disable_iff: consecutive antecedent triggers each produce a fail.
 
-    With BV_WIDTH=1, overlap fires at overflow for back-to-back starts.
-    Two separate starts (with gap) each independently fire a fail at t+2.
+    BUG-IMPL-01 fixed: two separate starts (with gap) each independently fire a
+    fail one cycle later (t+1).
     """
     checker = _build_checker()
-    # start at t=0, no b → fail at t=2
-    # start at t=4, no b → fail at t=6
+    # start at t=0, no b → fail at t=1
+    # start at t=4, no b → fail at t=5
     stimulus = [
         {"start": True,  "a": True,  "b": False},  # t=0
-        {"start": False, "a": False, "b": False},  # t=1
-        {"start": False, "a": False, "b": False},  # t=2: fail
+        {"start": False, "a": False, "b": False},  # t=1: first fail
+        {"start": False, "a": False, "b": False},  # t=2: idle
         {"start": False, "a": False, "b": False},  # t=3: idle
         {"start": True,  "a": True,  "b": False},  # t=4: second start
-        {"start": False, "a": False, "b": False},  # t=5
-        {"start": False, "a": False, "b": False},  # t=6: fail
+        {"start": False, "a": False, "b": False},  # t=5: second fail
+        {"start": False, "a": False, "b": False},  # t=6: idle
     ]
     rtl_out = _run_stimulus(checker, stimulus, tmp_path)
 
     assert len(rtl_out) == len(stimulus)
-    assert     rtl_out[2]["fail"], "t=2: first fail"
-    assert not rtl_out[3]["fail"], "t=3: idle"
-    assert     rtl_out[6]["fail"], "t=6: second fail"
+    assert     rtl_out[1]["fail"], "t=1: first fail"
+    assert not rtl_out[2]["fail"], "t=2: idle"
+    assert     rtl_out[5]["fail"], "t=5: second fail"
 
 
 # ══════════════════════════════════════════════════════════════════════════════

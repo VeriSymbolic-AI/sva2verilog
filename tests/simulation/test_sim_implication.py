@@ -103,36 +103,35 @@ def _run_stimulus(
 class TestImplicationOverlap:
     """RTL timing tests for ``a |-> b`` (BV_WIDTH=1)."""
 
-    def test_fail_fires_at_t2(self, tmp_path: Path) -> None:
-        """Overlap: fail fires exactly 2 cycles after antecedent fires.
+    def test_fail_fires_at_t1(self, tmp_path: Path) -> None:
+        """Overlap (BUG-IMPL-01 fixed): a |-> b checks b on the SAME cycle as a.
 
-        Pipeline latency with single-cycle bool_expr children:
-          t=0: start=1, a=1 — antecedent sampling begins
-          t=1: ant_pass_w=1 → bv_q<=1 (thread inserted)
-          t=2: bv_q[0]=1 → con_start_w=1; con_pass_w=0 → fail=1
+        With the parallel-consequent design (con_start = start), both leaves
+        register one cycle, so for a single antecedent at t=0 with b=0 the
+        violation a(0) & ~b(0) is reported exactly one cycle later, at t=1.
+        (The previous buggy design reported it at t=2.)
         """
         checker = _build("implication_overlap.json")
         stimulus = [
-            {"start": True,  "a": True,  "b": False},  # t=0: antecedent fires
-            {"start": False, "a": False, "b": False},   # t=1: thread in bv
-            {"start": False, "a": False, "b": False},   # t=2: fail fires
+            {"start": True,  "a": True,  "b": False},  # t=0: a=1, b=0 (violation)
+            {"start": False, "a": False, "b": False},   # t=1: fail fires
+            {"start": False, "a": False, "b": False},   # t=2: idle
             {"start": False, "a": False, "b": False},   # t=3: idle
         ]
         out = _run_stimulus(checker, stimulus, tmp_path)
 
         assert len(out) == len(stimulus)
-        assert not out[0]["fail"], "t=0: start cycle — not yet active"
-        assert not out[1]["fail"], "t=1: antecedent thread in bv — no fail yet"
-        assert     out[2]["fail"], "t=2: bv matures, b=0 → fail"
-        assert not out[3]["fail"], "t=3: thread consumed — idle"
+        assert not out[0]["fail"], "t=0: leaves not yet registered"
+        assert     out[1]["fail"], "t=1: a(0) & ~b(0) → fail"
+        assert not out[2]["fail"], "t=2: single attempt consumed"
+        assert not out[3]["fail"], "t=3: idle"
 
     def test_active_high_while_thread_in_pipeline(self, tmp_path: Path, simulator: str) -> None:
-        """Overlap: active is raised while a thread is live in the pipeline.
+        """Overlap: active is raised for one cycle while the attempt is evaluated.
 
-        t=0: start=1 → antecedent starts (active=0 until FF registers)
-        t=1: ant active registered → active=1
-        t=2: fail fires, con starts → still active
-        t=3: con active registered from t=2 → still active briefly
+        BUG-IMPL-01: with the parallel design (no bv_q thread tracker), a single
+        antecedent makes the monitor active only on the cycle its leaves report
+        (t=1); it returns to idle immediately afterwards.
         """
         checker = _build("implication_overlap.json")
         stimulus = [
@@ -144,8 +143,8 @@ class TestImplicationOverlap:
         out = _run_stimulus(checker, stimulus, tmp_path)
 
         assert not out[0]["active"], "t=0: FFs not yet updated"
-        assert     out[1]["active"], "t=1: ant_active_w=1"
-        assert     out[2]["active"], "t=2: bv_q=1 → thread active"
+        assert     out[1]["active"], "t=1: ant/con leaves active"
+        assert not out[2]["active"], "t=2: no bv_q → attempt already consumed"
 
     def test_no_start_no_output(self, tmp_path: Path, simulator: str) -> None:
         """Overlap: when start=0, antecedent never triggers — all outputs remain 0."""
@@ -162,23 +161,27 @@ class TestImplicationOverlap:
             assert not row["pass"],   f"t={i}: no start → pass=0"
             assert not row["fail"],   f"t={i}: no start → fail=0"
 
-    def test_pass_never_fires_bv1(self, tmp_path: Path) -> None:
-        """Overlap BV_WIDTH=1: pass never fires — thread exits bv_q before con registers.
+    def test_pass_fires_when_consequent_holds(self, tmp_path: Path) -> None:
+        """Overlap (BUG-IMPL-01 fixed): pass fires when a(0) & b(0) both hold.
 
-        Even with b=1 driven from t=0 onward, the consequent's pass_q isn't
-        ready when bv_q[0] is checked (they're on adjacent clock edges).
+        The previous bv_q-gated design dropped every pass (the thread left bv_q
+        before the consequent's pass_q registered). The fixed parallel design
+        reports a(0) & b(0) as a pass at t=1, with no spurious fail.
         """
         checker = _build("implication_overlap.json")
         stimulus = [
-            {"start": True,  "a": True,  "b": True},   # t=0: a=1, b=1
-            {"start": False, "a": False, "b": True},    # t=1: b=1
-            {"start": False, "a": False, "b": True},    # t=2: b=1
-            {"start": False, "a": False, "b": True},    # t=3: b=1
+            {"start": True,  "a": True,  "b": True},   # t=0: a=1, b=1 (satisfied)
+            {"start": False, "a": False, "b": False},   # t=1: pass fires
+            {"start": False, "a": False, "b": False},   # t=2: idle
+            {"start": False, "a": False, "b": False},   # t=3: idle
         ]
         out = _run_stimulus(checker, stimulus, tmp_path)
 
-        for i, row in enumerate(out):
-            assert not row["pass"], f"t={i}: pass never fires with BV_WIDTH=1"
+        assert     out[1]["pass"], "t=1: a(0) & b(0) → pass"
+        assert not out[1]["fail"], "t=1: consequent satisfied → no fail"
+        for i in (0, 2, 3):
+            assert not out[i]["pass"], f"t={i}: no pass outside the attempt"
+            assert not out[i]["fail"], f"t={i}: no spurious fail"
 
     def test_disable_i_gates_all_outputs(self, tmp_path: Path, simulator: str) -> None:
         """Overlap: disable_i=1 clears state and gates all outputs to 0."""
@@ -195,29 +198,27 @@ class TestImplicationOverlap:
             assert not row["pass"],   f"t={i}: disable_i=1 → pass=0"
             assert not row["fail"],   f"t={i}: disable_i=1 → fail=0"
 
-    def test_overflow_on_back_to_back_starts(self, tmp_path: Path, simulator: str) -> None:
-        """Overlap: back-to-back antecedent fires overflow the BV_WIDTH=1 shift register.
+    def test_back_to_back_starts_each_produce_fail(self, tmp_path: Path, simulator: str) -> None:
+        """Overlap (BUG-IMPL-01 fixed): back-to-back antecedents are independent.
 
-        t=0: start=1, a=1 — first thread
-        t=1: start=1, a=1 — second thread; bv_q[0]=0 still → no overflow yet
-        t=2: ant_pass_w=1 from t=1, bv_q[0]=1 from t=1 → overflow_event fires
-             fail fires (overflow takes priority over normal fail)
-        t=3: overflow_flag_q=1 → active=0, fail=0, overflow_flag=1
+        The single-cycle-consequent design has NO bv_q thread tracker and thus no
+        overflow: each antecedent is an independent same-cycle check. Two
+        back-to-back antecedents with b=0 produce two consecutive fails (t=1, t=2)
+        and never assert overflow.
         """
         checker = _build("implication_overlap.json")
         stimulus = [
-            {"start": True,  "a": True,  "b": False},  # t=0
-            {"start": True,  "a": True,  "b": False},  # t=1: second start
-            {"start": False, "a": False, "b": False},  # t=2: overflow fires
-            {"start": False, "a": False, "b": False},  # t=3: halted
+            {"start": True,  "a": True,  "b": False},  # t=0: first antecedent
+            {"start": True,  "a": True,  "b": False},  # t=1: second antecedent
+            {"start": False, "a": False, "b": False},  # t=2
+            {"start": False, "a": False, "b": False},  # t=3
         ]
         out = _run_stimulus(checker, stimulus, tmp_path)
 
-        # overflow causes fail to fire at t=2
-        assert out[2]["fail"],     "t=2: overflow_event → fail=1"
-        assert out[3]["overflow"], "t=3: overflow_flag sticky"
-        assert not out[3]["active"], "t=3: overflow halts monitor"
-        assert not out[3]["fail"],   "t=3: no further fail after overflow"
+        assert out[1]["fail"], "t=1: first attempt a(0) & ~b(0) → fail"
+        assert out[2]["fail"], "t=2: second attempt a(1) & ~b(1) → fail"
+        for row in out:
+            assert not row["overflow"], "no overflow without a thread tracker"
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -228,31 +229,31 @@ class TestImplicationOverlap:
 class TestImplicationNonoverlap:
     """RTL timing tests for ``a |=> b`` (BV_WIDTH=1)."""
 
-    def test_fail_fires_at_t3(self, tmp_path: Path) -> None:
-        """Nonoverlap: fail fires 3 cycles after antecedent — one extra delay vs overlap.
+    def test_fail_fires_at_t2(self, tmp_path: Path) -> None:
+        """Nonoverlap (BUG-IMPL-01 fixed): a |=> b checks b ONE cycle after a.
 
-        Extra pipeline register ``ant_pass_delayed_q`` adds 1 cycle latency:
-          t=0: start=1, a=1 — antecedent sampling begins
-          t=1: ant_pass_w=1 registered; ant_pass_delayed_q still 0
-          t=2: ant_pass_delayed_q=1 → bv_q<=1
-          t=3: bv_q[0]=1 → con_start_w=1; con_pass_w=0 → fail=1
+        con_start = ant_pass_w starts the consequent exactly when the antecedent
+        matches, so b is sampled at a+1 (the ##1 of |=>) and the verdict is
+        reported one further cycle later: for a single antecedent at t=0 with
+        b=0 the violation a(0) & ~b(1) is reported at t=2.  (The previous buggy
+        design reported it at t=3 and checked the wrong b cycle.)
         """
         checker = _build("implication_nonoverlap.json")
         stimulus = [
             {"start": True,  "a": True,  "b": False},  # t=0: antecedent fires
-            {"start": False, "a": False, "b": False},   # t=1
-            {"start": False, "a": False, "b": False},   # t=2: thread entering bv
-            {"start": False, "a": False, "b": False},   # t=3: fail fires
+            {"start": False, "a": False, "b": False},   # t=1: b sampled here (=0)
+            {"start": False, "a": False, "b": False},   # t=2: fail fires
+            {"start": False, "a": False, "b": False},   # t=3: idle
             {"start": False, "a": False, "b": False},   # t=4: idle
         ]
         out = _run_stimulus(checker, stimulus, tmp_path)
 
         assert len(out) == len(stimulus)
-        assert not out[0]["fail"], "t=0: start — not yet active"
-        assert not out[1]["fail"], "t=1: ant registered, delayed not yet"
-        assert not out[2]["fail"], "t=2: delayed register loaded, bv_q not yet"
-        assert     out[3]["fail"], "t=3: bv_q[0]=1, con_pass_w=0 → fail"
-        assert not out[4]["fail"], "t=4: thread consumed"
+        assert not out[0]["fail"], "t=0: start — leaves not registered"
+        assert not out[1]["fail"], "t=1: consequent being sampled"
+        assert     out[2]["fail"], "t=2: a(0) & ~b(1) → fail"
+        assert not out[3]["fail"], "t=3: attempt consumed"
+        assert not out[4]["fail"], "t=4: idle"
 
     def test_no_start_no_output(self, tmp_path: Path, simulator: str) -> None:
         """Nonoverlap: start=0 → all outputs remain 0."""
@@ -286,51 +287,51 @@ class TestImplicationNonoverlap:
             assert not row["fail"],   f"t={i}: disable_i=1 → fail=0"
 
     def test_multiple_starts_produce_multiple_fails(self, tmp_path: Path, simulator: str) -> None:
-        """Nonoverlap: two separated starts each produce a fail at t+3.
+        """Nonoverlap (BUG-IMPL-01 fixed): two separated starts each fail at t+2.
 
-        start at t=0 → fail at t=3
-        start at t=5 → fail at t=8
+        start at t=0 → fail at t=2
+        start at t=5 → fail at t=7
         """
         checker = _build("implication_nonoverlap.json")
         stimulus = [
             {"start": True,  "a": True,  "b": False},  # t=0
             {"start": False, "a": False, "b": False},   # t=1
-            {"start": False, "a": False, "b": False},   # t=2
-            {"start": False, "a": False, "b": False},   # t=3: first fail
+            {"start": False, "a": False, "b": False},   # t=2: first fail
+            {"start": False, "a": False, "b": False},   # t=3: idle
             {"start": False, "a": False, "b": False},   # t=4: idle
             {"start": True,  "a": True,  "b": False},   # t=5: second start
             {"start": False, "a": False, "b": False},   # t=6
-            {"start": False, "a": False, "b": False},   # t=7
-            {"start": False, "a": False, "b": False},   # t=8: second fail
+            {"start": False, "a": False, "b": False},   # t=7: second fail
+            {"start": False, "a": False, "b": False},   # t=8: idle
         ]
         out = _run_stimulus(checker, stimulus, tmp_path)
 
         assert len(out) == len(stimulus)
-        assert     out[3]["fail"], "t=3: first fail"
-        assert not out[4]["fail"], "t=4: idle"
-        assert     out[8]["fail"], "t=8: second fail"
+        assert     out[2]["fail"], "t=2: first fail"
+        assert not out[3]["fail"], "t=3: idle"
+        assert     out[7]["fail"], "t=7: second fail"
 
-    def test_overflow_on_back_to_back_starts(self, tmp_path: Path, simulator: str) -> None:
-        """Nonoverlap: back-to-back starts overflow the BV_WIDTH=1 bit-vector.
+    def test_back_to_back_starts_each_produce_fail(self, tmp_path: Path, simulator: str) -> None:
+        """Nonoverlap (BUG-IMPL-01 fixed): back-to-back starts are independent.
 
-        The extra delay register shifts both threads into bv_q on adjacent cycles,
-        causing an overflow event at t=3.
+        The single-cycle-consequent design has no bv_q thread tracker, so there
+        is no overflow: two back-to-back antecedents with b=0 produce two
+        consecutive fails (t=2, t=3) and never assert overflow.
         """
         checker = _build("implication_nonoverlap.json")
         stimulus = [
             {"start": True,  "a": True,  "b": False},  # t=0
             {"start": True,  "a": True,  "b": False},  # t=1: second start
-            {"start": False, "a": False, "b": False},  # t=2
-            {"start": False, "a": False, "b": False},  # t=3: overflow fires
+            {"start": False, "a": False, "b": False},  # t=2: first fail
+            {"start": False, "a": False, "b": False},  # t=3: second fail
             {"start": False, "a": False, "b": False},  # t=4
         ]
         out = _run_stimulus(checker, stimulus, tmp_path)
 
-        # overflow_event fires when ant_pass_delayed_q=1 AND bv_q full
-        # combined fail/overflow fires at t=3
-        assert out[3]["fail"] or out[3]["overflow"], (
-            "t=3: overflow or fail must fire for back-to-back nonoverlap starts"
-        )
+        assert out[2]["fail"], "t=2: first attempt a(0) & ~b(1) → fail"
+        assert out[3]["fail"], "t=3: second attempt a(1) & ~b(2) → fail"
+        for row in out:
+            assert not row["overflow"], "no overflow without a thread tracker"
 
 
 # ══════════════════════════════════════════════════════════════════════════════

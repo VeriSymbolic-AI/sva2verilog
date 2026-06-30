@@ -135,12 +135,7 @@ _MULTI_MODULE_CASES: list[tuple[str, list[tuple[str, str]]]] = [
             ("sva_nonoverlap_check", "nonoverlap_impl.sv"),
         ],
     ),
-    (
-        "implication_bitvec.json",
-        [
-            ("sva_bitvec_impl", "sva_bitvec_impl.sv"),
-        ],
-    ),
+
 ]
 
 
