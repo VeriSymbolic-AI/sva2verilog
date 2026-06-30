@@ -45,6 +45,30 @@
 | `not` | Property | Invert pass/fail | `not (prop)` | Swap pass and fail outputs |
 | `if...else` | Property | Conditional property selection | `if (cond) p1 else p2` | MUX between true/false branch checkers |
 
+## Tier 3 Operators (v1.4 Part A — Bounded Liveness)
+
+Bounded-liveness operators carry an explicit cycle window `[m:n]`, which makes
+them synthesizable on finite state (the obligation has a hard deadline). The
+**unbounded** forms are rejected at compile time — they are not synthesizable on
+finite state.
+
+| Operator | Category | Description | Example SVA | Generated Template |
+|----------|----------|-------------|-------------|-------------------|
+| `s_eventually [m:n]` | Liveness | Boolean operand must hold at some offset `k ∈ [m,n]` from start; PASS at first in-window hit, FAIL at deadline `n` if never satisfied | `s_eventually [1:3] a` | `s_eventually` — offset counter + satisfied latch + deadline-fail (pass@start+k*+1, fail@start+n+1) |
+| `eventually [m:n]` | Liveness | Weak bounded form; collapses to the same synthesizable monitor as the strong form over a finite window | `eventually [0:4] a` | `s_eventually` (shared) |
+
+Notes for v1.4 Part A:
+- The operand must reduce to a **boolean expression** (like `throughout`'s
+  condition). Sequence/property operands are rejected (deferred to the v1.5 NFA
+  engine).
+- Equivalence is established **non-circularly**: the generated monitor is proven
+  by SymbiYosys BMC against an independent IEEE-1800 reference monitor authored
+  from `∃ k ∈ [m,n] : a(t0+k)` semantics (not derived from the implementation).
+- Unbounded `s_eventually a` / `s_until` (which require an eventual obligation)
+  raise `UnsupportedConstruct` with a source location and a remediation hint.
+- Bounded `until` and `always [m:n]` / `s_always [m:n]` are the remaining Part A
+  operators (phases A3/A4).
+
 ## Composition Model
 
 sva2rtl uses token-passing composition to handle concurrent property evaluations:
@@ -176,12 +200,15 @@ The following temporal operators are not yet supported:
 | Operator | Category | Status |
 |----------|----------|--------|
 | `nexttime` | Temporal | Not supported |
-| `always` | Temporal | Not supported |
-| `eventually` | Temporal | Not supported |
-| `until` | Temporal | Not supported |
+| `eventually`/`s_eventually` (bounded `[m:n]`) | Liveness | **Supported** (v1.4 Part A) |
+| `eventually`/`s_eventually` (unbounded) | Liveness | Rejected — not synthesizable on finite state |
+| `always [m:n]` / `s_always [m:n]` (bounded) | Liveness | Planned v1.4 Part A (phase A3) |
+| `until` / `until_with` (bounded, weak) | Liveness | Planned v1.4 Part A (phase A4) |
+| `s_until` (strong) | Liveness | Rejected — requires unbounded eventual obligation |
+| `always` (unbounded) | Temporal | Not supported |
 | `intersect`/`within` with local variables | Sequence | Not supported |
 | Nested multi-path operators | Sequence | Not supported (single-level only) |
-| Multi-clock properties | Clocking | Not supported |
+| Multi-clock properties | Clocking | Not supported (planned v1.4.1 Part B) |
 
 ### Structural Limitations
 
@@ -254,7 +281,8 @@ The following constructs are recognized by the parser but produce clear error me
 | `[+]` (unbounded) | SVA-E002 | Use `[*1:MAX]` with explicit bound |
 | `##[0:$]` | SVA-E002 | Use `##[0:MAX]` with explicit bound |
 | Multi-clock `@(posedge clk2)` | SVA-E003 | Split into separate single-clock properties |
-| `nexttime` / `always` / `eventually` / `until` | SVA-E001 | Tier 3 operators; planned for v1.4 |
+| `nexttime` / unbounded `always` / unbounded `eventually` / `s_until` | SVA-E001 | Unbounded liveness not synthesizable; use bounded `[m:n]` forms |
+| bounded `eventually`/`s_eventually [m:n]` | — | Supported since v1.4 Part A |
 
 ## Validation
 

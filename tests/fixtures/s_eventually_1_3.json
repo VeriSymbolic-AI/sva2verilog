@@ -1,0 +1,200 @@
+{
+  "design": {
+    "name": "$root",
+    "kind": "Root",
+    "addr": 4345847520,
+    "members": [
+      {
+        "name": "",
+        "kind": "CompilationUnit",
+        "addr": 6338700054992
+      },
+      {
+        "name": "se",
+        "kind": "Instance",
+        "source_file": "s_eventually_1_3.sv",
+        "source_line": 1,
+        "source_column": 8,
+        "addr": 6338700055768,
+        "body": {
+          "name": "se",
+          "kind": "InstanceBody",
+          "source_file": "s_eventually_1_3.sv",
+          "source_line": 1,
+          "source_column": 8,
+          "addr": 6338700055272,
+          "members": [
+            {
+              "name": "clk",
+              "kind": "Port",
+              "source_file": "s_eventually_1_3.sv",
+              "source_line": 1,
+              "source_column": 23,
+              "addr": 6338700055904,
+              "type": "logic",
+              "direction": "In",
+              "internalSymbol": "6338700056024 clk"
+            },
+            {
+              "name": "clk",
+              "kind": "Variable",
+              "source_file": "s_eventually_1_3.sv",
+              "source_line": 1,
+              "source_column": 23,
+              "addr": 6338700056024,
+              "type": "logic",
+              "lifetime": "Static"
+            },
+            {
+              "name": "a",
+              "kind": "Port",
+              "source_file": "s_eventually_1_3.sv",
+              "source_line": 1,
+              "source_column": 27,
+              "addr": 6338700056160,
+              "type": "logic",
+              "direction": "In",
+              "internalSymbol": "6338700056280 a"
+            },
+            {
+              "name": "a",
+              "kind": "Variable",
+              "source_file": "s_eventually_1_3.sv",
+              "source_line": 1,
+              "source_column": 27,
+              "addr": 6338700056280,
+              "type": "logic",
+              "lifetime": "Static"
+            },
+            {
+              "name": "se_1_3",
+              "kind": "StatementBlock",
+              "source_file": "s_eventually_1_3.sv",
+              "source_line": 2,
+              "source_column": 3,
+              "addr": 6338700055616
+            },
+            {
+              "name": "",
+              "kind": "ProceduralBlock",
+              "source_file": "s_eventually_1_3.sv",
+              "source_line": 2,
+              "source_column": 3,
+              "addr": 6338700055512,
+              "procedureKind": "Always",
+              "body": {
+                "source_file_start": "s_eventually_1_3.sv",
+                "source_file_end": "s_eventually_1_3.sv",
+                "source_line_start": 2,
+                "source_line_end": 2,
+                "source_column_start": 3,
+                "source_column_end": 64,
+                "kind": "Block",
+                "blockKind": "Sequential",
+                "block": "6338700055616 se_1_3",
+                "body": {
+                  "source_file_start": "s_eventually_1_3.sv",
+                  "source_file_end": "s_eventually_1_3.sv",
+                  "source_line_start": 2,
+                  "source_line_end": 2,
+                  "source_column_start": 3,
+                  "source_column_end": 64,
+                  "kind": "ConcurrentAssertion",
+                  "propertySpec": {
+                    "source_file_start": "s_eventually_1_3.sv",
+                    "source_file_end": "s_eventually_1_3.sv",
+                    "source_line_start": 2,
+                    "source_line_end": 2,
+                    "source_column_start": 27,
+                    "source_column_end": 62,
+                    "kind": "Clocking",
+                    "clocking": {
+                      "source_file_start": "s_eventually_1_3.sv",
+                      "source_file_end": "s_eventually_1_3.sv",
+                      "source_line_start": 2,
+                      "source_line_end": 2,
+                      "source_column_start": 29,
+                      "source_column_end": 40,
+                      "kind": "SignalEvent",
+                      "expr": {
+                        "source_file_start": "s_eventually_1_3.sv",
+                        "source_file_end": "s_eventually_1_3.sv",
+                        "source_line_start": 2,
+                        "source_line_end": 2,
+                        "source_column_start": 37,
+                        "source_column_end": 40,
+                        "kind": "NamedValue",
+                        "type": "logic",
+                        "symbol": "6338700056024 clk"
+                      },
+                      "edge": "PosEdge"
+                    },
+                    "expr": {
+                      "source_file_start": "s_eventually_1_3.sv",
+                      "source_file_end": "s_eventually_1_3.sv",
+                      "source_line_start": 2,
+                      "source_line_end": 2,
+                      "source_column_start": 42,
+                      "source_column_end": 62,
+                      "kind": "Unary",
+                      "op": "SEventually",
+                      "expr": {
+                        "source_file_start": "s_eventually_1_3.sv",
+                        "source_file_end": "s_eventually_1_3.sv",
+                        "source_line_start": 2,
+                        "source_line_end": 2,
+                        "source_column_start": 61,
+                        "source_column_end": 62,
+                        "kind": "Simple",
+                        "expr": {
+                          "source_file_start": "s_eventually_1_3.sv",
+                          "source_file_end": "s_eventually_1_3.sv",
+                          "source_line_start": 2,
+                          "source_line_end": 2,
+                          "source_column_start": 61,
+                          "source_column_end": 62,
+                          "kind": "NamedValue",
+                          "type": "logic",
+                          "symbol": "6338700056280 a"
+                        }
+                      },
+                      "min": 1,
+                      "max": 3
+                    }
+                  },
+                  "ifTrue": {
+                    "source_file_start": "s_eventually_1_3.sv",
+                    "source_file_end": "s_eventually_1_3.sv",
+                    "source_line_start": 2,
+                    "source_line_end": 2,
+                    "source_column_start": 63,
+                    "source_column_end": 64,
+                    "kind": "Empty"
+                  },
+                  "assertionKind": "Assert"
+                }
+              }
+            }
+          ],
+          "definition": "4346830208 se"
+        },
+        "connections": []
+      }
+    ]
+  },
+  "definitions": [
+    {
+      "name": "se",
+      "kind": "Definition",
+      "source_file": "s_eventually_1_3.sv",
+      "source_line": 1,
+      "source_column": 8,
+      "addr": 4346830208,
+      "defaultNetType": "4345845280 wire",
+      "definitionKind": "Module",
+      "defaultLifetime": "Static",
+      "unconnectedDrive": "None",
+      "cellDefine": false
+    }
+  ]
+}

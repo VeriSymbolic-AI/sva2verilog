@@ -641,6 +641,8 @@ class _HierarchicalSim:
             return self._tick_prop_not(node, signals)
         if tname == "prop_if_else":
             return self._tick_prop_if_else(node, signals)
+        if tname == "s_eventually":
+            return self._tick_s_eventually(node, signals)
         if node.children:
             return self._tick_node(node.children[0], signals)
         return {"pass": False, "fail": False, "active": False, "overflow": False}
@@ -873,6 +875,73 @@ class _HierarchicalSim:
         if len(node.children) > 1:
             return self._tick_node(node.children[1], signals)
         return {"pass": False, "fail": False, "active": False, "overflow": False}
+
+    def _tick_s_eventually(
+        self, node: CheckerNode, signals: dict[str, bool]
+    ) -> dict[str, bool]:
+        """Bounded eventually ``s_eventually [lo:hi] p``.
+
+        Independent contract model (derived from IEEE 1800 semantics, NOT from the
+        RTL template — RISK-01): armed at the ``start`` cycle t0 (offset 0), the
+        operand p must hold at SOME offset k in [lo,hi].  Registered outputs
+        (latency 1): PASS at t0 + k* + 1 where k* is the first in-window holding
+        offset; FAIL at t0 + hi + 1 if no offset in [lo,hi] holds.  ``active`` is
+        the registered ``armed`` state.  Operand truth is read from the live
+        stimulus (single-signal operands modelled precisely; multi-signal truth is
+        approximated, with correctness guaranteed by the sby BMC proof).
+        """
+        lo = int(node.params.get("lo", 0))
+        hi = int(node.params.get("hi", 0))
+        key = node.module_name
+        if not hasattr(self, "_se_state"):
+            self._se_state: dict[str, dict[str, object]] = {}
+        st = self._se_state.setdefault(
+            key, {"armed": False, "off": 0, "sat": False, "o_pass": False, "o_fail": False}
+        )
+
+        # Registered outputs: emit what was scheduled at the previous tick.
+        out = {
+            "pass": bool(st["o_pass"]),
+            "fail": bool(st["o_fail"]),
+            "active": bool(st["armed"]),
+            "overflow": False,
+        }
+        nxt_pass = False
+        nxt_fail = False
+
+        p = self._eval_operand(node, signals)
+        if signals.get("start", False):
+            st["armed"] = True
+            st["off"] = 0
+            st["sat"] = False
+        if st["armed"]:
+            k = int(st["off"])
+            in_window = lo <= k <= hi
+            hit = in_window and p and not bool(st["sat"])
+            if hit:
+                nxt_pass = True
+                st["sat"] = True
+            if k >= hi:
+                if not bool(st["sat"]) and not hit:
+                    nxt_fail = True
+                st["armed"] = False
+            st["off"] = k + 1
+
+        st["o_pass"] = nxt_pass
+        st["o_fail"] = nxt_fail
+        return out
+
+    def _eval_operand(self, node: CheckerNode, signals: dict[str, bool]) -> bool:
+        """Evaluate the (boolean) operand of a liveness node from the stimulus.
+
+        Single-signal operands are exact; multi-signal expressions use the same
+        conservative convention as the other condition evaluators (RISK-02), with
+        true correctness established by the formal-equivalence proof.
+        """
+        sigs = [port for port, _ in node.observed_signals]
+        if not sigs:
+            return bool(signals.get("sig", False))
+        return all(bool(signals.get(s, False)) for s in sigs)
 
     def _tick_implication(
         self, node: CheckerNode, signals: dict[str, bool], tname: str
