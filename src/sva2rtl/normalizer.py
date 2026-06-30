@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from sva2rtl.ir import (
     BoolExpr,
+    ClockedSeq,
     DisableIff,
     PropBoundedAlways,
     PropBoundedEventually,
@@ -192,6 +193,15 @@ def normalize(node: SVANode) -> SVANode:
                     left=new_left,
                     right=new_right,
                     with_=node.with_,
+                    source_loc=node.source_loc,
+                )
+            )
+        case ClockedSeq():
+            new_body = normalize(node.body)
+            return _normalize_node(
+                ClockedSeq(
+                    clock=node.clock,
+                    body=new_body,
                     source_loc=node.source_loc,
                 )
             )

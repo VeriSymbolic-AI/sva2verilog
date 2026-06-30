@@ -438,6 +438,34 @@ class PropUntil(SVANode):
     with_: bool = False
 
 
+# ── v1.4.1 Part B: Multi-clock ─────────────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class ClockedSeq(SVANode):
+    """A sub-property explicitly re-clocked by a (possibly different) clock.
+
+    Emitted by the frontend ONLY at a nested ``@(clk) ...`` boundary inside a
+    MULTI-clock property (e.g. the ``@(clk2) b`` part of
+    ``@(clk1) a ##1 @(clk2) b``).  Single-clock properties NEVER contain this
+    node — for them the single :class:`ClockSpec` is threaded separately exactly
+    as before, keeping the single-clock pipeline byte-identical.
+
+    Marks a clock-domain switch: ``body`` is evaluated in the ``clock`` domain.
+    The composer splits at this node, compiles ``body`` as a single-clock
+    sub-checker on ``clock``, and inserts a 2-DFF synchronizer on the token
+    crossing into this domain (IEEE-1800 allows only ``##1``/``##0`` across the
+    boundary; slang enforces this).
+
+    Attributes:
+        clock:  The clock domain that ``body`` is evaluated in.
+        body:   The sub-property/sequence evaluated in ``clock``'s domain.
+    """
+
+    clock: ClockSpec
+    body: SVANode
+
+
 # ── Clocking ───────────────────────────────────────────────────────────────
 
 

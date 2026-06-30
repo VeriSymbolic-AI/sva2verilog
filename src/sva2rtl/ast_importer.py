@@ -23,6 +23,7 @@ from typing import Any
 from sva2rtl.errors import SvaCompileError, UnsupportedConstruct
 from sva2rtl.ir import (
     BoolExpr,
+    ClockedSeq,
     ClockSpec,
     DisableIff,
     PropBoundedAlways,
@@ -727,6 +728,13 @@ def _import_concurrent_assertion(
             ir_node, text = _build_binary_seq_op(expr_node, source_loc, "or")
         # ── slang v11.0 uses plain Binary/Unary (not *PropertyExpr) for
         #     simple sequence-level operators.  Children are wrapped in Simple.
+        case "Binary" if expr_node.get("op") in (
+            "OverlappedImplication",
+            "NonOverlappedImplication",
+        ):
+            prop_ir = _build_prop_implication(expr_node, source_loc)
+            ir_node = prop_ir
+            text = _reconstruct_impl_text(prop_ir)
         case "Binary" if expr_node.get("op") == "Or" and not _is_boolean_binary(expr_node):
             ir_node, text = _build_binary_seq_op(expr_node, source_loc, "or")
         case "Binary" if expr_node.get("op") == "And" and not _is_boolean_binary(expr_node):
@@ -802,6 +810,9 @@ def _dispatch_expr_to_ir(node: dict[str, Any], _visited: frozenset[str] = frozen
         case "Simple":
             # v11.0: unwrap Simple wrapper, recurse into inner expression
             return _dispatch_expr_to_ir(node.get("expr", {}), _visited)
+        case "Clocking":
+            # Nested clocking = a multi-clock domain switch (v1.4.1 Part B).
+            return _build_clocked_seq(node, source_loc, _visited)
         case "SequenceConcat":
             return _build_seq_concat(node, source_loc, _visited)
         case "SimpleAssertionExpr" if node.get("repetition", {}).get("kind") == "Consecutive":
@@ -1308,6 +1319,24 @@ def _reconstruct_signal_func_text(node: SignalFunc) -> str:
     return f"${node.func_name}({node.signal})"
 
 
+def _build_clocked_seq(
+    node: dict[str, Any],
+    source_loc: SourceLoc,
+    _visited: frozenset[str] = frozenset(),
+) -> SVANode:
+    """Build a ClockedSeq from a nested ``Clocking`` node (multi-clock boundary).
+
+    The nested ``Clocking`` carries its own ``@(clk)`` event plus an ``expr``
+    body, the same shape as the outer property clocking. We extract the domain
+    clock and recurse into the body. IEEE-1800 (and slang) already restrict the
+    cross-boundary delay to ``##1``/``##0``, so no extra delay check is needed
+    here. See :class:`sva2rtl.ir.ClockedSeq`.
+    """
+    clock = _extract_clock(node)
+    body = _dispatch_expr_to_ir(node.get("expr", {}), _visited)
+    return ClockedSeq(clock=clock, body=body, source_loc=source_loc)
+
+
 def _build_seq_concat(
     node: dict[str, Any],
     source_loc: SourceLoc,
@@ -1369,6 +1398,11 @@ def _reconstruct_seq_text(node: SeqConcat) -> str:
             parts.append(_reconstruct_rep_text(elem))
         elif isinstance(elem, SignalFunc):
             parts.append(_reconstruct_signal_func_text(elem))
+        elif isinstance(elem, ClockedSeq):
+            parts.append(
+                f"@({elem.clock.edge} {elem.clock.signal}) "
+                f"{_reconstruct_node_text(elem.body)}"
+            )
         else:
             parts.append("<expr>")
         if i < len(node.delays):
@@ -1389,6 +1423,19 @@ def _build_prop_implication(
     ant = _dispatch_expr_to_ir(node["left"], _visited)
     con = _dispatch_expr_to_ir(node["right"], _visited)
     overlapping = node.get("op") == "OverlappedImplication"
+    # Blacklist (v1.4.1 Part B): overlapping `|->` across a clock boundary can race
+    # (IEEE-1800 recommends `|=>` for cross-clock). Reject if the consequent (or
+    # antecedent) switches clock domain under an overlapping implication.
+    if overlapping and (isinstance(con, ClockedSeq) or isinstance(ant, ClockedSeq)):
+        raise UnsupportedConstruct(
+            message=(
+                "overlapping implication '|->' across a clock-domain boundary is "
+                "not supported (race-prone); use non-overlapping '|=>' for "
+                "cross-clock implication."
+            ),
+            construct_name="multi-clock overlapping implication",
+            source_loc=source_loc,
+        )
     return PropImplication(
         antecedent=ant,
         consequent=con,
@@ -1400,18 +1447,8 @@ def _build_prop_implication(
 def _reconstruct_impl_text(node: PropImplication) -> str:
     """Reconstruct SVA text for a PropImplication IR node."""
     op = "|->" if node.overlapping else "|=>"
-    if isinstance(node.antecedent, BoolExpr):
-        ant_text = node.antecedent.text
-    elif isinstance(node.antecedent, SeqConcat):
-        ant_text = _reconstruct_seq_text(node.antecedent)
-    else:
-        ant_text = "<ant>"
-    if isinstance(node.consequent, BoolExpr):
-        con_text = node.consequent.text
-    elif isinstance(node.consequent, SeqConcat):
-        con_text = _reconstruct_seq_text(node.consequent)
-    else:
-        con_text = "<con>"
+    ant_text = _reconstruct_node_text(node.antecedent)
+    con_text = _reconstruct_node_text(node.consequent)
     return f"{ant_text} {op} {con_text}"
 
 
@@ -1423,6 +1460,8 @@ def _reconstruct_node_text(node: SVANode) -> str:
     """
     if isinstance(node, BoolExpr):
         return node.text
+    if isinstance(node, ClockedSeq):
+        return f"@({node.clock.edge} {node.clock.signal}) {_reconstruct_node_text(node.body)}"
     if isinstance(node, SeqConcat):
         return _reconstruct_seq_text(node)
     if isinstance(node, SeqRepetition):

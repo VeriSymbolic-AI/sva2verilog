@@ -160,13 +160,13 @@ endmodule
         passed, output = _check_equiv(sv)
         assert passed, f"Equivalence check FAILED:\n{output}"
 
-    @pytest.mark.xfail(
-        reason="ast_importer does not support |-> (Binary expression) via slang "
-               "frontend — needs fixture-based test instead",
-        strict=True,
-    )
     def test_implication_with_shared_structure(self) -> None:
-        """|-> with repeated signal patterns exercises CSE in sub-trees."""
+        """|-> with repeated signal patterns exercises CSE in sub-trees.
+
+        (v1.4.1 Part B incidentally enabled live-slang ``|->``/``|=>`` via the
+        v11 ``Binary`` implication kind, so this no longer needs a fixture and the
+        prior ``xfail`` was removed.)
+        """
         sv = """
 module test(input logic clk, a, b, c);
     a_impl: assert property (@(posedge clk) a ##2 b |-> c ##2 b);
