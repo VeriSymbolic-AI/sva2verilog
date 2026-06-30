@@ -21,6 +21,7 @@ from __future__ import annotations
 from sva2rtl.ir import (
     BoolExpr,
     DisableIff,
+    PropBoundedEventually,
     PropIfElse,
     PropImplication,
     PropNot,
@@ -159,6 +160,17 @@ def normalize(node: SVANode) -> SVANode:
         case PropNot():
             new_body = normalize(node.body)
             return _normalize_node(PropNot(body=new_body, source_loc=node.source_loc))
+        case PropBoundedEventually():
+            new_body = normalize(node.body)
+            return _normalize_node(
+                PropBoundedEventually(
+                    body=new_body,
+                    lo=node.lo,
+                    hi=node.hi,
+                    strong=node.strong,
+                    source_loc=node.source_loc,
+                )
+            )
         case PropIfElse():
             new_cond = normalize(node.condition)
             new_true = normalize(node.true_branch)

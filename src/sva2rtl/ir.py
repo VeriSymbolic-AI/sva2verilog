@@ -338,6 +338,39 @@ class PropIfElse(SVANode):
     false_branch: SVANode | None = None
 
 
+# ── v1.4 Part A: Bounded liveness ─────────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class PropBoundedEventually(SVANode):
+    """Bounded eventually: ``s_eventually [lo:hi] p`` / ``eventually [lo:hi] p``.
+
+    A deadline-bounded EXISTENTIAL obligation: starting at the evaluation
+    (``start``) cycle, the boolean property *body* must hold at SOME cycle offset
+    k with ``lo <= k <= hi``.  PASS fires at the first in-window cycle where body
+    holds; FAIL fires when the window closes (offset ``hi``) with no holding
+    cycle.  This is distinct from a ``##[M:N]`` sequence match.
+
+    Weak (``eventually``) and strong (``s_eventually``) bounded forms collapse to
+    the same synthesizable monitor over a finite window; ``strong`` is retained
+    only for faithful text reconstruction.  The operand *body* must reduce to a
+    boolean expression (``BoolExpr``) in v1.4 Part A; sequence/property operands
+    are rejected (deferred to the v1.5 NFA engine).  Unbounded forms (no range)
+    are rejected at import time — not synthesizable on finite state.
+
+    Attributes:
+        body:    Boolean expression to satisfy within the window (BoolExpr).
+        lo:      Lower window bound (cycles from start), >= 0.
+        hi:      Upper window bound (cycles from start), >= lo.
+        strong:  True for ``s_eventually``, False for ``eventually``.
+    """
+
+    body: SVANode
+    lo: int
+    hi: int
+    strong: bool = True
+
+
 # ── Clocking ───────────────────────────────────────────────────────────────
 
 
