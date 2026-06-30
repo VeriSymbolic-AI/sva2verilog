@@ -71,6 +71,16 @@ sva2rtl input.sv --property req_ack_prop -o monitor.sv
 | `$past()` | Previous value reference | `$past(sig, 2)` |
 | `disable iff` | Asynchronous disable | `disable iff (reset) ...` |
 | Named sequences | Sequence instantiation | `sequence s; ... endsequence` |
+| `s_eventually [m:n]` | Bounded eventually (liveness) | `s_eventually [1:3] a` |
+| `eventually [m:n]` | Bounded eventually (weak) | `eventually [0:4] a` |
+| `always [m:n]` | Bounded always (liveness) | `always [1:3] a` |
+| `s_always [m:n]` | Bounded always (strong) | `s_always [0:4] a` |
+| `until` | Weak until (safety) | `a until b` |
+| `until_with` | Weak until-with (safety) | `a until_with b` |
+
+Unbounded liveness (`s_eventually a`, unbounded `always a`) and the strong
+`s_until` / `s_until_with` forms are rejected at compile time — they are not
+synthesizable on finite state. See [SUPPORTED_CONSTRUCTS.md](SUPPORTED_CONSTRUCTS.md).
 
 For the full construct reference with generated templates, see [SUPPORTED_CONSTRUCTS.md](SUPPORTED_CONSTRUCTS.md).
 
