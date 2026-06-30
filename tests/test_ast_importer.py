@@ -9,6 +9,7 @@ import pytest
 
 from sva2rtl.ast_importer import (
     UNSUPPORTED_KINDS_PHASE1,
+    _dispatch_expr_to_ir,
     expr_to_sv,
     extract_source_loc,
     import_assertion,
@@ -149,6 +150,44 @@ def test_expr_to_sv_unsupported_kind_raises() -> None:
     with pytest.raises(UnsupportedConstruct) as exc_info:
         expr_to_sv(node)
     assert exc_info.value.source_loc is not None
+
+
+# ── P0-2: never silently flatten an unknown temporal kind to a boolean ─────
+
+
+def test_dispatch_unknown_temporal_kind_raises_not_silent() -> None:
+    """An unrecognized temporal/property node must error, not become a BoolExpr.
+
+    Regression for the silent-degradation defect: the dispatcher default case
+    used to fall through to ``expr_to_sv`` (BoolExpr) for any kind outside the
+    1-element Phase-1 whitelist, producing a compilable but semantically wrong
+    monitor with no diagnostic.  An ``until`` property node must now raise.
+    """
+    node = {
+        "kind": "UntilPropertyExpr",
+        "source_file_start": "foo.sv",
+        "source_line_start": 7,
+        "source_column_start": 2,
+    }
+    with pytest.raises(UnsupportedConstruct) as exc_info:
+        _dispatch_expr_to_ir(node)
+    # Source location is preserved and the friendly operator name is reported.
+    assert exc_info.value.source_loc is not None
+    assert "until" in str(exc_info.value)
+
+
+def test_dispatch_boolean_kind_still_flattens() -> None:
+    """A genuine boolean leaf (NamedValue) still becomes a BoolExpr (no regression)."""
+    node = {
+        "kind": "NamedValue",
+        "symbol": "Variable sig",
+        "source_file_start": "foo.sv",
+        "source_line_start": 1,
+        "source_column_start": 1,
+    }
+    ir = _dispatch_expr_to_ir(node)
+    assert isinstance(ir, BoolExpr)
+    assert ir.text == "sig"
 
 
 # ── import_assertion tests using fixture files ────────────────────────────

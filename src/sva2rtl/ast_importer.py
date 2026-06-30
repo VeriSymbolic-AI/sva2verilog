@@ -76,6 +76,50 @@ _SUPPORTED_SIGNAL_FUNCS: frozenset[str] = frozenset(
 # Phase 1 unsupported node kinds; value is a human-readable construct name.
 UNSUPPORTED_KINDS_PHASE1: dict[str, str] = {"StrongWeakAssertionExpr": "strong()/weak()"}
 
+# Node kinds that legitimately reduce to a boolean expression (BoolExpr leaf).
+# This set is exactly the set of kinds ``expr_to_sv`` can handle without raising.
+# When a dispatcher's default ``case _`` is reached with a kind NOT in this set,
+# it means an unrecognized (almost always temporal/property) construct slipped
+# through every explicit case — we MUST raise rather than silently flatten it to
+# a boolean expression (the project's "never fail silently" charter, and the
+# direct cause of the kind of latent semantic bug RISK-01 warns about).
+_BOOLEAN_EXPR_KINDS: frozenset[str] = frozenset(
+    {
+        "NamedValue",
+        "BinaryOp",
+        "UnaryOp",
+        "IntegerLiteral",
+        "SequenceExpr",
+        "Simple",
+        "CallExpression",
+        "Call",
+        "BinaryPropertyExpr",
+        "UnaryPropertyExpr",
+    }
+)
+
+# Readable names for common temporal/property kinds that may reach a default
+# dispatch case. Used only to make the error message helpful; any kind absent
+# here is reported by its raw slang kind string.
+_TEMPORAL_KIND_NAMES: dict[str, str] = {
+    "NexttimePropertyExpr": "nexttime",
+    "AlwaysPropertyExpr": "always",
+    "SAlwaysPropertyExpr": "s_always",
+    "EventuallyPropertyExpr": "eventually",
+    "SEventuallyPropertyExpr": "s_eventually",
+    "UntilPropertyExpr": "until",
+    "SUntilPropertyExpr": "s_until",
+    "UntilWithPropertyExpr": "until_with",
+    "SUntilWithPropertyExpr": "s_until_with",
+    "ImpliesPropertyExpr": "implies",
+    "IffPropertyExpr": "iff",
+    "AcceptOnPropertyExpr": "accept_on",
+    "RejectOnPropertyExpr": "reject_on",
+    "CaseAssertionExpr": "case",
+    "AbortPropertyExpr": "abort",
+    "DisableIffAssertionExpr": "disable iff (nested)",
+}
+
 # Implication operators are now handled natively (Phase 2).
 _UNSUPPORTED_BINARY_OPS: dict[str, str] = {}
 
@@ -373,6 +417,32 @@ def _check_unsupported(node: dict[str, Any], source_loc: SourceLoc) -> None:
         raise UnsupportedConstruct(
             message="Use a future version of sva2rtl for this feature",
             construct_name=UNSUPPORTED_KINDS_PHASE1[kind],
+            source_loc=source_loc,
+        )
+
+
+def _reject_non_boolean_kind(node: dict[str, Any], source_loc: SourceLoc) -> None:
+    """Raise UnsupportedConstruct unless *node* is a boolean-expression kind.
+
+    Called from the dispatchers' default ``case _`` BEFORE falling back to
+    ``BoolExpr``.  Without this guard, an unrecognized temporal/property node
+    whose ``kind`` is not in the small Phase-1 unsupported whitelist would be
+    silently treated as a boolean expression, producing a compilable but
+    semantically wrong monitor with no diagnostic — a silent-failure class bug
+    that directly violates the "never fail silently" charter (and is exactly the
+    failure mode RISK-01 cautions about).  Only kinds in ``_BOOLEAN_EXPR_KINDS``
+    (the set ``expr_to_sv`` can faithfully render as a boolean) are allowed to
+    fall through; everything else errors with a precise source location.
+    """
+    kind = node.get("kind", "")
+    if kind not in _BOOLEAN_EXPR_KINDS:
+        raise UnsupportedConstruct(
+            message=(
+                f"unsupported SVA construct '{kind}' — sva2rtl will not silently "
+                "treat it as a boolean expression. See SUPPORTED_CONSTRUCTS.md for "
+                "the list of supported operators."
+            ),
+            construct_name=_TEMPORAL_KIND_NAMES.get(kind, kind),
             source_loc=source_loc,
         )
 
@@ -685,6 +755,7 @@ def _import_concurrent_assertion(
             text = _reconstruct_node_text(expanded)
         case _:
             _check_unsupported(expr_node, extract_source_loc(expr_node))
+            _reject_non_boolean_kind(expr_node, extract_source_loc(expr_node))
             text = expr_to_sv(expr_node)
             ir_node = BoolExpr(text=text, source_loc=source_loc)
 
@@ -746,6 +817,7 @@ def _dispatch_expr_to_ir(node: dict[str, Any], _visited: frozenset[str] = frozen
             return ir_node
         case _:
             _check_unsupported(node, source_loc)
+            _reject_non_boolean_kind(node, source_loc)
             text = expr_to_sv(node)
             return BoolExpr(text=text, source_loc=source_loc)
 

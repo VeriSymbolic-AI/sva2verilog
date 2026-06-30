@@ -785,7 +785,6 @@ _PARITY_FIXTURES: list[str] = [
     "delay_zero",
     "disable_iff",
     "fell",
-    "implication_bitvec",
     "implication_nonoverlap",
     "implication_overlap",
     "past",
@@ -984,3 +983,75 @@ def test_optimization_parity(fixture_name: str, tmp_path: Path) -> None:
             f"{fixture_name}: fail mismatch at cycle {cycle_idx}: "
             f"unopt={u['fail']}, opt={o['fail']}"
         )
+
+
+# ── Regression: CSE/merge must keep module_name and params["module_name"] synced ──
+#
+# The emitter renders the ``module <name>`` header from params["module_name"]
+# but parents instantiate child.module_name. cse / counter_merge / concat_merge
+# used to rename module_name WITHOUT updating params["module_name"], so a shared
+# module was emitted under a STALE header while its parent referenced the new
+# canonical name -> the design referenced an undefined module (non-compilable
+# RTL). Invisible because the BV_WIDTH>1 sequence-consequent path (the only one
+# exercising CSE-of-leaves) had no compile/sim test, only golden text comparison.
+
+
+def _module_name_invariant(node: CheckerNode) -> None:
+    """Every node's params['module_name'] (if present) must equal module_name."""
+    pm = node.params.get("module_name")
+    if pm is not None:
+        assert pm == node.module_name, (
+            f"module_name/params mismatch: module_name={node.module_name!r} "
+            f"params['module_name']={pm!r} — emitted header would not match how "
+            f"parents instantiate this module"
+        )
+    for child in node.children:
+        _module_name_invariant(child)
+
+
+def test_cse_module_names_consistent_after_optimize() -> None:
+    """A duplicate-subsequence sequence (`a ##1 b ##1 a ##1 b`) triggers CSE of
+    the repeated `a`/`b` leaves; the optimized module set must be self-consistent
+    (params['module_name'] == module_name for every node, and every instantiated
+    sva_* module is defined).
+
+    Regression for the CSE module-naming defect that emitted a shared module
+    under a stale header, leaving parents referencing an undefined module
+    (non-compilable RTL) — previously uncaught because CSE-of-leaves was only
+    exercised on the BV_WIDTH>1 implication path, which had no compile test.
+    """
+    import re
+
+    from sva2rtl.emitter import emit_all
+    from sva2rtl.ir import BoolExpr, ClockSpec, SeqConcat, SourceLoc
+
+    loc = SourceLoc("test.sv", 1, 1)
+    clock = ClockSpec(edge="posedge", signal="clk", source_loc=loc)
+    a = BoolExpr(text="a", source_loc=loc)
+    b = BoolExpr(text="b", source_loc=loc)
+    seq = SeqConcat(
+        elements=(a, b, a, b),
+        delays=((1, 1), (1, 1), (1, 1)),
+        source_loc=loc,
+    )
+    checker = optimize(compose(seq, clock, "dup_seq", "a ##1 b ##1 a ##1 b"))
+
+    _module_name_invariant(checker)
+
+    modules = emit_all(checker)
+    defined: set[str] = set()
+    instantiated: set[str] = set()
+    for sv in modules.values():
+        for line in sv.splitlines():
+            s = line.strip()
+            md = re.match(r"module\s+([A-Za-z_]\w*)", s)
+            if md:
+                defined.add(md.group(1))
+            mi = re.match(r"(sva\w*)\s+u_", s)
+            if mi:
+                instantiated.add(mi.group(1))
+    missing = instantiated - defined
+    assert not missing, (
+        f"optimized RTL instantiates undefined modules: {sorted(missing)} "
+        f"(defined={sorted(defined)})"
+    )

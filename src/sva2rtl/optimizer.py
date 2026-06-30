@@ -161,13 +161,18 @@ def concat_merge(root: CheckerNode) -> CheckerNode:
                 )
                 # cnt_width = ceil(log2(merged_max + 1)), minimum 1 bit
                 cnt_width = max(1, merged_max.bit_length())
+                merged_name = f"sva_delay_{merged_min}_{merged_max}"
                 merged_params: dict[str, str] = {
                     **node.params,
                     "delay_min": str(merged_min),
                     "delay_max": str(merged_max),
                     "cnt_width": str(cnt_width),
+                    # Keep the emitted ``module <name>`` header (rendered from
+                    # params["module_name"]) in sync with the node's module_name,
+                    # otherwise the parent instantiates a module that is never
+                    # defined under that name → non-compilable RTL.
+                    "module_name": merged_name,
                 }
-                merged_name = f"sva_delay_{merged_min}_{merged_max}"
                 merged_node = dataclasses.replace(
                     node,
                     module_name=merged_name,
@@ -245,7 +250,17 @@ def cse(root: CheckerNode) -> CheckerNode:
     for h in merge_hashes:
         representative = hash_groups[h][0]
         canonical_name = _cse_canonical_name(representative)
-        canonical_map[h] = dataclasses.replace(representative, module_name=canonical_name)
+        # Sync params["module_name"] with the renamed module_name: the emitter
+        # renders the ``module <name>`` header from params["module_name"], while
+        # parents instantiate child.module_name.  If the two diverge, CSE emits a
+        # shared module whose header keeps the OLD name, so the parent references
+        # an undefined module → non-compilable RTL (caught only on the BV_WIDTH>1
+        # sequence-consequent path, which had no sim/formal test).
+        canonical_map[h] = dataclasses.replace(
+            representative,
+            module_name=canonical_name,
+            params={**representative.params, "module_name": canonical_name},
+        )
 
     # Step 4: sanity-check cse_origin field (D-05)
     origin_hash: dict[str, str] = {}  # cse_origin → structural hash
@@ -327,7 +342,13 @@ def counter_merge(root: CheckerNode) -> CheckerNode:
         min_v = representative.params.get("delay_min", "0")
         max_v = representative.params.get("delay_max", "0")
         canonical_name = f"sva_cse_counter_{min_v}_{max_v}"
-        canonical_map[h] = dataclasses.replace(representative, module_name=canonical_name)
+        # Keep params["module_name"] (the emitted header) in sync with module_name
+        # (the instantiated name) — see the note in cse() above.
+        canonical_map[h] = dataclasses.replace(
+            representative,
+            module_name=canonical_name,
+            params={**representative.params, "module_name": canonical_name},
+        )
 
     if not canonical_map:
         return root
