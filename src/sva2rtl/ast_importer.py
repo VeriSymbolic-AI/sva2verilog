@@ -21,8 +21,6 @@ import logging
 from typing import Any
 
 from sva2rtl.errors import SvaCompileError, UnsupportedConstruct
-
-_LOG = logging.getLogger(__name__)
 from sva2rtl.ir import (
     BoolExpr,
     ClockSpec,
@@ -44,6 +42,8 @@ from sva2rtl.ir import (
     SourceLoc,
     SVANode,
 )
+
+_LOG = logging.getLogger(__name__)
 
 # ── Operator tables ────────────────────────────────────────────────────────
 
@@ -697,7 +697,9 @@ def _import_concurrent_assertion(
             rep_ir = _build_goto_rep(expr_node, source_loc)
             ir_node = rep_ir
             text = _reconstruct_rep_text(rep_ir)
-        case "SimpleAssertionExpr" if expr_node.get("repetition", {}).get("kind") == "Nonconsecutive":
+        case "SimpleAssertionExpr" if (
+            expr_node.get("repetition", {}).get("kind") == "Nonconsecutive"
+        ):
             rep_ir = _build_nonconsec_rep(expr_node, source_loc)
             ir_node = rep_ir
             text = _reconstruct_rep_text(rep_ir)
@@ -712,9 +714,13 @@ def _import_concurrent_assertion(
             prop_ir = _build_prop_implication(expr_node, source_loc)
             ir_node = prop_ir
             text = _reconstruct_impl_text(prop_ir)
-        case "BinaryPropertyExpr" if expr_node.get("op") == "And" and not _is_boolean_binary(expr_node):
+        case "BinaryPropertyExpr" if (
+            expr_node.get("op") == "And" and not _is_boolean_binary(expr_node)
+        ):
             ir_node, text = _build_binary_seq_op(expr_node, source_loc, "and")
-        case "BinaryPropertyExpr" if expr_node.get("op") == "Or" and not _is_boolean_binary(expr_node):
+        case "BinaryPropertyExpr" if (
+            expr_node.get("op") == "Or" and not _is_boolean_binary(expr_node)
+        ):
             ir_node, text = _build_binary_seq_op(expr_node, source_loc, "or")
         # ── slang v11.0 uses plain Binary/Unary (not *PropertyExpr) for
         #     simple sequence-level operators.  Children are wrapped in Simple.
@@ -793,7 +799,10 @@ def _dispatch_expr_to_ir(node: dict[str, Any], _visited: frozenset[str] = frozen
             return _build_goto_rep(node, source_loc)
         case "SimpleAssertionExpr" if node.get("repetition", {}).get("kind") == "Nonconsecutive":
             return _build_nonconsec_rep(node, source_loc)
-        case "CallExpression" | "Call" if (node.get("subroutineName") or node.get("subroutine", "")) in _SUPPORTED_SIGNAL_FUNCS:
+        case "CallExpression" | "Call" if (
+            (node.get("subroutineName") or node.get("subroutine", ""))
+            in _SUPPORTED_SIGNAL_FUNCS
+        ):
             return _build_signal_func(node, source_loc)
         case "SequenceInstance":
             return _expand_named_sequence(node, source_loc, _visited)
@@ -880,7 +889,9 @@ def _build_goto_rep(
     rep_max = int(rep.get("max", 1))
     inner_node = node.get("expr", {})
     if not inner_node:
-        raise SvaCompileError(message=f"Goto repetition [->N] requires an expression at {source_loc}")
+        raise SvaCompileError(
+            message=f"Goto repetition [->N] requires an expression at {source_loc}"
+        )
     inner = _dispatch_expr_to_ir(inner_node)
     return SeqGotoRep(expr=inner, rep_min=rep_min, rep_max=rep_max, source_loc=source_loc)
 
@@ -895,7 +906,9 @@ def _build_nonconsec_rep(
     rep_max = int(rep.get("max", 1))
     inner_node = node.get("expr", {})
     if not inner_node:
-        raise SvaCompileError(message=f"Non-consecutive repetition [=N] requires an expression at {source_loc}")
+        raise SvaCompileError(
+            message=f"Non-consecutive repetition [=N] requires an expression at {source_loc}"
+        )
     inner = _dispatch_expr_to_ir(inner_node)
     return SeqNonconsecRep(expr=inner, rep_min=rep_min, rep_max=rep_max, source_loc=source_loc)
 
@@ -991,7 +1004,15 @@ def _build_prop_if_else(
         text = f"if ({cond_text}) {true_text} else {false_text}"
     else:
         text = f"if ({cond_text}) {true_text}"
-    return PropIfElse(condition=cond_ir, true_branch=true_ir, false_branch=false_ir, source_loc=source_loc), text
+    return (
+        PropIfElse(
+            condition=cond_ir,
+            true_branch=true_ir,
+            false_branch=false_ir,
+            source_loc=source_loc,
+        ),
+        text,
+    )
 
 
 def _is_boolean_binary(node: dict[str, Any]) -> bool:
@@ -1242,11 +1263,17 @@ def _reconstruct_node_text(node: SVANode) -> str:
     if isinstance(node, SeqOr):
         return f"({_reconstruct_node_text(node.left)} or {_reconstruct_node_text(node.right)})"
     if isinstance(node, SeqIntersect):
-        return f"({_reconstruct_node_text(node.left)} intersect {_reconstruct_node_text(node.right)})"
+        return (
+            f"({_reconstruct_node_text(node.left)} intersect "
+            f"{_reconstruct_node_text(node.right)})"
+        )
     if isinstance(node, SeqWithin):
         return f"({_reconstruct_node_text(node.inner)} within {_reconstruct_node_text(node.outer)})"
     if isinstance(node, SeqThroughout):
-        return f"({_reconstruct_node_text(node.condition)} throughout {_reconstruct_node_text(node.body)})"
+        return (
+            f"({_reconstruct_node_text(node.condition)} throughout "
+            f"{_reconstruct_node_text(node.body)})"
+        )
     if isinstance(node, PropNot):
         return f"not ({_reconstruct_node_text(node.body)})"
     if isinstance(node, PropIfElse):

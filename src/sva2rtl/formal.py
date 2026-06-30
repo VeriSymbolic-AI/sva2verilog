@@ -28,7 +28,9 @@ _LOG = logging.getLogger(__name__)
 _VersionOutput = tuple[str, str]
 
 
-def _suffix_module_names(sv_text: str, suffix: str, all_module_names: set[str] | None = None) -> str:
+def _suffix_module_names(
+    sv_text: str, suffix: str, all_module_names: set[str] | None = None
+) -> str:
     """Rename all module definitions and instantiations by appending *suffix*.
 
     Processes module declarations, instantiations, and endmodule comments

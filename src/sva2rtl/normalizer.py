@@ -129,23 +129,33 @@ def normalize(node: SVANode) -> SVANode:
         case SeqOr():
             new_left = normalize(node.left)
             new_right = normalize(node.right)
-            return _normalize_node(SeqOr(left=new_left, right=new_right, source_loc=node.source_loc))
+            return _normalize_node(
+                SeqOr(left=new_left, right=new_right, source_loc=node.source_loc)
+            )
         case SeqAnd():
             new_left = normalize(node.left)
             new_right = normalize(node.right)
-            return _normalize_node(SeqAnd(left=new_left, right=new_right, source_loc=node.source_loc))
+            return _normalize_node(
+                SeqAnd(left=new_left, right=new_right, source_loc=node.source_loc)
+            )
         case SeqIntersect():
             new_left = normalize(node.left)
             new_right = normalize(node.right)
-            return _normalize_node(SeqIntersect(left=new_left, right=new_right, source_loc=node.source_loc))
+            return _normalize_node(
+                SeqIntersect(left=new_left, right=new_right, source_loc=node.source_loc)
+            )
         case SeqWithin():
             new_inner = normalize(node.inner)
             new_outer = normalize(node.outer)
-            return _normalize_node(SeqWithin(inner=new_inner, outer=new_outer, source_loc=node.source_loc))
+            return _normalize_node(
+                SeqWithin(inner=new_inner, outer=new_outer, source_loc=node.source_loc)
+            )
         case SeqThroughout():
             new_cond = normalize(node.condition)
             new_body = normalize(node.body)
-            return _normalize_node(SeqThroughout(condition=new_cond, body=new_body, source_loc=node.source_loc))
+            return _normalize_node(
+                SeqThroughout(condition=new_cond, body=new_body, source_loc=node.source_loc)
+            )
         case PropNot():
             new_body = normalize(node.body)
             return _normalize_node(PropNot(body=new_body, source_loc=node.source_loc))
@@ -153,7 +163,14 @@ def normalize(node: SVANode) -> SVANode:
             new_cond = normalize(node.condition)
             new_true = normalize(node.true_branch)
             new_false = normalize(node.false_branch) if node.false_branch is not None else None
-            return _normalize_node(PropIfElse(condition=new_cond, true_branch=new_true, false_branch=new_false, source_loc=node.source_loc))
+            return _normalize_node(
+                PropIfElse(
+                    condition=new_cond,
+                    true_branch=new_true,
+                    false_branch=new_false,
+                    source_loc=node.source_loc,
+                )
+            )
 
         case _:
             return node

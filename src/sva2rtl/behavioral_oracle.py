@@ -17,6 +17,7 @@ Supported operators:
 
 from __future__ import annotations
 
+import re as _re_oracle
 from typing import Any
 
 
@@ -553,12 +554,9 @@ class SVABehavioralSim:
 # ── Hierarchical oracle: composes SVABehavioralSim instances ─────────────
 # Appended to behavioral_oracle.py for Phase 4 (ORACLE-01).
 
-from typing import Any
-import re as _re_oracle
-
 
 def simulate_checker_hierarchy(
-    tree: "CheckerNode",
+    tree: CheckerNode,
     stimulus: list[dict[str, bool]],
 ) -> list[dict[str, bool]]:
     """Simulate a composed checker tree cycle-by-cycle.
@@ -598,12 +596,12 @@ _TEMPLATE_ORACLE_MAP: dict[str, str] = {
 class _HierarchicalSim:
     """Internal: evaluates a checker tree by wiring child oracles."""
 
-    def __init__(self, root: "CheckerNode") -> None:
+    def __init__(self, root: CheckerNode) -> None:
         self._root = root
-        self._leaf_oracles: dict[str, "SVABehavioralSim"] = {}
+        self._leaf_oracles: dict[str, SVABehavioralSim] = {}
         self._build_oracles(root)
 
-    def _build_oracles(self, node: "CheckerNode") -> None:
+    def _build_oracles(self, node: CheckerNode) -> None:
         tname = node.template_name
         if tname in _LEAF_TEMPLATES:
             params = _extract_oracle_params(node)
@@ -616,7 +614,7 @@ class _HierarchicalSim:
     def tick(self, signals: dict[str, bool]) -> dict[str, bool]:
         return self._tick_node(self._root, signals)
 
-    def _tick_node(self, node: "CheckerNode", signals: dict[str, bool]) -> dict[str, bool]:
+    def _tick_node(self, node: CheckerNode, signals: dict[str, bool]) -> dict[str, bool]:
         tname = node.template_name
         if tname in _LEAF_TEMPLATES:
             oracle = self._leaf_oracles[node.module_name]
@@ -647,7 +645,7 @@ class _HierarchicalSim:
             return self._tick_node(node.children[0], signals)
         return {"pass": False, "fail": False, "active": False, "overflow": False}
 
-    def _tick_seq_concat(self, node: "CheckerNode", signals: dict[str, bool]) -> dict[str, bool]:
+    def _tick_seq_concat(self, node: CheckerNode, signals: dict[str, bool]) -> dict[str, bool]:
         children = node.children
         prev_pass = False
         any_fail = False
@@ -663,19 +661,23 @@ class _HierarchicalSim:
                 any_active = True
         return {"pass": prev_pass, "fail": any_fail, "active": any_active, "overflow": False}
 
-    def _tick_disable_iff(self, node: "CheckerNode", signals: dict[str, bool]) -> dict[str, bool]:
+    def _tick_disable_iff(self, node: CheckerNode, signals: dict[str, bool]) -> dict[str, bool]:
         body = node.children[0] if node.children else None
         if body is None:
             return {"pass": False, "fail": False, "active": False, "overflow": False}
         cond_text = node.params.get("cond_expr", "")
         cond_sigs = _re_oracle.findall(r"\b([a-zA-Z_]\w*)\b", cond_text)
-        cond_val = all(signals.get(s, False) for s in cond_sigs) if cond_sigs else signals.get("cond", False)
+        cond_val = (
+            all(signals.get(s, False) for s in cond_sigs)
+            if cond_sigs
+            else signals.get("cond", False)
+        )
         if cond_val:
             self._tick_node(body, {**signals, "disable": True})
             return {"pass": False, "fail": False, "active": False, "overflow": False}
         return self._tick_node(body, signals)
 
-    def _tick_first_match(self, node: "CheckerNode", signals: dict[str, bool]) -> dict[str, bool]:
+    def _tick_first_match(self, node: CheckerNode, signals: dict[str, bool]) -> dict[str, bool]:
         """Tick a first_match_top wrapper: gate outputs once body passes.
 
         On the cycle the body first passes, output is passed through and the
@@ -703,22 +705,31 @@ class _HierarchicalSim:
             return out  # pass=1, fail=0 (body just completed)
         # Already locked: suppress everything
         if locked:
-            return {"pass": False, "fail": False, "active": False, "overflow": out.get("overflow", False)}
+            return {
+                "pass": False,
+                "fail": False,
+                "active": False,
+                "overflow": out.get("overflow", False),
+            }
         # Not yet passed, not locked: pass through body outputs
         return out
 
     # ── Phase 3: Complex sequence operator oracles (v1.3) ────────────────
 
-    def _tick_prop_or(self, node: "CheckerNode", signals: dict[str, bool]) -> dict[str, bool]:
+    def _tick_prop_or(self, node: CheckerNode, signals: dict[str, bool]) -> dict[str, bool]:
         """prop_or: OR two sub-checkers."""
         if len(node.children) < 2:
             return {"pass": False, "fail": False, "active": False, "overflow": False}
-        l = self._tick_node(node.children[0], signals)
-        r = self._tick_node(node.children[1], signals)
-        return {"pass": l["pass"] or r["pass"], "fail": l["fail"] or r["fail"],
-                "active": l["active"] or r["active"], "overflow": l.get("overflow", False) or r.get("overflow", False)}
+        lhs = self._tick_node(node.children[0], signals)
+        rhs = self._tick_node(node.children[1], signals)
+        return {
+            "pass": lhs["pass"] or rhs["pass"],
+            "fail": lhs["fail"] or rhs["fail"],
+            "active": lhs["active"] or rhs["active"],
+            "overflow": lhs.get("overflow", False) or rhs.get("overflow", False),
+        }
 
-    def _tick_prop_and(self, node: "CheckerNode", signals: dict[str, bool]) -> dict[str, bool]:
+    def _tick_prop_and(self, node: CheckerNode, signals: dict[str, bool]) -> dict[str, bool]:
         """prop_and: both must eventually pass; matches when the LATER one completes.
 
         IEEE 1800-2017: s1 and s2 — both start at the same time; the ``and``
@@ -731,8 +742,8 @@ class _HierarchicalSim:
         """
         if len(node.children) < 2:
             return {"pass": False, "fail": False, "active": False, "overflow": False}
-        l = self._tick_node(node.children[0], signals)
-        r = self._tick_node(node.children[1], signals)
+        lhs = self._tick_node(node.children[0], signals)
+        rhs = self._tick_node(node.children[1], signals)
 
         key = node.module_name
         if not hasattr(self, "_and_state"):
@@ -746,21 +757,28 @@ class _HierarchicalSim:
             st["right_m"] = False
 
         # Clear matched state on new start when previous evaluation is done
-        if signals.get("start", False) and not l["active"] and not r["active"]:
+        if signals.get("start", False) and not lhs["active"] and not rhs["active"]:
             st["left_m"] = False
             st["right_m"] = False
 
-        if l["pass"]:
+        if lhs["pass"]:
             st["left_m"] = True
-        if r["pass"]:
+        if rhs["pass"]:
             st["right_m"] = True
 
-        pass_val = (l["pass"] and st["right_m"]) or (r["pass"] and st["left_m"]) or (l["pass"] and r["pass"])
-        return {"pass": pass_val, "fail": l["fail"] or r["fail"],
-                "active": l["active"] or r["active"],
-                "overflow": l.get("overflow", False) or r.get("overflow", False)}
+        pass_val = (
+            (lhs["pass"] and st["right_m"])
+            or (rhs["pass"] and st["left_m"])
+            or (lhs["pass"] and rhs["pass"])
+        )
+        return {
+            "pass": pass_val,
+            "fail": lhs["fail"] or rhs["fail"],
+            "active": lhs["active"] or rhs["active"],
+            "overflow": lhs.get("overflow", False) or rhs.get("overflow", False),
+        }
 
-    def _tick_prop_intersect(self, node: "CheckerNode", signals: dict[str, bool]) -> dict[str, bool]:
+    def _tick_prop_intersect(self, node: CheckerNode, signals: dict[str, bool]) -> dict[str, bool]:
         """prop_intersect: both must pass at same cycle (intersection)."""
         if len(node.children) < 2:
             return {"pass": False, "fail": False, "active": False, "overflow": False}
@@ -772,12 +790,16 @@ class _HierarchicalSim:
             self._tick_node(node.children[0], signals)
             self._tick_node(node.children[1], signals)
             return {"pass": False, "fail": False, "active": False, "overflow": False}
-        l = self._tick_node(node.children[0], signals)
-        r = self._tick_node(node.children[1], signals)
-        return {"pass": l["pass"] and r["pass"], "fail": l["fail"] or r["fail"],
-                "active": l["active"] and r["active"], "overflow": l.get("overflow", False) or r.get("overflow", False)}
+        lhs = self._tick_node(node.children[0], signals)
+        rhs = self._tick_node(node.children[1], signals)
+        return {
+            "pass": lhs["pass"] and rhs["pass"],
+            "fail": lhs["fail"] or rhs["fail"],
+            "active": lhs["active"] and rhs["active"],
+            "overflow": lhs.get("overflow", False) or rhs.get("overflow", False),
+        }
 
-    def _tick_prop_within(self, node: "CheckerNode", signals: dict[str, bool]) -> dict[str, bool]:
+    def _tick_prop_within(self, node: CheckerNode, signals: dict[str, bool]) -> dict[str, bool]:
         """prop_within: inner pass while outer is still active."""
         if len(node.children) < 2:
             return {"pass": False, "fail": False, "active": False, "overflow": False}
@@ -793,7 +815,7 @@ class _HierarchicalSim:
                 "active": inner["active"] or outer["active"],
                 "overflow": inner.get("overflow", False) or outer.get("overflow", False)}
 
-    def _tick_prop_throughout(self, node: "CheckerNode", signals: dict[str, bool]) -> dict[str, bool]:
+    def _tick_prop_throughout(self, node: CheckerNode, signals: dict[str, bool]) -> dict[str, bool]:
         """prop_throughout: condition must hold throughout body sequence.
 
         Mirrors RTL template behaviour: cond checker is driven by
@@ -827,7 +849,7 @@ class _HierarchicalSim:
                 "active": body["active"],
                 "overflow": cond.get("overflow", False) or body.get("overflow", False)}
 
-    def _tick_prop_not(self, node: "CheckerNode", signals: dict[str, bool]) -> dict[str, bool]:
+    def _tick_prop_not(self, node: CheckerNode, signals: dict[str, bool]) -> dict[str, bool]:
         """prop_not: invert pass/fail of body."""
         body = node.children[0] if node.children else None
         if body is None:
@@ -836,19 +858,25 @@ class _HierarchicalSim:
         return {"pass": out["fail"], "fail": out["pass"],
                 "active": out["active"], "overflow": out.get("overflow", False)}
 
-    def _tick_prop_if_else(self, node: "CheckerNode", signals: dict[str, bool]) -> dict[str, bool]:
+    def _tick_prop_if_else(self, node: CheckerNode, signals: dict[str, bool]) -> dict[str, bool]:
         """prop_if_else: multiplex between true/false branches."""
         # Evaluate condition from cond_expr in params
         cond_text = node.params.get("cond_expr", "")
         cond_sigs = _re_oracle.findall(r"\b([a-zA-Z_]\w*)\b", cond_text)
-        cond_val = all(signals.get(s, False) for s in cond_sigs) if cond_sigs else signals.get("cond", False)
+        cond_val = (
+            all(signals.get(s, False) for s in cond_sigs)
+            if cond_sigs
+            else signals.get("cond", False)
+        )
         if cond_val:
             return self._tick_node(node.children[0], signals)
         if len(node.children) > 1:
             return self._tick_node(node.children[1], signals)
         return {"pass": False, "fail": False, "active": False, "overflow": False}
 
-    def _tick_implication(self, node: "CheckerNode", signals: dict[str, bool], tname: str) -> dict[str, bool]:
+    def _tick_implication(
+        self, node: CheckerNode, signals: dict[str, bool], tname: str
+    ) -> dict[str, bool]:
         if len(node.children) < 2:
             return {"pass": False, "fail": False, "active": False, "overflow": False}
         ant_out = self._tick_node(node.children[0], signals)
@@ -861,7 +889,7 @@ class _HierarchicalSim:
         }
 
 
-def _extract_oracle_params(node: "CheckerNode") -> dict[str, Any]:
+def _extract_oracle_params(node: CheckerNode) -> dict[str, Any]:
     tname = node.template_name
     params: dict[str, Any] = {}
     if tname in ("delay_fixed", "delay_range", "concat_delay"):
@@ -877,12 +905,15 @@ def _extract_oracle_params(node: "CheckerNode") -> dict[str, Any]:
     return params
 
 
-def _map_stimulus(tname: str, signals: dict[str, bool], node: "CheckerNode") -> dict[str, bool]:
+def _map_stimulus(tname: str, signals: dict[str, bool], node: CheckerNode) -> dict[str, bool]:
     if tname == "bool_expr":
         return {"start": signals.get("start", False)}
     if tname in ("delay_fixed", "delay_range"):
         return {"start": signals.get("start", False)}
-    if tname in ("rep_consecutive", "goto_rep", "nonconsec_rep", "rose", "fell", "stable", "past", "changed"):
+    if tname in (
+        "rep_consecutive", "goto_rep", "nonconsec_rep",
+        "rose", "fell", "stable", "past", "changed",
+    ):
         sig_name = _extract_obs_sig(node, 0)
         return {"start": signals.get("start", False), "sig": signals.get(sig_name, False)}
     if tname in ("overlap_bitvec", "nonoverlap"):
@@ -893,14 +924,14 @@ def _map_stimulus(tname: str, signals: dict[str, bool], node: "CheckerNode") -> 
     return signals
 
 
-def _extract_obs_sig(node: "CheckerNode", idx: int) -> str:
+def _extract_obs_sig(node: CheckerNode, idx: int) -> str:
     obs = node.observed_signals
     if idx < len(obs):
         return str(obs[idx][0])
     return "sig"
 
 
-def _eval_cond_expr(cond_node: "CheckerNode", signals: dict[str, bool]) -> bool:
+def _eval_cond_expr(cond_node: CheckerNode, signals: dict[str, bool]) -> bool:
     """Evaluate a boolean-expression checker's condition against signal values.
 
     The behavioral oracle models ``bool_expr`` as ``delay_fixed(0,0)`` which
