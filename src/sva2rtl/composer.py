@@ -1621,6 +1621,57 @@ def _render_state_d_body(
     return "\n".join(lines)
 
 
+def _emit_nfa_checker(
+    op_name: str, states: int,
+    transitions: tuple[tuple[int, str, int], ...],
+    accept: frozenset[int], signals: tuple[str, ...],
+    nfa_kind: str,
+    clock: ClockSpec, label: str | None,
+    original_text: str, source_loc: SourceLoc,
+    cse_origin: str | None,
+) -> CheckerNode:
+    """Shared emitter for all NFA-composed operators.
+
+    Encapsulates:
+    - D3 budget check (K ≤ 32) with actionable error naming the op.
+    - Serialisation of transitions / accept into ``params``.
+    - Observed-signal derivation from the union of sub-NFA signal sets.
+    """
+    if states > 32:
+        raise UnsupportedConstruct(
+            message=(
+                f"'{op_name}' composed NFA has K={states} states, "
+                f"exceeding the D3 budget K ≤ 32. Workaround: split the "
+                f"property so operands are shorter, or reduce repetition "
+                f"/ delay bounds. See SUPPORTED_CONSTRUCTS.md for the K "
+                f"budget rationale."
+            ),
+            construct_name=f"{op_name} with K > 32",
+            source_loc=source_loc,
+        )
+    observed = tuple((s, s) for s in signals)
+    module_name = module_name_from_label(label, original_text)
+    params: dict[str, str] = {
+        "module_name": module_name,
+        "clock_signal": clock.signal, "clock_edge": clock.edge,
+        "source_loc": str(source_loc),
+        "sva2rtl_version": __version__,
+        "original_text": original_text,
+        "nfa_states": str(states),
+        "nfa_transitions": _serialise_transitions(transitions),
+        "nfa_accept": _serialise_accept(accept),
+        "nfa_accept_mask": hex(sum(1 << i for i in accept)),
+        "nfa_accept_bits": _accept_bits(states, accept),
+        "nfa_kind": nfa_kind,
+        "nfa_state_d_body": _render_state_d_body(states, transitions),
+    }
+    return CheckerNode(
+        template_name="nfa_generic", module_name=module_name, params=params,
+        observed_signals=observed, source_loc=source_loc,
+        children=(), cse_origin=cse_origin,
+    )
+
+
 def _compose_intersect_nfa(
     node: SeqIntersect, clock: ClockSpec, label: str | None,
     original_text: str, cse_origin: str | None = None,
@@ -1632,50 +1683,172 @@ def _compose_intersect_nfa(
     single ``nfa_generic`` CheckerNode with the serialised transition
     table, accept mask and ``nfa_kind = "sequence"``.
 
-    Requires D3 budget: composed state count K = |L| * |R| ≤ 32. If not,
-    raise ``UnsupportedConstruct`` with the split-property workaround.
+    Requires D3 budget: composed state count K = |L| * |R| ≤ 32.
     """
     n_left, t_left, acc_left, sigs_left = _lift_to_nfa(node.left)
     n_right, t_right, acc_right, sigs_right = _lift_to_nfa(node.right)
     states, trans, accept = _nfa_product_intersect(
-        n_left, t_left, acc_left,
-        n_right, t_right, acc_right,
+        n_left, t_left, acc_left, n_right, t_right, acc_right,
     )
-    if states > 32:
+    all_sigs = tuple(sorted(set(sigs_left) | set(sigs_right)))
+    return _emit_nfa_checker(
+        "intersect", states, trans, accept, all_sigs, "sequence",
+        clock, label, original_text, node.source_loc, cse_origin,
+    )
+
+
+# ── within (v1.5.1 slice 2) ─────────────────────────────────────────────
+
+
+def _nfa_reachable_states(
+    states: int, transitions: tuple[tuple[int, str, int], ...],
+) -> frozenset[int]:
+    """Compute states reachable from state 0 in the NFA transition graph.
+
+    Ignores guards (assumes all can eventually fire). Used by
+    ``_nfa_product_within`` to build the "outer still alive" mask —
+    the outer sub-NFA is considered "in its window" as long as it is
+    in any state reachable from 0 that has outgoing transitions OR is
+    in accept.
+    """
+    reach = {0}
+    changed = True
+    while changed:
+        changed = False
+        for from_s, _, to_s in transitions:
+            if from_s in reach and to_s not in reach:
+                reach.add(to_s)
+                changed = True
+    return frozenset(reach)
+
+
+def _nfa_alive_states(
+    states: int, transitions: tuple[tuple[int, str, int], ...],
+    accept: frozenset[int],
+) -> frozenset[int]:
+    """Compute "alive" states for a sub-NFA: any state that either has
+    outgoing transitions OR is accept. Dead states (no outgoing edges,
+    not accept) are excluded — matching the ``outer_alive`` predicate
+    used in the spike prototype's ``nfa_product`` (mode='within').
+    """
+    with_out = {from_s for from_s, _, _ in transitions}
+    return frozenset(with_out | accept)
+
+
+def _nfa_product_within(
+    n_inner: int, t_inner: tuple[tuple[int, str, int], ...],
+    acc_inner: frozenset[int],
+    n_outer: int, t_outer: tuple[tuple[int, str, int], ...],
+    acc_outer: frozenset[int],
+) -> tuple[int, tuple[tuple[int, str, int], ...], frozenset[int]]:
+    """Cross-product NFA for ``within`` — spike-notes §G0.4 (mode='within').
+
+    Same transition composition as ``_nfa_product_intersect``; the
+    difference is in the accept set:
+
+        accept = { sid(i, j) : i ∈ acc_inner, j ∈ alive(outer) }
+
+    where alive(outer) = outer states that have outgoing edges OR are
+    themselves accept. This encodes IEEE 1800 §16.9.10: the inner
+    match cycle must fall inside the outer's active window.
+    """
+    def sid(i: int, j: int) -> int:
+        return i * n_outer + j
+
+    trans: list[tuple[int, str, int]] = []
+    for (li, gl, lt) in t_inner:
+        for (rj, gr, rt) in t_outer:
+            g = f"({gl}) & ({gr})"
+            trans.append((sid(li, rj), g, sid(lt, rt)))
+    alive_outer = _nfa_alive_states(n_outer, t_outer, acc_outer)
+    accept = frozenset(sid(i, j) for i in acc_inner for j in alive_outer)
+    return n_inner * n_outer, tuple(trans), accept
+
+
+def _compose_within_nfa(
+    node: SeqWithin, clock: ClockSpec, label: str | None,
+    original_text: str, cse_origin: str | None = None,
+) -> CheckerNode:
+    """Compose ``within`` via NFA product (v1.5.1 slice 2).
+
+    Inner sequence must complete while outer is still alive (IEEE 1800
+    §16.9.10). Product construction: cross-product state IDs;
+    transitions AND-composed; accept = inner_accept × outer_alive.
+    """
+    n_inner, t_inner, acc_inner, sigs_inner = _lift_to_nfa(node.inner)
+    n_outer, t_outer, acc_outer, sigs_outer = _lift_to_nfa(node.outer)
+    states, trans, accept = _nfa_product_within(
+        n_inner, t_inner, acc_inner, n_outer, t_outer, acc_outer,
+    )
+    all_sigs = tuple(sorted(set(sigs_inner) | set(sigs_outer)))
+    return _emit_nfa_checker(
+        "within", states, trans, accept, all_sigs, "sequence",
+        clock, label, original_text, node.source_loc, cse_origin,
+    )
+
+
+# ── throughout (v1.5.1 slice 2) ─────────────────────────────────────────
+
+
+def _nfa_product_throughout(
+    cond_text: str,
+    n_body: int, t_body: tuple[tuple[int, str, int], ...],
+    acc_body: frozenset[int],
+    cond_signals: tuple[str, ...],
+) -> tuple[int, tuple[tuple[int, str, int], ...], frozenset[int]]:
+    """Product NFA for ``throughout`` — IEEE 1800 §16.9.11.
+
+    Semantics: ``cond throughout body`` matches iff ``body`` matches AND
+    ``cond`` holds on EVERY cycle body is active.
+
+    Encoding: guard every body transition by ``AND (cond)``. If cond
+    fails while body is active, no outgoing transition fires → body
+    thread drops (dead-end = vacuous no-match for sequence NFAs; a
+    property-level guard would fire fail here — deferred to the
+    property NFA path used by implication).
+
+    Result: same K as body (no state explosion), same accept set.
+    """
+    cond_guard = f"({cond_text})"
+    trans = tuple(
+        (from_s, f"({g}) & {cond_guard}", to_s)
+        for from_s, g, to_s in t_body
+    )
+    return n_body, trans, acc_body
+
+
+def _compose_throughout_nfa(
+    node: SeqThroughout, clock: ClockSpec, label: str | None,
+    original_text: str, cse_origin: str | None = None,
+) -> CheckerNode:
+    """Compose ``throughout`` via NFA (v1.5.1 slice 2).
+
+    Requires the condition to be a ``BoolExpr`` (per IEEE 1800 §16.9.11
+    and current pipeline; multi-cycle cond is not a valid SVA form).
+    Body may be any NFA-liftable shape.
+    """
+    if not isinstance(node.condition, BoolExpr):
+        # Non-boolean condition is not a valid throughout per IEEE 1800.
+        # Fall back to the existing rejection (also caught by G2a).
         raise UnsupportedConstruct(
             message=(
-                f"'intersect' composed NFA has K={states} states, exceeding "
-                f"the D3 budget K ≤ 32. Composed from L={n_left} × R="
-                f"{n_right}. Workaround: split the property so the two "
-                f"operands are shorter, or reduce their repetition/delay "
-                f"bounds."
+                "'throughout' condition must be a boolean expression per "
+                f"IEEE 1800 §16.9.11; got {type(node.condition).__name__}."
             ),
-            construct_name="intersect with K > 32",
+            construct_name="throughout with non-boolean condition",
             source_loc=node.source_loc,
         )
+    cond_text = node.condition.text
+    cond_signals = tuple(sorted({s for s, _ in extract_signals(cond_text)}))
 
-    all_sigs = tuple(sorted(set(sigs_left) | set(sigs_right)))
-    observed = tuple((s, s) for s in all_sigs)
-
-    module_name = module_name_from_label(label, original_text)
-    params: dict[str, str] = {
-        "module_name": module_name,
-        "clock_signal": clock.signal, "clock_edge": clock.edge,
-        "source_loc": str(node.source_loc),
-        "sva2rtl_version": __version__,
-        "original_text": original_text,
-        "nfa_states": str(states),
-        "nfa_transitions": _serialise_transitions(trans),
-        "nfa_accept": _serialise_accept(accept),
-        "nfa_accept_mask": hex(sum(1 << i for i in accept)),
-        "nfa_accept_bits": _accept_bits(states, accept),
-        "nfa_kind": "sequence",
-        "nfa_state_d_body": _render_state_d_body(states, trans),
-    }
-    return CheckerNode(
-        template_name="nfa_generic", module_name=module_name, params=params,
-        observed_signals=observed, source_loc=node.source_loc,
-        children=(), cse_origin=cse_origin,
+    n_body, t_body, acc_body, sigs_body = _lift_to_nfa(node.body)
+    states, trans, accept = _nfa_product_throughout(
+        cond_text, n_body, t_body, acc_body, cond_signals,
+    )
+    all_sigs = tuple(sorted(set(cond_signals) | set(sigs_body)))
+    return _emit_nfa_checker(
+        "throughout", states, trans, accept, all_sigs, "sequence",
+        clock, label, original_text, node.source_loc, cse_origin,
     )
 
 
@@ -1685,14 +1858,33 @@ def _compose_within(
 ) -> CheckerNode:
     """Compose within: inner sequence completes within outer's window.
 
-    v1.5 G2a: reject multi-cycle operands honestly (see
-    ``_reject_non_boolean_composition``); NFA path in G2b.
+    Routing (v1.5.1 slice 2):
+    - Both operands are BoolExpr atoms → direct ``prop_within`` path
+      (v1.5.0 behaviour, RISK-02 fixed).
+    - Both operands are NFA-liftable → ``_compose_within_nfa``.
+    - Other shapes → G2a rejection (unchanged).
     """
+    if _is_boolean_leaf(node.inner) and _is_boolean_leaf(node.outer):
+        return _compose_within_bool(
+            node, clock, label, original_text, cse_origin=cse_origin,
+        )
+    if _is_nfa_liftable(node.inner) and _is_nfa_liftable(node.outer):
+        return _compose_within_nfa(
+            node, clock, label, original_text, cse_origin=cse_origin,
+        )
     _reject_non_boolean_composition(
         "within",
         (("inner", node.inner), ("outer", node.outer)),
         node.source_loc,
     )
+    raise AssertionError("unreachable")  # pragma: no cover
+
+
+def _compose_within_bool(
+    node: SeqWithin, clock: ClockSpec, label: str | None,
+    original_text: str, cse_origin: str | None = None,
+) -> CheckerNode:
+    """Direct path for bool ``within`` bool — unchanged v1.5.0 behaviour."""
     module_name = module_name_from_label(label, original_text)
     base = module_name[4:] if module_name.startswith("sva_") else module_name
     inner = compose(node.inner, clock, f"{base}_inner", original_text)
@@ -1716,16 +1908,34 @@ def _compose_throughout(
 ) -> CheckerNode:
     """Compose throughout: condition must hold continuously through body sequence.
 
-    v1.5 G2a: reject multi-cycle body honestly (see
-    ``_reject_non_boolean_composition``); NFA path in G2b. The condition
-    is required to be a boolean expression already (IEEE 1800 §16.9.11),
-    so only the body is checked here.
+    Routing (v1.5.1 slice 2):
+    - Both condition and body are BoolExpr → direct ``prop_throughout``
+      path (v1.5.0 behaviour, IEEE-1800 correct — 4 tests already green).
+    - condition is BoolExpr and body is NFA-liftable multi-cycle →
+      ``_compose_throughout_nfa`` (guard-every-transition-by-cond).
+    - Anything else → G2a rejection.
     """
+    if _is_boolean_leaf(node.condition) and _is_boolean_leaf(node.body):
+        return _compose_throughout_bool(
+            node, clock, label, original_text, cse_origin=cse_origin,
+        )
+    if _is_boolean_leaf(node.condition) and _is_nfa_liftable(node.body):
+        return _compose_throughout_nfa(
+            node, clock, label, original_text, cse_origin=cse_origin,
+        )
     _reject_non_boolean_composition(
         "throughout",
         (("condition", node.condition), ("body", node.body)),
         node.source_loc,
     )
+    raise AssertionError("unreachable")  # pragma: no cover
+
+
+def _compose_throughout_bool(
+    node: SeqThroughout, clock: ClockSpec, label: str | None,
+    original_text: str, cse_origin: str | None = None,
+) -> CheckerNode:
+    """Direct path for bool ``throughout`` bool — unchanged v1.5.0 behaviour."""
     module_name = module_name_from_label(label, original_text)
     base = module_name[4:] if module_name.startswith("sva_") else module_name
     cond_checker = compose(node.condition, clock, f"{base}_cond", original_text)

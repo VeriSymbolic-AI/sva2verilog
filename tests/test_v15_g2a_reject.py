@@ -28,7 +28,6 @@ from sva2rtl.ir import (
     SeqNonconsecRep,
     SeqOr,
     SeqRepetition,
-    SeqThroughout,
     SeqWithin,
     SourceLoc,
 )
@@ -64,34 +63,17 @@ def _rep_c_3() -> SeqRepetition:
 # still awaiting NFA lifting in later P1 slices.
 
 
-# ── within ───────────────────────────────────────────────────────────────
-
-def test_within_rejects_seq_concat_inner() -> None:
-    """(a ##2 b) within c — multi-cycle inner → reject."""
-    node = SeqWithin(inner=_seq_concat_ab(), outer=_b("c"), source_loc=_LOC)
-    with pytest.raises(UnsupportedConstruct) as ei:
-        compose(node, _CLK, None, "(a ##2 b) within c")
-    assert "within" in str(ei.value)
-    assert "inner=SeqConcat" in str(ei.value)
+# ── within — MIGRATED (v1.5.1 P1 slice 2) ────────────────────────────────
+# The 2 originally-rejected within cases (SeqConcat-inner, SeqRepetition-
+# outer) now compile via ``_compose_within_nfa``. Positive tests live in
+# ``tests/test_v151_nfa_within_throughout.py``.
 
 
-def test_within_rejects_repetition_outer() -> None:
-    """a within (c[*3]) — multi-cycle outer → reject."""
-    node = SeqWithin(inner=_b("a"), outer=_rep_c_3(), source_loc=_LOC)
-    with pytest.raises(UnsupportedConstruct) as ei:
-        compose(node, _CLK, None, "a within (c[*3])")
-    assert "outer=SeqRepetition" in str(ei.value)
-
-
-# ── throughout ───────────────────────────────────────────────────────────
-
-def test_throughout_rejects_multi_cycle_body() -> None:
-    """en throughout (a ##2 b) — multi-cycle body → reject."""
-    node = SeqThroughout(condition=_b("en"), body=_seq_concat_ab(), source_loc=_LOC)
-    with pytest.raises(UnsupportedConstruct) as ei:
-        compose(node, _CLK, None, "en throughout (a ##2 b)")
-    assert "throughout" in str(ei.value)
-    assert "body=SeqConcat" in str(ei.value)
+# ── throughout — MIGRATED (v1.5.1 P1 slice 2) ────────────────────────────
+# The 1 originally-rejected throughout case (multi-cycle body) now
+# compiles via ``_compose_throughout_nfa`` (guards every body transition
+# by the cond expression per IEEE 1800 §16.9.11). Positive tests live
+# in ``tests/test_v151_nfa_within_throughout.py``.
 
 
 # ── nested composition — the RISK-02 root case ───────────────────────────
