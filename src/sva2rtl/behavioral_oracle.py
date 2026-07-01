@@ -785,7 +785,17 @@ class _HierarchicalSim:
         }
 
     def _tick_prop_intersect(self, node: CheckerNode, signals: dict[str, bool]) -> dict[str, bool]:
-        """prop_intersect: both must pass at same cycle (intersection)."""
+        """prop_intersect: both must pass at same cycle (intersection).
+
+        RISK-02 (v1.5 G1): for boolean-atom operands the child oracle is
+        vacuously ``pass=True`` because ``bool_expr`` is modelled as
+        ``delay_fixed(0,0)``. To honour the actual operand values (per
+        IEEE 1800 §16.9.7), we AND the sub-checker pass signals with an
+        independently-derived boolean-leaf evaluation (``_eval_bool_leaf``)
+        that reads the operand truth from the live stimulus. Non-boolexpr
+        children see ``_eval_bool_leaf`` return True conservatively — the
+        full NFA engine in G2 replaces this path for those cases.
+        """
         if len(node.children) < 2:
             return {"pass": False, "fail": False, "active": False, "overflow": False}
         # RISK-03: explicit disable handling. Although disable propagates to leaf
@@ -798,15 +808,25 @@ class _HierarchicalSim:
             return {"pass": False, "fail": False, "active": False, "overflow": False}
         lhs = self._tick_node(node.children[0], signals)
         rhs = self._tick_node(node.children[1], signals)
+        # RISK-02 fix: honour operand truth for boolean-atom children.
+        lhs_ok = _eval_bool_leaf(node.children[0], signals)
+        rhs_ok = _eval_bool_leaf(node.children[1], signals)
         return {
-            "pass": lhs["pass"] and rhs["pass"],
+            "pass": lhs["pass"] and rhs["pass"] and lhs_ok and rhs_ok,
             "fail": lhs["fail"] or rhs["fail"],
             "active": lhs["active"] and rhs["active"],
             "overflow": lhs.get("overflow", False) or rhs.get("overflow", False),
         }
 
     def _tick_prop_within(self, node: CheckerNode, signals: dict[str, bool]) -> dict[str, bool]:
-        """prop_within: inner pass while outer is still active."""
+        """prop_within: inner pass while outer is still active.
+
+        RISK-02 (v1.5 G1): mirroring the intersect fix, gate the pass
+        signal by the actual boolean-atom truth of both inner and outer
+        operands. IEEE 1800 §16.9.10 requires the inner-sequence match
+        cycle to fall inside the outer window; for boolean atoms this
+        reduces to "inner true AND outer true this cycle".
+        """
         if len(node.children) < 2:
             return {"pass": False, "fail": False, "active": False, "overflow": False}
         # RISK-03: explicit disable handling (see _tick_prop_intersect).
@@ -816,7 +836,10 @@ class _HierarchicalSim:
             return {"pass": False, "fail": False, "active": False, "overflow": False}
         inner = self._tick_node(node.children[0], signals)
         outer = self._tick_node(node.children[1], signals)
-        return {"pass": inner["pass"] and outer["active"],
+        # RISK-02 fix: honour operand truth (see _tick_prop_intersect docstring).
+        inner_ok = _eval_bool_leaf(node.children[0], signals)
+        outer_ok = _eval_bool_leaf(node.children[1], signals)
+        return {"pass": inner["pass"] and outer["active"] and inner_ok and outer_ok,
                 "fail": inner["fail"] or outer["fail"],
                 "active": inner["active"] or outer["active"],
                 "overflow": inner.get("overflow", False) or outer.get("overflow", False)}
@@ -1136,6 +1159,40 @@ def _eval_cond_expr(cond_node: CheckerNode, signals: dict[str, bool]) -> bool:
                 return True  # at least one observed signal is true
         return False  # all observed signals are false → condition violated
     return True  # no signals to check: assume passes
+
+
+def _eval_bool_leaf(cond_node: CheckerNode, signals: dict[str, bool]) -> bool:
+    """Independent (RISK-01) boolean-leaf value evaluator for RISK-02 fix.
+
+    Used by ``_tick_prop_intersect`` / ``_tick_prop_within`` to close the
+    RISK-02 gap where composed sequence operators previously ignored their
+    boolean operand values.
+
+    Semantics: for a ``bool_expr`` leaf whose ``observed_signals`` is
+    ``[(p1, w1), (p2, w2), ...]``, the leaf holds this cycle iff **all**
+    observed signals are true in the stimulus — this is the standard
+    single-cycle-sequence semantics from IEEE 1800 (a sequence completes
+    on the cycle its boolean expression holds).
+
+    Independence: derived from IEEE semantics of a boolean sequence atom,
+    NOT from the RTL template's structure. This is the v1.5 G1 "rule-based
+    thread simulator" (D2) applied to the specific single-cycle sequence
+    case; the full NFA path in G2 will generalise this to multi-cycle
+    sequences.
+
+    Returns True (conservative) for non-``bool_expr`` children so composed
+    sequences continue to see them as always-holding for now — G2 replaces
+    the whole ``prop_intersect``/``prop_within`` oracle path with the NFA
+    engine, at which point this helper becomes vacuously true for its
+    remaining callers.
+    """
+    if cond_node.template_name != "bool_expr":
+        return True
+    obs = cond_node.observed_signals
+    if not obs:
+        return True
+    # AND across all observed signals — sequence-atom semantics.
+    return all(bool(signals.get(port_name, False)) for port_name, _ in obs)
 
 
 from sva2rtl.ir import CheckerNode  # noqa: E402

@@ -46,8 +46,6 @@ condition through ``_eval_cond_expr`` (a v1.3.0 hardening patch), which is why
 
 from __future__ import annotations
 
-import pytest
-
 from sva2rtl.behavioral_oracle import simulate_checker_hierarchy
 from sva2rtl.composer import compose
 from sva2rtl.ir import (
@@ -83,11 +81,6 @@ def _fails(results: list[dict[str, bool]]) -> list[bool]:
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="RISK-02: boolean-expr oracle does not evaluate operand values, so "
-    "intersect ignores a/b. Fixed by v1.5 unified timing+data oracle.",
-)
 def test_intersect_baseline_both_true() -> None:
     """a intersect b — manual derivation: pass on the start cycle iff a&&b.
 
@@ -123,11 +116,6 @@ def test_intersect_baseline_both_true() -> None:
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="RISK-02: boolean-expr oracle is always-active, so within's outer "
-    "window is always active and the operand value is ignored. Fixed by v1.5.",
-)
 def test_within_baseline_inner_inside_outer() -> None:
     """a within b — manual derivation: inner match must land inside outer window.
 
