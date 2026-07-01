@@ -227,31 +227,30 @@ The following temporal operators are not yet supported:
 | Multi-dimensional signals | Array signals not supported in sampled value functions |
 | `$countones`, `$onehot` | System functions beyond $rose/$fell/$stable/$past not supported |
 
-### Multi-clock support: planned scope and verification boundary (v1.4)
+### Multi-clock support (v1.4.1 Part B — Path One: trusted 2-DFF synchronizer)
 
-Multi-clock properties are planned for v1.4 using a split-and-synchronize
-compilation approach (Gawanmeh & Tahar, 2009): each `@(clk_i)` sub-sequence is
-compiled to a single-clock checker in its own clock domain, and cross-domain
-`##1` boundaries are connected through a standard 2-DFF synchronizer.
+Multi-clock properties are supported using a split-and-synchronize compilation
+approach (Gawanmeh & Tahar, 2009): each `@(clk_i)` sub-sequence is compiled to
+a single-clock checker in its own clock domain, reusing the full Tier 1/2/3
+generation pipeline. Cross-domain `##1` boundaries are connected through a
+standard 2-DFF synchronizer (`templates/sync_2dff.sv.j2`, TRUSTED COMPONENT).
 
-Planned supported subset (equals the SVA standard's allowed multi-clock forms):
-- `@(posedge clk1) seq1 ##1 @(posedge clk2) seq2`
-- `@(posedge clk1) antecedent |=> @(posedge clk2) consequent`
-- multi-stage chains of the above
+**Supported subset** (equals the SVA standard's allowed multi-clock forms):
+- `@(posedge clk1) seq1 ##1 @(posedge clk2) seq2` (multi-clock sequence)
+- `@(posedge clk1) antecedent |=> @(posedge clk2) consequent` (multi-clock impl.)
+- multi-stage chains of the above (`@(clk1) ... ##1 @(clk2) ... ##1 @(clk3) ...`)
 
-Permanently excluded (with reasons):
+**Permanently excluded** (with reasons):
 - `##N (N != 1)` or `##[M:N]` across a clock change — forbidden by IEEE 1800
 - multi-clock `intersect`/`within`/`throughout` — require same-start same-clock
 - overlapping implication `|->` across different clocks — race risk
+- full multi-clock formal equivalence — industry-wide limitation (DVCon 2024)
 
-Verification boundary (honesty statement): the single-clock sub-checkers are
-verified by the full triple-oracle stack (dual simulators, behavioral oracle,
-yosys formal equivalence). The cross-clock 2-DFF synchronizer is treated as a
-trusted base component verified by structural checks and protocol assertions,
-NOT by formal equivalence — formal equivalence checking assumes a single clock
-domain and is not applicable to multi-clock designs (an industry-wide
-limitation, not a sva2rtl-specific defect). Users should validate cross-clock
-timing assumptions on FPGA prototypes or in post-silicon testing.
+**Trusted component:** The 2-DFF synchronizer has NOT been verified against
+metastability via formal methods. Per-domain sub-checkers retain the full
+verification stack (iverilog+Verilator sim, behavioral oracle, SymbiYosys
+formal equivalence). Cross-clock timing assumptions should be validated on FPGA
+prototypes or in post-silicon testing.
 
 See `.planning/DESIGN-multiclock-risk-D.md` for the full design and references.
 
@@ -259,9 +258,9 @@ See `.planning/DESIGN-multiclock-risk-D.md` for the full design and references.
 
 | Code | Severity | Description | Resolution |
 |------|----------|-------------|------------|
-| SVA-E001 | Error | Unsupported SVA operator encountered | Use only Tier 1 operators listed above |
+| SVA-E001 | Error | Unsupported SVA operator encountered | Use only Tier 1/2/3 operators listed above |
 | SVA-E002 | Error | Unbounded repetition is not synthesizable | Replace `[*]` or `[+]` with bounded `[*M:N]` |
-| SVA-E003 | Error | Multi-clock property detected | Rewrite using single clock domain |
+| SVA-E003 | Error | Multi-clock property detected (cross-clock `##N` N≠1, multi-clock intersect/within/throughout, overlapping `|->` cross-clock) | Use allowed multi-clock forms (`##1`, `|=>`) |
 | SVA-E004 | Error | Failed to parse SVA input (slang error) | Check syntax; ensure slang can parse the input |
 | SVA-E005 | Error | `--property` matched no assertion (label, index, or line not found) | Use a valid label name, 1-based index, or `@N` source-line number |
 

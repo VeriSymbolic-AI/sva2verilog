@@ -928,30 +928,44 @@ def _compose_implication(
     original_text: str,
     cse_origin: str | None = None,
 ) -> CheckerNode:
-    """Build a hierarchical CheckerNode for a PropImplication (|-> or |=>)."""
+    """Build a hierarchical CheckerNode for a PropImplication (|-> or |=>).
+
+    Single-clock: delegates to ``_compose_implication_sc``.
+
+    Multi-clock (consequent is ClockedSeq, v1.4.1 Part B): delegates to
+    ``_compose_implication_mc`` — antecedent in clk1 domain, consequent in clk2
+    domain, 2-DFF synchronizer on the token.
+    """
+    module_name = module_name_from_label(label, original_text)
+
+    if isinstance(node.consequent, ClockedSeq):
+        return _compose_implication_mc(
+            node, clock, label, original_text, cse_origin
+        )
+    return _compose_implication_sc(
+        node, clock, label, original_text, cse_origin
+    )
+
+
+def _compose_implication_sc(
+    node: PropImplication,
+    clock: ClockSpec,
+    label: str | None,
+    original_text: str,
+    cse_origin: str | None = None,
+) -> CheckerNode:
+    """Build a single-clock PropImplication (byte-identical to pre-v1.4.1)."""
     module_name = module_name_from_label(label, original_text)
     template = "overlap_bitvec" if node.overlapping else "nonoverlap"
-
-    # Give each child a unique sub-label so their module names never collide
-    # with the parent wrapper (or each other) when label is None and both
-    # antecedent and consequent hash the same original_text.  Same pattern as
-    # _compose_seq_concat uses for _e{i} children.
     base = module_name[4:] if module_name.startswith("sva_") else module_name
     ant_checker = compose(node.antecedent, clock, f"{base}_ant", original_text)
     con_checker = compose(node.consequent, clock, f"{base}_con", original_text)
-
     bv_width = _compute_bv_width(node.consequent)
 
     # v1.5 boundary (BUG-IMPL-01): only a SINGLE-CYCLE consequent (BV_WIDTH==1 —
     # a boolean expression or sampled-value function) is formally proven correct
-    # against IEEE-1800 semantics (tests/test_formal_sva_equiv.py). A multi-cycle
-    # SEQUENCE consequent compiles to BV_WIDTH>1 and would use the legacy bv_q
-    # token-passing path, which is CONFIRMED (iverilog trace, 2026-06-30) to
-    # mishandle the existential "∃ match within the window" obligation: pass
-    # never fires and fail is unrelated to the consequent (see
-    # .planning/BUG-implication-timing.md). Emitting it would be a silent
-    # correctness failure, so we reject it explicitly instead. A correct
-    # implementation requires the v1.5 NFA composition engine.
+    # against IEEE-1800 semantics. Multi-cycle sequence consequents need the
+    # v1.5 NFA composition engine.
     if bv_width > 1:
         raise UnsupportedConstruct(
             message=(
@@ -987,6 +1001,60 @@ def _compose_implication(
         observed_signals=all_signals,
         source_loc=node.source_loc,
         children=(ant_checker, con_checker),
+        cse_origin=cse_origin,
+    )
+
+
+def _compose_implication_mc(
+    node: PropImplication,
+    clock: ClockSpec,
+    label: str | None,
+    original_text: str,
+    cse_origin: str | None = None,
+) -> CheckerNode:
+    """Multi-clock implication (consequent is ClockedSeq, v1.4.1 Part B).
+
+    Antecedent in outer clock domain; consequent in ClockedSeq inner domain;
+    2-DFF sync carries ant match → con start. Reuses mc_seq_top template.
+    """
+    if node.overlapping:
+        raise UnsupportedConstruct(
+            message="overlapping '|->' across clock domains is not supported",
+            construct_name="multi-clock overlapping implication",
+            source_loc=node.source_loc,
+        )
+    module_name = module_name_from_label(label, original_text)
+    base = module_name[4:] if module_name.startswith("sva_") else module_name
+
+    ant_checker = compose(node.antecedent, clock, f"{base}_ant", original_text)
+    con_body = compose(
+        node.consequent.body, node.consequent.clock,
+        f"{base}_con", original_text,
+    )
+    sync = _make_sync_2dff(
+        f"{module_name}_sync_0", clock.signal,
+        node.consequent.clock.signal, node.source_loc, 0,
+    )
+
+    all_signals = _collect_signals([ant_checker, con_body])
+    clk_sigs = [clock.signal, node.consequent.clock.signal]
+    all_signals = tuple((p, s) for p, s in all_signals if s not in clk_sigs)
+
+    params: dict[str, str] = {
+        "module_name": module_name,
+        "clocks": ",".join(clk_sigs),
+        "clock_edge": clock.edge,
+        "source_loc": str(node.source_loc),
+        "sva2rtl_version": __version__,
+        "original_text": original_text,
+    }
+    return CheckerNode(
+        template_name="mc_seq_top",
+        module_name=module_name,
+        params=params,
+        observed_signals=all_signals,
+        source_loc=node.source_loc,
+        children=(ant_checker, sync, con_body),
         cse_origin=cse_origin,
     )
 
