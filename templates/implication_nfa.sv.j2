@@ -61,29 +61,14 @@ module {{ module_name }} (
 
     // ── Implication verdict ──────────────────────────────────────────
     // NFA started from ant_match — if ant never matched, NFA is idle
-    // (state_q = 0) and pass/fail are 0. The NFA itself gates by
-    // ant_match, so its pass/fail already represent the implication
-    // verdict without additional ant-side gating.
-    {{ signal_type(verilog_mode) }} active_q, pass_q, fail_q, disabled_q;
+    // (state_q = 0) and pass/fail are 0. The NFA itself already registers
+    // its outputs (pass_q, fail_q inside nfa_generic), so we wire them
+    // directly without adding a second register.
     {{ wire_type(verilog_mode) }} con_active;
-{{ always_block_header(verilog_mode, clock_edge, clock_signal) }}
-        if (!rst_n || disable_i) begin
-            active_q   <= 1'b0;
-            pass_q     <= 1'b0;
-            fail_q     <= 1'b0;
-            disabled_q <= 1'b0;
-        end else begin
-            active_q   <= con_active;
-            pass_q     <= con_pass_w;
-            fail_q     <= con_fail_w;
-            disabled_q <= con_disabled_w;
-        end
-    end
-
-    assign active        = disable_i ? 1'b0 : active_q;
-    assign pass          = disable_i ? 1'b0 : pass_q;
-    assign fail          = disable_i ? 1'b0 : fail_q;
-    assign disabled_o    = disabled_q;
+    assign active        = disable_i ? 1'b0 : con_active;
+    assign pass          = disable_i ? 1'b0 : con_pass_w;
+    assign fail          = disable_i ? 1'b0 : con_fail_w;
+    assign disabled_o    = disable_i ? 1'b1 : con_disabled_w;
 
     // ── attempt_fired ────────────────────────────────────────────────
     {{ signal_type(verilog_mode) }} attempt_fired_q;
