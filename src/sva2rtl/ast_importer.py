@@ -1356,10 +1356,20 @@ def _build_seq_concat(
         seq_node = elem.get("sequence", {})
         elements.append(_dispatch_expr_to_ir(seq_node, _visited))
 
-        # Skip last element's delay — always (0, 0) sentinel in slang JSON
+        # Skip last element's delay — always (0, 0) sentinel in slang JSON.
+        # For SINGLE-clk SeqConcat, elem[i].min is the delay AFTER element i
+        # (before element i+1). For MULTI-clk (where element i+1 is a Clocking
+        # node), slang stores the cross-boundary ##N on element i+1, not on
+        # element i — so we read element i+1's min in that case.
         if i < len(elements_raw) - 1:
             d_min = int(elem.get("min", "0"))
             d_max = int(elem.get("max", "0"))
+            # Detect multi-clock: if the NEXT element is a Clocking, slang puts
+            # the cross-boundary delay on that next element instead.
+            next_seq = elements_raw[i + 1].get("sequence", {})
+            if d_min == 0 and d_max == 0 and next_seq.get("kind") == "Clocking":
+                d_min = int(elements_raw[i + 1].get("min", "0"))
+                d_max = int(elements_raw[i + 1].get("max", "0"))
 
             if d_min < 0 or d_max < 0:
                 elem_loc = extract_source_loc(elem)

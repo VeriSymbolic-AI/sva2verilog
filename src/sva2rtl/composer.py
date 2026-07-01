@@ -23,6 +23,7 @@ from sva2rtl.errors import SvaCompileError, UnsupportedConstruct
 from sva2rtl.ir import (
     BoolExpr,
     CheckerNode,
+    ClockedSeq,
     ClockSpec,
     DisableIff,
     PropBoundedAlways,
@@ -504,6 +505,8 @@ def compose(
             return _compose_bounded_always(node, clock, label, original_text, cse_origin)
         case PropUntil():
             return _compose_until(node, clock, label, original_text, cse_origin)
+        case ClockedSeq():
+            return _compose_clocked_seq(node, clock, label, original_text, cse_origin)
         case _:
             raise UnsupportedConstruct(
                 message=(
@@ -559,17 +562,36 @@ def _compose_seq_concat(
 ) -> CheckerNode:
     """Build a hierarchical CheckerNode tree for a SeqConcat.
 
+    Single-clock (no ClockedSeq elements): delegates to
+    ``_compose_seq_concat_sc`` (byte-identical to pre-v1.4.1).
+
+    Multi-clock (has ClockedSeq elements): delegates to
+    ``_compose_seq_concat_mc`` — per-domain sub-checkers connected by 2-DFF
+    synchronizers.
+    """
+    has_mc = any(isinstance(e, ClockedSeq) for e in node.elements)
+    if has_mc:
+        return _compose_seq_concat_mc(node, clock, label, original_text, cse_origin)
+    return _compose_seq_concat_sc(node, clock, label, original_text, cse_origin)
+
+
+def _compose_seq_concat_sc(
+    node: SeqConcat,
+    clock: ClockSpec,
+    label: str | None,
+    original_text: str,
+    cse_origin: str | None = None,
+) -> CheckerNode:
+    """Build a single-clock SeqConcat hierarchy (byte-identical to pre-v1.4.1).
+
     Structure: seq_concat_top wrapper → interleaved (bool_expr, delay) children
     following token-passing wiring: A.pass → delay.start → B.start.
     """
     module_name = module_name_from_label(label, original_text)
-    # Build a base name (without leading "sva_") for child sub-labels so that
-    # module_name_from_label doesn't double-prefix with "sva_sva_".
     base = module_name[4:] if module_name.startswith("sva_") else module_name
     children: list[CheckerNode] = []
 
     for i, elem in enumerate(node.elements):
-        # Use a hash-based sub-label so each child gets a unique module name
         child_label = f"{base}_e{i}"
         elem_checker = compose(elem, clock, child_label, original_text)
         children.append(elem_checker)
@@ -598,6 +620,130 @@ def _compose_seq_concat(
         source_loc=node.source_loc,
         children=tuple(children),
         cse_origin=cse_origin,
+    )
+
+
+def _compose_seq_concat_mc(
+    node: SeqConcat,
+    clock: ClockSpec,
+    label: str | None,
+    original_text: str,
+    cse_origin: str | None = None,
+) -> CheckerNode:
+    """Build a multi-clock SeqConcat: per-domain sub-checkers + 2-DFF syncs.
+
+    Each ClockedSeq element marks a clock-domain switch. Its body is compiled as
+    a single-clock sub-checker on its OWN clock (compiling through
+    ``_compose_clocked_seq``), and a ``sync_2dff`` CheckerNode is inserted at
+    the boundary to carry the token (match → start) across domains.
+    """
+    module_name = module_name_from_label(label, original_text)
+    base = module_name[4:] if module_name.startswith("sva_") else module_name
+    children: list[CheckerNode] = []
+    # Collect unique clock domains for the top module
+    clock_signals: list[str] = [clock.signal]
+    sync_index = 0
+
+    for i, elem in enumerate(node.elements):
+        child_label = f"{base}_e{i}"
+        if isinstance(elem, ClockedSeq):
+            # Cross-domain boundary: compile the ClockedSeq body on its own
+            # clock (which compose dispatches via the ClockedSeq arm), then
+            # insert a 2-DFF synchronizer to connect the previous domain's
+            # output to this domain's start.
+            sync_name = f"{module_name}_sync_{sync_index}"
+            src_clk, dst_clk = clock_signals[-1], elem.clock.signal
+            if dst_clk not in clock_signals:
+                clock_signals.append(dst_clk)
+
+            sync = _make_sync_2dff(sync_name, src_clk, dst_clk, node.source_loc, sync_index)
+            children.append(sync)
+            sync_index += 1
+
+            # Compile the body on the destination clock
+            elem_checker = compose(elem, clock, child_label, original_text)
+            children.append(elem_checker)
+        else:
+            # Same domain (or the first element before any switch)
+            elem_checker = compose(elem, clock, child_label, original_text)
+            children.append(elem_checker)
+
+        # Inter-element delays: compiled on the CURRENT domain's clock.
+        if i < len(node.delays):
+            delay_min, delay_max = node.delays[i]
+            cur_clk_signal = clock_signals[-1]
+            if cur_clk_signal == clock.signal:
+                cur_clock = clock
+            else:
+                cur_clock = ClockSpec(edge="posedge", signal=cur_clk_signal, source_loc=node.source_loc)
+            delay_checker = _make_delay_node(delay_min, delay_max, cur_clock, node.source_loc)
+            children.append(delay_checker)
+
+    all_signals = _collect_signals(children)
+    # Remove clock signals from observed_signals (they are not data inputs)
+    all_signals = tuple(
+        (p, s) for p, s in all_signals
+        if s not in clock_signals
+    )
+
+    params: dict[str, str] = {
+        "module_name": module_name,
+        "clocks": ",".join(clock_signals),
+        "clock_edge": clock.edge,
+        "source_loc": str(node.source_loc),
+        "sva2rtl_version": __version__,
+        "original_text": original_text,
+    }
+
+    return CheckerNode(
+        template_name="mc_seq_top",
+        module_name=module_name,
+        params=params,
+        observed_signals=all_signals,
+        source_loc=node.source_loc,
+        children=tuple(children),
+        cse_origin=cse_origin,
+    )
+
+
+def _compose_clocked_seq(
+    node: ClockedSeq,
+    clock: ClockSpec,
+    label: str | None,
+    original_text: str,
+    cse_origin: str | None = None,
+) -> CheckerNode:
+    """Compose a ClockedSeq body on its own (inner) clock domain.
+
+    The outer *clock* is intentionally ignored — the ClockedSeq carries its own
+    domain clock. The label and original_text pass through verbatim.
+    """
+    return compose(node.body, node.clock, label, original_text, cse_origin)
+
+
+def _make_sync_2dff(
+    module_name: str,
+    src_clock: str,
+    dst_clock: str,
+    source_loc: SourceLoc,
+    index: int,
+) -> CheckerNode:
+    """Create a 2-DFF synchronizer CheckerNode for a clock-domain crossing."""
+    return CheckerNode(
+        template_name="sync_2dff",
+        module_name=module_name,
+        params={
+            "module_name": module_name,
+            "src_clock": src_clock,
+            "dst_clock": dst_clock,
+            "source_loc": str(source_loc),
+            "sva2rtl_version": __version__,
+            "original_text": f"sync_2dff #{index} ({src_clock} → {dst_clock})",
+        },
+        observed_signals=(),
+        source_loc=source_loc,
+        children=(),
+        cse_origin=None,
     )
 
 
