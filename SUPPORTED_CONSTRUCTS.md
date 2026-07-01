@@ -1,4 +1,4 @@
-# Supported SVA Constructs — sva2rtl v1.3.1
+# Supported SVA Constructs — sva2rtl v1.5.1
 
 ## Tier 1 Operators (Fully Supported)
 
@@ -6,20 +6,17 @@
 |----------|----------|-------------|-------------|-------------------|
 | `##N` | Delay | Fixed cycle delay | `a ##2 b` | Shift register (N flip-flops) |
 | `##[M:N]` | Delay | Bounded delay range | `a ##[1:3] b` | Counter with [M,N] window comparator |
-| <code>\|-></code> | Implication | Overlapping implication, **single-cycle consequent only** | <code>req \|-> ack</code> | Antecedent match triggers consequent check (same cycle) |
-| <code>\|=></code> | Implication | Non-overlapping implication, **single-cycle consequent only** | <code>req \|=> ack</code> | Antecedent match triggers consequent check (next cycle) |
+| <code>\|-></code> | Implication | Overlapping implication, including multi-cycle consequent | <code>req \|-> ack</code> | Antecedent match triggers consequent check |
+| <code>\|=></code> | Implication | Non-overlapping implication, including multi-cycle consequent | <code>req \|=> ack</code> | Antecedent match triggers consequent check (next cycle) |
 
-> **Implication consequent restriction (v1.3.2).** The consequent of `|->` / `|=>`
-> must be a **single-cycle** expression: a boolean expression or a sampled-value
-> function (`$rose`/`$fell`/`$stable`/`$past`/`$changed`). These single-cycle
-> forms are formally proven equivalent to IEEE-1800 semantics
-> (`tests/test_formal_sva_equiv.py`). A **multi-cycle sequence consequent**
-> (e.g. `a |-> b ##2 c`, `a |-> b[*3]`, `a |-> (b ##[2:5] c)`) is **rejected at
-> compile time** (error SVA-E002): its legacy implementation is a confirmed
-> correctness defect (BUG-IMPL-01) and a correct version requires the v1.5 NFA
-> composition engine. Workaround: move the sequence into the **antecedent**
-> (e.g. `(b ##2 c) |-> d`), or split into separate properties whose consequent
-> is single-cycle.
+> **v1.5.1 (P2).** Multi-cycle sequence consequents (e.g. `a |-> b ##2 c`,
+> `a |-> b[*3]`, `a |-> b ##1 c ##2 d`) are now supported via the NFA
+> composition engine. The antecedent is evaluated combinationally and gates the
+> consequent NFA start. Multi-thread slots (T ≤ 4) handle overlapping ant matches.
+> Single-cycle consequents continue to use the formally-proven overlap_bitvec/
+> nonoverlap path (byte-identical to v1.5.0). Ranged delays in the consequent
+> (`a |-> b ##[2:5] c`) are still rejected — use a fixed delay or split the
+> property.
 | `[*N]` | Repetition | Exact consecutive repetition | `a[*3]` | Counter counts N consecutive matches |
 | `[*M:N]` | Repetition | Bounded consecutive repetition | `a[*1:4]` | Counter with [M,N] range check |
 | `$rose()` | Sampled value | Rising edge (0-to-1 transition) | `$rose(sig)` | Edge detector: `sig & ~sig_prev` |
@@ -213,15 +210,29 @@ sequence operators `intersect`, `within`, `throughout` have been addressed:
    SeqGotoRep / SeqNonconsecRep operands, and error-message quality
    (source_loc, workaround hint).
 
-**Current honesty boundary.** After v1.5.0 the supported forms are:
-`a intersect b`, `a within b`, `c throughout b` **with boolean-atom
-operands only** — verified end-to-end (behavioral oracle, iverilog RTL
-simulation, single-cycle-completion IEEE semantics). Any multi-cycle
-sequence operand (`##N`, `[*N]`, `[->N]`, `[=N]`, nested intersect /
-within / throughout, SeqOr, etc.) is rejected at compile time. The full
-NFA composition engine — one-hot state encoding, product construction
-for the multi-cycle cases, and per-operator sby BMC non-circular proofs
-vs independent IEEE-1800 reference monitors — is scheduled for v1.5.1.
+**v1.5.1 changes — NFA composition engine fully deployed.**
+
+The NFA composition engine (one-hot state encoding, product construction,
+multi-thread slot allocation) now supports:
+
+- **Multi-cycle operands** for `intersect`, `within`, `throughout`:
+  `SeqConcat` (fixed delays), `SeqRepetition` (fixed count). Total states
+  K ≤ 32 per composition (compile-time enforced).
+- **Multi-cycle implication consequents**: `|->` / `|=>` with
+  `SeqConcat` / `SeqRepetition` consequents (up to 7-state, 4-thread).
+- **Nested composition**: `(a intersect b) within c`,
+  `(a intersect b) intersect c`, `en throughout (a intersect b)` — all
+  combinations of intersect/within/throughout nested up to the K ≤ 32
+  budget.
+- **Independent verification**: 24 sby BMC miters across all operators
+  prove equivalence against shift-register reference monitors (structurally
+  distinct from one-hot NFA). 18 dual-oracle iverilog simulations match
+  cycle-for-cycle. Behavioral oracle uses rule-based thread simulator
+  (RISK-01 independent).
+
+**Still rejected**: ranged delays in operands, SeqOr/SeqGotoRep/
+SeqNonconsecRep inside intersections, multi-cycle condition expressions
+in throughout.
 
 ### RTL simulation: multi-module x-propagation
 
