@@ -1325,11 +1325,70 @@ def _compose_seq_and(
     )
 
 
+def _is_boolean_leaf(operand: SVANode) -> bool:
+    """Return True iff ``operand`` is a single-cycle boolean sequence atom.
+
+    v1.5 G2a honesty boundary: intersect / within / throughout's current RTL
+    templates compose via ``left_pass & right_pass`` (or the equivalent
+    inner/outer active-window AND). This is only semantically correct when
+    both operands complete on a single unambiguous cycle — i.e. they are
+    plain boolean expressions. For multi-cycle sequence operands the
+    "same-cycle completion" of IEEE-1800 §16.9.7/§16.9.10 requires
+    tracking multiple parallel matching threads (the NFA composition
+    engine landing in G2b). Compiling multi-cycle operands via the current
+    templates would produce a silent-wrong monitor whose pass fires only
+    when the two sub-sequences' completion cycles happen to coincide by
+    accident.
+    """
+    return isinstance(operand, BoolExpr)
+
+
+def _reject_non_boolean_composition(
+    op_name: str, positions: tuple[tuple[str, SVANode], ...],
+    source_loc: SourceLoc,
+) -> None:
+    """Raise UnsupportedConstruct if any operand is not a boolean leaf.
+
+    ``positions`` = tuple of (position_label, operand) pairs used in the
+    error message to point the user at the exact offending operand.
+    """
+    bad = [(pos, type(op).__name__) for pos, op in positions
+           if not _is_boolean_leaf(op)]
+    if not bad:
+        return
+    parts = ", ".join(f"{pos}={ty}" for pos, ty in bad)
+    raise UnsupportedConstruct(
+        message=(
+            f"'{op_name}' with a multi-cycle sequence operand is not yet "
+            f"supported: current RTL templates compose via a single-cycle "
+            f"'same-cycle completion' AND which is only correct when both "
+            f"operands are boolean atoms (BoolExpr). Offending operand(s): "
+            f"{parts}. Multi-cycle operands (##N / [*N] / nested sequence "
+            f"operators) are deferred to the v1.5 G2b NFA composition "
+            f"engine (nfa_generic template). Workaround: split the "
+            f"multi-cycle operand into a separate property whose result "
+            f"feeds a single-cycle boolean into the composition."
+        ),
+        construct_name=f"{op_name} with multi-cycle operand",
+        source_loc=source_loc,
+    )
+
+
 def _compose_intersect(
     node: SeqIntersect, clock: ClockSpec, label: str | None,
     original_text: str, cse_origin: str | None = None,
 ) -> CheckerNode:
-    """Compose intersect: both sequences complete simultaneously (AND pass + both active)."""
+    """Compose intersect: both sequences complete simultaneously (AND pass + both active).
+
+    v1.5 G2a: reject multi-cycle operands honestly — see
+    ``_reject_non_boolean_composition``. Multi-cycle intersect arrives in
+    G2b via the NFA engine.
+    """
+    _reject_non_boolean_composition(
+        "intersect",
+        (("left", node.left), ("right", node.right)),
+        node.source_loc,
+    )
     module_name = module_name_from_label(label, original_text)
     base = module_name[4:] if module_name.startswith("sva_") else module_name
     left = compose(node.left, clock, f"{base}_left", original_text)
@@ -1351,7 +1410,16 @@ def _compose_within(
     node: SeqWithin, clock: ClockSpec, label: str | None,
     original_text: str, cse_origin: str | None = None,
 ) -> CheckerNode:
-    """Compose within: inner sequence completes within outer's window."""
+    """Compose within: inner sequence completes within outer's window.
+
+    v1.5 G2a: reject multi-cycle operands honestly (see
+    ``_reject_non_boolean_composition``); NFA path in G2b.
+    """
+    _reject_non_boolean_composition(
+        "within",
+        (("inner", node.inner), ("outer", node.outer)),
+        node.source_loc,
+    )
     module_name = module_name_from_label(label, original_text)
     base = module_name[4:] if module_name.startswith("sva_") else module_name
     inner = compose(node.inner, clock, f"{base}_inner", original_text)
@@ -1373,7 +1441,18 @@ def _compose_throughout(
     node: SeqThroughout, clock: ClockSpec, label: str | None,
     original_text: str, cse_origin: str | None = None,
 ) -> CheckerNode:
-    """Compose throughout: condition must hold continuously through body sequence."""
+    """Compose throughout: condition must hold continuously through body sequence.
+
+    v1.5 G2a: reject multi-cycle body honestly (see
+    ``_reject_non_boolean_composition``); NFA path in G2b. The condition
+    is required to be a boolean expression already (IEEE 1800 §16.9.11),
+    so only the body is checked here.
+    """
+    _reject_non_boolean_composition(
+        "throughout",
+        (("condition", node.condition), ("body", node.body)),
+        node.source_loc,
+    )
     module_name = module_name_from_label(label, original_text)
     base = module_name[4:] if module_name.startswith("sva_") else module_name
     cond_checker = compose(node.condition, clock, f"{base}_cond", original_text)
