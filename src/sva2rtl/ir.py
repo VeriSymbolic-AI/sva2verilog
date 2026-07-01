@@ -305,6 +305,88 @@ class SeqThroughout(SVANode):
     body: SVANode
 
 
+# ── Phase 3b: NFA composition primitive (v1.5.1) ──────────────────────────
+
+
+@dataclass(frozen=True)
+class NfaCompose(SVANode):
+    """Explicit NFA (non-deterministic finite automaton) composition primitive.
+
+    A ``NfaCompose`` IR node represents a set of NFA states with transitions
+    labelled by boolean guard expressions, plus an accept-set and a
+    fail-semantic selector (``nfa_kind``).  It is produced by the composer
+    (``_compose_intersect_nfa`` / ``_compose_within_nfa`` /
+    ``_compose_throughout_nfa`` / multi-cycle implication consequents) via
+    Boulé & Zilic MBAC-style product construction (see
+    ``.gsd/milestones/v1.5/spike-notes.md`` §G0.4 for the algorithm).
+
+    Encoding
+    --------
+    One-hot state bit-vector: bit ``i`` = 1 iff NFA state ``i`` is active
+    this cycle.  ``INITIAL_STATE`` is set to ``1 << 0`` on ``start``.
+    Fully synthesizable: the RTL template unrolls transitions to a next-
+    state OR-tree gated by the operand guards.
+
+    Fail semantics (see v1.5-ROADMAP § G1.2 for the derivation)
+    -----------
+    ``nfa_kind = "sequence"``: dead-end (no accept and no active next
+    state) is a **vacuous no-match** — the enclosing property decides
+    whether to fail.  ``fail`` output is always 0 for sequence NFAs.
+
+    ``nfa_kind = "property"``: dead-end while ``attempt_fired`` is set
+    without reaching accept is a **fail** (broken obligation, per v1.0
+    P1.1).  This is the mode used for property-level NFAs such as the
+    consequent of a multi-cycle implication.
+
+    Attributes
+    ----------
+    states:
+        Number of NFA states K (one-hot bit width).  K must be ≤ 32 per
+        the D3 state budget (checked by the composer at emit time; a
+        bigger K raises ``UnsupportedConstruct`` with the split-property
+        workaround).
+    transitions:
+        Tuple of ``(from_state, guard_expr, to_state)`` triples.
+        ``guard_expr`` is a SystemVerilog boolean expression over the
+        signals in ``observed_signals`` — evaluated at emit time by the
+        RTL template's transition matrix and independently (rule-based)
+        by the oracle's ``_tick_nfa_generic``.
+    accept:
+        Frozen set of accepting state IDs.  A cycle in which the next
+        active state set intersects ``accept`` produces a ``pass``.
+    nfa_kind:
+        ``"sequence"`` or ``"property"`` — selects the fail rule.
+    observed_signals:
+        Tuple of ``(port_name, signal_expression)`` pairs mirroring the
+        convention on ``CheckerNode.observed_signals`` — the emitter uses
+        these to derive module ports and wire operands.
+
+    Example::
+
+        # `a intersect b` — product of two 2-state boolean NFAs
+        NfaCompose(
+            states=4,
+            transitions=(
+                (0, "(a) & (b)", 3),      # both operands hold → accept
+            ),
+            accept=frozenset({3}),
+            nfa_kind="sequence",
+            observed_signals=(("a", "a"), ("b", "b")),
+            source_loc=...,
+        )
+
+    See also ``.gsd/milestones/v1.5/spike-notes.md`` §G0.4 for the
+    product construction algorithm and the tested Python prototype in
+    ``tools/audit/probe_nfa_prototype.py``.
+    """
+
+    states: int
+    transitions: tuple[tuple[int, str, int], ...]
+    accept: frozenset[int]
+    nfa_kind: str  # "sequence" | "property"
+    observed_signals: tuple[tuple[str, str], ...]
+
+
 # ── Phase 4: Property operators (v1.3) ────────────────────────────────────
 
 

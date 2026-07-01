@@ -647,6 +647,8 @@ class _HierarchicalSim:
             return self._tick_s_always(node, signals)
         if tname == "until":
             return self._tick_until_prop(node, signals)
+        if tname == "nfa_generic":
+            return self._tick_nfa_generic(node, signals)
         if node.children:
             return self._tick_node(node.children[0], signals)
         return {"pass": False, "fail": False, "active": False, "overflow": False}
@@ -1071,6 +1073,92 @@ class _HierarchicalSim:
         st["o_fail"] = nxt_fail
         return out
 
+    def _tick_nfa_generic(
+        self, node: CheckerNode, signals: dict[str, bool]
+    ) -> dict[str, bool]:
+        """v1.5.1 rule-based NFA thread simulator (RISK-01 independent).
+
+        Implements the NFA composition oracle for ``nfa_generic``-template
+        CheckerNodes (produced by ``_compose_intersect_nfa`` /
+        ``_compose_within_nfa`` / ``_compose_throughout_nfa`` and multi-cycle
+        implication consequents).  The transition table, accept-set and
+        ``nfa_kind`` are read from ``node.params``:
+
+        * ``nfa_transitions``: string ``"s0,g0,t0;s1,g1,t1;..."`` — each triple
+          is ``from_state,guard_expr,to_state``. Semicolon-separated.
+        * ``nfa_accept``: string ``"i,j,k"`` — comma-separated accept-state
+          IDs.
+        * ``nfa_kind``: ``"sequence"`` or ``"property"`` — fail-rule selector.
+
+        Latency model (matches ``nfa_generic.sv.j2``):
+          state_q registers next_active from previous cycle;
+          pass_q = |(state_d & accept), fail_q derived from state_d & kind.
+        Output on cycle t reflects state_d at the previous cycle → 1-cycle
+        latency from ``start`` to ``pass``.
+
+        Fail semantics (per v1.5-ROADMAP G1.2 correction):
+          sequence NFA: dead-end = vacuous no-match (fail = False).
+          property NFA: dead-end after attempt_fired without accept = fail.
+
+        Guard evaluation is done by ``_eval_nfa_guard`` (recursive descent,
+        independent of any RTL evaluator — this is the whole point of D2).
+        """
+        transitions = _parse_nfa_transitions(node.params.get("nfa_transitions", ""))
+        accept = _parse_nfa_accept(node.params.get("nfa_accept", ""))
+        nfa_kind = str(node.params.get("nfa_kind", "sequence"))
+
+        key = node.module_name
+        if not hasattr(self, "_nfa_state"):
+            self._nfa_state: dict[str, dict[str, object]] = {}
+        st = self._nfa_state.setdefault(
+            key,
+            {
+                "active": frozenset(),
+                "attempt_fired": False,
+                "o_pass": False,
+                "o_fail": False,
+                "o_active": False,
+            },
+        )
+
+        # Registered outputs: emit what was scheduled last tick.
+        out = {
+            "pass": bool(st["o_pass"]),
+            "fail": bool(st["o_fail"]),
+            "active": bool(st["o_active"]),
+            "overflow": False,
+        }
+
+        # Compute new active set for this cycle.
+        active: set[int] = set(st["active"])  # type: ignore[arg-type]
+        if signals.get("start", False):
+            active.add(0)
+            st["attempt_fired"] = True
+
+        next_active: set[int] = set()
+        for from_s, guard, to_s in transitions:
+            if from_s in active and _eval_nfa_guard(guard, signals):
+                next_active.add(to_s)
+
+        nxt_pass = bool(next_active & accept)
+        if nfa_kind == "property":
+            # Dead-end after attempt_fired without accept = fail.
+            nxt_fail = (
+                bool(st["attempt_fired"])
+                and (not next_active)
+                and (not nxt_pass)
+            )
+        else:  # "sequence"
+            # Dead-end = vacuous no-match, NOT fail.
+            nxt_fail = False
+
+        # Schedule next-cycle outputs (1-cycle registered latency).
+        st["active"] = frozenset(next_active)
+        st["o_pass"] = nxt_pass
+        st["o_fail"] = nxt_fail
+        st["o_active"] = bool(next_active)
+        return out
+
     def _eval_operand(self, node: CheckerNode, signals: dict[str, bool]) -> bool:
         """Evaluate the (boolean) operand of a liveness node from the stimulus.
 
@@ -1159,6 +1247,109 @@ def _eval_cond_expr(cond_node: CheckerNode, signals: dict[str, bool]) -> bool:
                 return True  # at least one observed signal is true
         return False  # all observed signals are false → condition violated
     return True  # no signals to check: assume passes
+
+
+def _parse_nfa_transitions(spec: str) -> list[tuple[int, str, int]]:
+    """Parse a serialised NFA transition table.
+
+    Format: ``"s0,g0,t0;s1,g1,t1;..."`` — each semicolon-separated triple is
+    ``from_state,guard_expr,to_state``. Guards may not contain literal commas
+    or semicolons (grammar restricted to ``&``, ``|``, ``~``, parentheses,
+    identifiers, ``0``, ``1``). Empty string → no transitions.
+    """
+    if not spec:
+        return []
+    result: list[tuple[int, str, int]] = []
+    for chunk in spec.split(";"):
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        parts = chunk.split(",")
+        if len(parts) != 3:
+            raise ValueError(f"malformed NFA transition {chunk!r}")
+        from_s, guard, to_s = parts
+        result.append((int(from_s), guard.strip(), int(to_s)))
+    return result
+
+
+def _parse_nfa_accept(spec: str) -> frozenset[int]:
+    """Parse a serialised NFA accept-state set: ``"i,j,k"``."""
+    if not spec:
+        return frozenset()
+    return frozenset(int(x) for x in spec.split(",") if x.strip())
+
+
+def _eval_nfa_guard(expr: str, sig: dict[str, bool]) -> bool:
+    """Evaluate a boolean guard against a signal snapshot.
+
+    Grammar: ``signal | '1' | '0' | '~' expr | expr '&' expr | expr '|' expr
+    | '(' expr ')'``. Precedence ``~`` > ``&`` > ``|``. Recursive-descent
+    parser — deliberately independent of any RTL evaluator (RISK-01 D2).
+
+    Direct copy of the parser validated in
+    ``tools/audit/probe_nfa_prototype.py`` on 4 hand-derived vectors.
+    """
+    tokens = _nfa_tokenize(expr)
+    pos = [0]
+
+    def parse_or() -> bool:
+        v = parse_and()
+        while pos[0] < len(tokens) and tokens[pos[0]] == "|":
+            pos[0] += 1
+            v = v | parse_and()
+        return v
+
+    def parse_and() -> bool:
+        v = parse_not()
+        while pos[0] < len(tokens) and tokens[pos[0]] == "&":
+            pos[0] += 1
+            v = v & parse_not()
+        return v
+
+    def parse_not() -> bool:
+        if pos[0] < len(tokens) and tokens[pos[0]] == "~":
+            pos[0] += 1
+            return not parse_not()
+        return parse_atom()
+
+    def parse_atom() -> bool:
+        t = tokens[pos[0]]
+        pos[0] += 1
+        if t == "(":
+            v = parse_or()
+            if pos[0] >= len(tokens) or tokens[pos[0]] != ")":
+                raise ValueError(f"unbalanced parens in guard {expr!r}")
+            pos[0] += 1
+            return v
+        if t == "1":
+            return True
+        if t == "0":
+            return False
+        return bool(sig.get(t, False))
+
+    return parse_or()
+
+
+def _nfa_tokenize(expr: str) -> list[str]:
+    """Tokenise an NFA guard expression (see ``_eval_nfa_guard`` for grammar)."""
+    out: list[str] = []
+    i = 0
+    while i < len(expr):
+        c = expr[i]
+        if c.isspace():
+            i += 1
+        elif c in "()~&|":
+            out.append(c)
+            i += 1
+        elif c.isalnum() or c == "_":
+            j = i
+            while j < len(expr) and (expr[j].isalnum() or expr[j] == "_"):
+                j += 1
+            out.append(expr[i:j])
+            i = j
+        else:
+            raise ValueError(f"bad char {c!r} in guard {expr!r}")
+    return out
 
 
 def _eval_bool_leaf(cond_node: CheckerNode, signals: dict[str, bool]) -> bool:

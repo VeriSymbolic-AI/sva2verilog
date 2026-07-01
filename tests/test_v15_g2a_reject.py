@@ -55,33 +55,13 @@ def _rep_c_3() -> SeqRepetition:
     return SeqRepetition(expr=_b("c"), rep_min=3, rep_max=3, source_loc=_LOC)
 
 
-# ── intersect ────────────────────────────────────────────────────────────
-
-def test_intersect_rejects_seq_concat_left() -> None:
-    """(a ##2 b) intersect c — left multi-cycle → reject."""
-    node = SeqIntersect(left=_seq_concat_ab(), right=_b("c"), source_loc=_LOC)
-    with pytest.raises(UnsupportedConstruct) as ei:
-        compose(node, _CLK, None, "(a ##2 b) intersect c")
-    assert "intersect" in str(ei.value)
-    assert "left=SeqConcat" in str(ei.value)
-
-
-def test_intersect_rejects_repetition_right() -> None:
-    """a intersect (c[*3]) — right multi-cycle → reject."""
-    node = SeqIntersect(left=_b("a"), right=_rep_c_3(), source_loc=_LOC)
-    with pytest.raises(UnsupportedConstruct) as ei:
-        compose(node, _CLK, None, "a intersect (c[*3])")
-    assert "right=SeqRepetition" in str(ei.value)
-
-
-def test_intersect_rejects_both_multi_cycle() -> None:
-    """(a ##2 b) intersect (c[*3]) — both multi-cycle → reject, both named."""
-    node = SeqIntersect(left=_seq_concat_ab(), right=_rep_c_3(), source_loc=_LOC)
-    with pytest.raises(UnsupportedConstruct) as ei:
-        compose(node, _CLK, None, "(a ##2 b) intersect (c[*3])")
-    msg = str(ei.value)
-    assert "left=SeqConcat" in msg
-    assert "right=SeqRepetition" in msg
+# ── intersect — MIGRATED (v1.5.1 P1 slice 1) ─────────────────────────────
+# The 3 originally-rejected intersect cases (SeqConcat-left, SeqRepetition-
+# right, both-multi-cycle) now compile successfully via the NFA path
+# (`_compose_intersect_nfa` → `nfa_generic` template). Positive tests
+# covering these constructs live in `tests/test_v151_nfa_intersect.py`
+# (compile + oracle end-to-end). This file now only guards the shapes
+# still awaiting NFA lifting in later P1 slices.
 
 
 # ── within ───────────────────────────────────────────────────────────────
@@ -191,12 +171,17 @@ def test_within_rejects_nonconsec_rep() -> None:
 
 
 # ── error message quality ────────────────────────────────────────────────
+# Using SeqOr as the offending operand (still not NFA-lifted in P1 slice 1).
+
+def _seq_or_bc() -> SeqOr:
+    return SeqOr(left=_b("b"), right=_b("c"), source_loc=_LOC)
+
 
 def test_error_message_names_workaround() -> None:
-    """The error must point users at the G2b NFA engine and the split-property workaround."""
-    node = SeqIntersect(left=_seq_concat_ab(), right=_b("c"), source_loc=_LOC)
+    """The error must point users at the NFA engine and the split-property workaround."""
+    node = SeqIntersect(left=_b("a"), right=_seq_or_bc(), source_loc=_LOC)
     with pytest.raises(UnsupportedConstruct) as ei:
-        compose(node, _CLK, None, "(a ##2 b) intersect c")
+        compose(node, _CLK, None, "a intersect (b or c)")
     msg = str(ei.value)
     assert "NFA" in msg
     assert "Workaround" in msg or "split" in msg.lower()
@@ -204,7 +189,7 @@ def test_error_message_names_workaround() -> None:
 
 def test_error_carries_source_loc() -> None:
     """Source loc must be threaded per pitfall P5.1."""
-    node = SeqIntersect(left=_seq_concat_ab(), right=_b("c"), source_loc=_LOC)
+    node = SeqIntersect(left=_b("a"), right=_seq_or_bc(), source_loc=_LOC)
     with pytest.raises(UnsupportedConstruct) as ei:
-        compose(node, _CLK, None, "(a ##2 b) intersect c")
+        compose(node, _CLK, None, "a intersect (b or c)")
     assert "g2a_reject.sv:1:1" in str(ei.value)

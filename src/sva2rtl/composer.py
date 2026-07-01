@@ -1378,17 +1378,53 @@ def _compose_intersect(
     node: SeqIntersect, clock: ClockSpec, label: str | None,
     original_text: str, cse_origin: str | None = None,
 ) -> CheckerNode:
-    """Compose intersect: both sequences complete simultaneously (AND pass + both active).
+    """Compose intersect: both sequences complete simultaneously.
 
-    v1.5 G2a: reject multi-cycle operands honestly — see
-    ``_reject_non_boolean_composition``. Multi-cycle intersect arrives in
-    G2b via the NFA engine.
+    Routing (v1.5.1):
+    - Both operands are BoolExpr atoms (single-cycle sequences):
+      **direct path** via the ``prop_intersect`` template (byte-identical
+      to v1.5.0; goldens unchanged; verified by 8 gate tests +
+      2 flipped RISK-02 xfails).
+    - At least one operand is a supported multi-cycle sequence
+      (``SeqConcat`` fixed delays, ``SeqRepetition`` fixed count):
+      **NFA path** via ``_compose_intersect_nfa`` (product construction
+      per Boulé & Zilic MBAC; see ``.gsd/milestones/v1.5/spike-notes.md``
+      §G0.4).
+    - Any other IR shape (``SeqOr``, ``SeqGotoRep``, ``SeqNonconsecRep``,
+      nested composed operators, non-fixed bounds): still rejected with
+      ``UnsupportedConstruct`` — carried over from v1.5 G2a's honesty
+      boundary while those shapes await NFA support in a later slice.
     """
+    if _is_boolean_leaf(node.left) and _is_boolean_leaf(node.right):
+        return _compose_intersect_bool(
+            node, clock, label, original_text, cse_origin=cse_origin,
+        )
+    if _is_nfa_liftable(node.left) and _is_nfa_liftable(node.right):
+        return _compose_intersect_nfa(
+            node, clock, label, original_text, cse_origin=cse_origin,
+        )
+    # Not liftable to NFA yet — keep the honesty boundary.
     _reject_non_boolean_composition(
         "intersect",
         (("left", node.left), ("right", node.right)),
         node.source_loc,
     )
+    # unreachable — _reject_non_boolean_composition always raises for the
+    # non-boolean case, but mypy/ruff want a return.
+    raise AssertionError("unreachable")  # pragma: no cover
+
+
+def _compose_intersect_bool(
+    node: SeqIntersect, clock: ClockSpec, label: str | None,
+    original_text: str, cse_origin: str | None = None,
+) -> CheckerNode:
+    """Direct path for ``bool intersect bool`` — unchanged v1.5.0 behaviour.
+
+    The single-cycle-completion path via the ``prop_intersect`` template is
+    already verified correct (bool_expr.sv.j2 registers pass_q with
+    start & bool_result, prop_intersect ANDs left_pass & right_pass, and
+    the oracle gates by ``_eval_bool_leaf`` per v1.5 G1).
+    """
     module_name = module_name_from_label(label, original_text)
     base = module_name[4:] if module_name.startswith("sva_") else module_name
     left = compose(node.left, clock, f"{base}_left", original_text)
@@ -1403,6 +1439,243 @@ def _compose_intersect(
         template_name="prop_intersect", module_name=module_name, params=params,
         observed_signals=all_signals, source_loc=node.source_loc,
         children=(left, right), cse_origin=cse_origin,
+    )
+
+
+# ── NFA composition primitives (v1.5.1) ────────────────────────────────
+
+
+def _is_nfa_liftable(operand: SVANode) -> bool:
+    """Return True iff ``operand`` can be lifted into a small NFA today.
+
+    Supported shapes in the first v1.5.1 P1 slice:
+    - ``BoolExpr`` — 2-state NFA
+    - ``SeqConcat`` with fixed delays (min == max) whose sub-elements
+      are all ``BoolExpr`` — N+K state NFA where K = number of elements
+    - ``SeqRepetition`` with fixed count (rep_min == rep_max) over
+      a ``BoolExpr`` — N+1 state NFA
+
+    Every other IR shape falls back to the G2a rejection until a later
+    slice teaches ``_lift_to_nfa`` about it.
+    """
+    if isinstance(operand, BoolExpr):
+        return True
+    if isinstance(operand, SeqConcat):
+        # All delays fixed AND all elements are BoolExpr.
+        if any(mn != mx for mn, mx in operand.delays):
+            return False
+        return all(isinstance(e, BoolExpr) for e in operand.elements)
+    if isinstance(operand, SeqRepetition):
+        return (
+            isinstance(operand.expr, BoolExpr)
+            and operand.rep_min == operand.rep_max
+            and operand.rep_min >= 1
+        )
+    return False
+
+
+def _lift_to_nfa(operand: SVANode) -> tuple[
+    int, tuple[tuple[int, str, int], ...], frozenset[int], tuple[str, ...]
+]:
+    """Convert a liftable operand into a small NFA (states, transitions,
+    accept, observed_signals_ports).
+
+    All returned NFAs use the invariant "state 0 is the initial state,
+    accept = {states - 1}" so ``_nfa_product`` can compose them
+    uniformly.
+    """
+    if isinstance(operand, BoolExpr):
+        # 0 --expr--> 1 (accept)
+        guard = f"({operand.text})"
+        signals = tuple(sorted({s for s, _ in extract_signals(operand.text)}))
+        return 2, ((0, guard, 1),), frozenset({1}), signals
+
+    if isinstance(operand, SeqConcat):
+        # Chain of BoolExpr elements with fixed delays.
+        # State layout: element i's expression lives on transition
+        # (state_i --expr_i--> state_{i+1}); the delay ##N between
+        # elements i and i+1 becomes N-1 "true" transitions after
+        # matching element i and before checking element i+1.
+        #
+        # Total states = 1 + sum_i(1 + delay_before_element_i_plus_1)
+        # Element 0: delay 0 → state 0 --expr0--> state 1
+        # Between elements i and i+1: delay d → d-1 filler transitions.
+        # Element i+1 checked on state (accum + d).
+        trans: list[tuple[int, str, int]] = []
+        signal_set: set[str] = set()
+        current = 0
+        for i, element in enumerate(operand.elements):
+            assert isinstance(element, BoolExpr)
+            guard = f"({element.text})"
+            for s, _ in extract_signals(element.text):
+                signal_set.add(s)
+            if i == 0:
+                # First element consumed on state 0 → state 1
+                trans.append((current, guard, current + 1))
+                current += 1
+                continue
+            # Delay before this element is operand.delays[i] = (d, d).
+            d = operand.delays[i][0]
+            # d-1 wait cycles then element check. d must be >= 1 for
+            # slang SeqConcat (adjacent) — d == 0 means overlap which
+            # slang normalises to a single expression AND. Here we
+            # assume d >= 1 (single-cycle spacing).
+            wait = max(d - 1, 0)
+            for _ in range(wait):
+                trans.append((current, "1", current + 1))
+                current += 1
+            trans.append((current, guard, current + 1))
+            current += 1
+        return current + 1, tuple(trans), frozenset({current}), tuple(sorted(signal_set))
+
+    if isinstance(operand, SeqRepetition):
+        # a[*N]: 0 --a--> 1 --a--> ... --a--> N (accept)
+        assert isinstance(operand.expr, BoolExpr)
+        n = operand.rep_min
+        guard = f"({operand.expr.text})"
+        trans = tuple((i, guard, i + 1) for i in range(n))
+        signals = tuple(sorted({s for s, _ in extract_signals(operand.expr.text)}))
+        return n + 1, trans, frozenset({n}), signals
+
+    raise ValueError(f"cannot lift {type(operand).__name__} to NFA yet")
+
+
+def _nfa_product_intersect(
+    n_left: int, t_left: tuple[tuple[int, str, int], ...], acc_left: frozenset[int],
+    n_right: int, t_right: tuple[tuple[int, str, int], ...], acc_right: frozenset[int],
+) -> tuple[int, tuple[tuple[int, str, int], ...], frozenset[int]]:
+    """Cross-product NFA for ``intersect`` — see spike-notes §G0.4.
+
+    State ID mapping: ``sid(i, j) = i * n_right + j``.
+    Transition: for every (i, gL, i') in T_L and (j, gR, j') in T_R, the
+    product has ``(sid(i,j), gL & gR, sid(i',j'))``.
+    Accept: ``{sid(i,j) : i ∈ acc_L, j ∈ acc_R}``.
+    """
+    def sid(i: int, j: int) -> int:
+        return i * n_right + j
+
+    trans: list[tuple[int, str, int]] = []
+    for (li, gl, lt) in t_left:
+        for (rj, gr, rt) in t_right:
+            g = f"({gl}) & ({gr})"
+            trans.append((sid(li, rj), g, sid(lt, rt)))
+    accept = frozenset(sid(i, j) for i in acc_left for j in acc_right)
+    return n_left * n_right, tuple(trans), accept
+
+
+def _serialise_transitions(
+    transitions: tuple[tuple[int, str, int], ...],
+) -> str:
+    """Encode NFA transitions for the ``nfa_transitions`` params string.
+
+    Format: ``"s0,g0,t0;s1,g1,t1;..."``. Guards must not contain literal
+    ``,`` or ``;`` — the composer never emits such characters (guards
+    are built from operand text via ``BoolExpr.text`` which cannot contain
+    them under our slang whitelist). Empty transition list encodes as
+    empty string.
+    """
+    parts = [f"{s},{g},{t}" for s, g, t in transitions]
+    return ";".join(parts)
+
+
+def _serialise_accept(accept: frozenset[int]) -> str:
+    """Encode accept-state set as ``"i,j,k"`` (sorted for determinism)."""
+    return ",".join(str(i) for i in sorted(accept))
+
+
+def _accept_bits(states: int, accept: frozenset[int]) -> str:
+    """Render the K-bit accept mask as a binary string ``bK-1 bK-2 ... b0``
+    (MSB first) for embedding in a Verilog literal ``K'b<bits>``.
+    """
+    return "".join("1" if i in accept else "0" for i in range(states - 1, -1, -1))
+
+
+def _render_state_d_body(
+    states: int, transitions: tuple[tuple[int, str, int], ...],
+) -> str:
+    """Render the combinational next-state assignments for the NFA template.
+
+    Emits, for each bit ``b`` in ``[0, states)``, an assignment
+    ``assign state_d[b] = (state_now[s0] & (g0)) | (state_now[s1] & (g1)) | ...``
+    where the ORed terms are exactly the transitions whose ``to_state == b``,
+    and ``state_now`` is the combinational merge of ``state_q`` and the
+    start-seed pulse (see ``nfa_generic.sv.j2`` header). Using
+    ``state_now`` ensures the first transition can observe operand values
+    on the SAME cycle ``start`` is pulsed, matching the oracle's semantics.
+
+    Bits with no incoming transitions get ``assign state_d[b] = 1'b0``.
+    """
+    incoming: dict[int, list[tuple[int, str]]] = {b: [] for b in range(states)}
+    for from_s, guard, to_s in transitions:
+        incoming.setdefault(to_s, []).append((from_s, guard))
+    lines: list[str] = []
+    for b in range(states):
+        arcs = incoming.get(b, [])
+        if not arcs:
+            lines.append(f"    assign state_d[{b}] = 1'b0;")
+            continue
+        terms = " | ".join(
+            f"(state_now[{s}] & ({g}))" for s, g in arcs
+        )
+        lines.append(f"    assign state_d[{b}] = {terms};")
+    return "\n".join(lines)
+
+
+def _compose_intersect_nfa(
+    node: SeqIntersect, clock: ClockSpec, label: str | None,
+    original_text: str, cse_origin: str | None = None,
+) -> CheckerNode:
+    """Compose ``intersect`` via NFA product (v1.5.1 slice 1).
+
+    Builds sub-NFAs for both operands, forms their cross-product per
+    ``_nfa_product_intersect`` (Boulé & Zilic MBAC §4.3), and emits a
+    single ``nfa_generic`` CheckerNode with the serialised transition
+    table, accept mask and ``nfa_kind = "sequence"``.
+
+    Requires D3 budget: composed state count K = |L| * |R| ≤ 32. If not,
+    raise ``UnsupportedConstruct`` with the split-property workaround.
+    """
+    n_left, t_left, acc_left, sigs_left = _lift_to_nfa(node.left)
+    n_right, t_right, acc_right, sigs_right = _lift_to_nfa(node.right)
+    states, trans, accept = _nfa_product_intersect(
+        n_left, t_left, acc_left,
+        n_right, t_right, acc_right,
+    )
+    if states > 32:
+        raise UnsupportedConstruct(
+            message=(
+                f"'intersect' composed NFA has K={states} states, exceeding "
+                f"the D3 budget K ≤ 32. Composed from L={n_left} × R="
+                f"{n_right}. Workaround: split the property so the two "
+                f"operands are shorter, or reduce their repetition/delay "
+                f"bounds."
+            ),
+            construct_name="intersect with K > 32",
+            source_loc=node.source_loc,
+        )
+
+    all_sigs = tuple(sorted(set(sigs_left) | set(sigs_right)))
+    observed = tuple((s, s) for s in all_sigs)
+
+    module_name = module_name_from_label(label, original_text)
+    params: dict[str, str] = {
+        "module_name": module_name,
+        "clock_signal": clock.signal, "clock_edge": clock.edge,
+        "source_loc": str(node.source_loc),
+        "sva2rtl_version": __version__,
+        "original_text": original_text,
+        "nfa_states": str(states),
+        "nfa_transitions": _serialise_transitions(trans),
+        "nfa_accept": _serialise_accept(accept),
+        "nfa_accept_mask": hex(sum(1 << i for i in accept)),
+        "nfa_accept_bits": _accept_bits(states, accept),
+        "nfa_kind": "sequence",
+        "nfa_state_d_body": _render_state_d_body(states, trans),
+    }
+    return CheckerNode(
+        template_name="nfa_generic", module_name=module_name, params=params,
+        observed_signals=observed, source_loc=node.source_loc,
+        children=(), cse_origin=cse_origin,
     )
 
 
