@@ -675,7 +675,9 @@ def _compose_seq_concat_mc(
             if cur_clk_signal == clock.signal:
                 cur_clock = clock
             else:
-                cur_clock = ClockSpec(edge="posedge", signal=cur_clk_signal, source_loc=node.source_loc)
+                cur_clock = ClockSpec(
+                    edge="posedge", signal=cur_clk_signal, source_loc=node.source_loc
+                )
             delay_checker = _make_delay_node(delay_min, delay_max, cur_clock, node.source_loc)
             children.append(delay_checker)
 
@@ -936,8 +938,6 @@ def _compose_implication(
     ``_compose_implication_mc`` — antecedent in clk1 domain, consequent in clk2
     domain, 2-DFF synchronizer on the token.
     """
-    module_name = module_name_from_label(label, original_text)
-
     if isinstance(node.consequent, ClockedSeq):
         return _compose_implication_mc(
             node, clock, label, original_text, cse_origin
