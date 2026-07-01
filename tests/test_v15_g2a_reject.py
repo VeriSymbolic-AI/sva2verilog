@@ -78,32 +78,35 @@ def _rep_c_3() -> SeqRepetition:
 
 # ── nested composition — the RISK-02 root case ───────────────────────────
 
-def test_nested_intersect_within_rejects() -> None:
-    """(a intersect b) within c — the *inner* intersect is a boolean atom
-    composition but its **result** is not a BoolExpr node (it's the
-    SeqIntersect node itself), so the outer within must reject it as
-    non-boolean until G2b.
+def test_nested_intersect_within_compiles() -> None:
+    """(a intersect b) within c — nested composition via NFA (v1.5.1 P3).
+
+    Inner intersect is a 4-state product (2×2). Outer c is 2-state.
+    Total: 4 × 2 = 8 states.
     """
     node = SeqWithin(
         inner=SeqIntersect(left=_b("a"), right=_b("b"), source_loc=_LOC),
         outer=_b("c"),
         source_loc=_LOC,
     )
-    with pytest.raises(UnsupportedConstruct) as ei:
-        compose(node, _CLK, None, "(a intersect b) within c")
-    assert "inner=SeqIntersect" in str(ei.value)
+    checker = compose(node, _CLK, None, "(a intersect b) within c")
+    assert checker.template_name == "nfa_generic"
+    assert checker.params["nfa_states"] == "8"
 
 
-def test_nested_intersect_chain_rejects() -> None:
-    """(a intersect b) intersect c — same nested-non-boolean issue."""
+def test_nested_intersect_chain_compiles() -> None:
+    """(a intersect b) intersect c — nested intersect chain (v1.5.1 P3).
+
+    Inner intersect: 4 states. Outer with c: 4 × 2 = 8 states.
+    """
     node = SeqIntersect(
         left=SeqIntersect(left=_b("a"), right=_b("b"), source_loc=_LOC),
         right=_b("c"),
         source_loc=_LOC,
     )
-    with pytest.raises(UnsupportedConstruct) as ei:
-        compose(node, _CLK, None, "(a intersect b) intersect c")
-    assert "left=SeqIntersect" in str(ei.value)
+    checker = compose(node, _CLK, None, "(a intersect b) intersect c")
+    assert checker.template_name == "nfa_generic"
+    assert checker.params["nfa_states"] == "8"
 
 
 # ── other multi-cycle shapes ─────────────────────────────────────────────

@@ -1533,22 +1533,16 @@ def _compose_intersect_bool(
 
 
 def _is_nfa_liftable(operand: SVANode) -> bool:
-    """Return True iff ``operand`` can be lifted into a small NFA today.
+    """Return True iff ``operand`` can be composed into an NFA.
 
-    Supported shapes in the first v1.5.1 P1 slice:
-    - ``BoolExpr`` — 2-state NFA
-    - ``SeqConcat`` with fixed delays (min == max) whose sub-elements
-      are all ``BoolExpr`` — N+K state NFA where K = number of elements
-    - ``SeqRepetition`` with fixed count (rep_min == rep_max) over
-      a ``BoolExpr`` — N+1 state NFA
-
-    Every other IR shape falls back to the G2a rejection until a later
-    slice teaches ``_lift_to_nfa`` about it.
+    Supported shapes:
+    - ``BoolExpr``, fixed-delay ``SeqConcat``, fixed-count ``SeqRepetition``
+    - Nested ``SeqIntersect`` / ``SeqWithin`` / ``SeqThroughout`` with
+      liftable operands (v1.5.1 P3 recursive composition).
     """
     if isinstance(operand, BoolExpr):
         return True
     if isinstance(operand, SeqConcat):
-        # All delays fixed AND all elements are BoolExpr.
         if any(mn != mx for mn, mx in operand.delays):
             return False
         return all(isinstance(e, BoolExpr) for e in operand.elements)
@@ -1557,6 +1551,15 @@ def _is_nfa_liftable(operand: SVANode) -> bool:
             isinstance(operand.expr, BoolExpr)
             and operand.rep_min == operand.rep_max
             and operand.rep_min >= 1
+        )
+    if isinstance(operand, SeqIntersect):
+        return _is_nfa_liftable(operand.left) and _is_nfa_liftable(operand.right)
+    if isinstance(operand, SeqWithin):
+        return _is_nfa_liftable(operand.inner) and _is_nfa_liftable(operand.outer)
+    if isinstance(operand, SeqThroughout):
+        return (
+            isinstance(operand.condition, BoolExpr)
+            and _is_nfa_liftable(operand.body)
         )
     return False
 
@@ -1634,6 +1637,79 @@ def _lift_to_nfa(operand: SVANode) -> tuple[
     raise ValueError(f"cannot lift {type(operand).__name__} to NFA yet")
 
 
+def _extract_nfa_from_checker(checker: CheckerNode) -> tuple[
+    int, tuple[tuple[int, str, int], ...], frozenset[int], tuple[str, ...]
+]:
+    """Extract NFA data from an already-composed ``nfa_generic`` CheckerNode.
+    """
+    assert checker.template_name == "nfa_generic", (
+        f"expected nfa_generic, got {checker.template_name}"
+    )
+    states = int(checker.params["nfa_states"])
+    raw_trans = checker.params.get("nfa_transitions", "")
+    trans = _deserialise_transitions(raw_trans.split(";") if raw_trans else [])
+    raw_accept = checker.params.get("nfa_accept", "")
+    accept = _deserialise_accept(raw_accept.split(",") if raw_accept else [])
+    sigs = tuple(s for s, _ in checker.observed_signals)
+    return states, trans, accept, sigs
+
+
+def _try_lift_operand(
+    operand: SVANode,
+    clock: ClockSpec,
+    label: str | None,
+    original_text: str,
+) -> tuple[
+    int, tuple[tuple[int, str, int], ...], frozenset[int], tuple[str, ...]
+] | None:
+    """Try to obtain NFA data from an operand.
+
+    - Primitive shapes (BoolExpr, SeqConcat, SeqRepetition): lifted
+      directly via ``_lift_to_nfa``.
+    - Nested composed shapes (SeqIntersect, SeqWithin, SeqThroughout):
+      recursively lifted via their own product constructions (no
+      compose() dispatch — avoids the bool-bool legacy path).
+    """
+    if isinstance(operand, (BoolExpr, SeqConcat, SeqRepetition)):
+        return _lift_to_nfa(operand)
+    if isinstance(operand, SeqIntersect):
+        left = _try_lift_operand(operand.left, clock, label, original_text)
+        right = _try_lift_operand(operand.right, clock, label, original_text)
+        if not left or not right:
+            return None
+        states, trans, accept = _nfa_product_intersect(
+            left[0], left[1], left[2], right[0], right[1], right[2],
+        )
+        sigs = tuple(sorted(set(left[3]) | set(right[3])))
+        return states, trans, accept, sigs
+    if isinstance(operand, SeqWithin):
+        inner = _try_lift_operand(operand.inner, clock, label, original_text)
+        outer = _try_lift_operand(operand.outer, clock, label, original_text)
+        if not inner or not outer:
+            return None
+        states, trans, accept = _nfa_product_within(
+            inner[0], inner[1], inner[2], outer[0], outer[1], outer[2],
+        )
+        sigs = tuple(sorted(set(inner[3]) | set(outer[3])))
+        return states, trans, accept, sigs
+    if isinstance(operand, SeqThroughout):
+        body = _try_lift_operand(operand.body, clock, label, original_text)
+        if not body or not isinstance(operand.condition, BoolExpr):
+            return None
+        states, trans, accept = _nfa_product_throughout(
+            operand.condition.text,
+            body[0], body[1], body[2],
+            tuple(sorted({
+                s for s, _ in extract_signals(operand.condition.text)
+            })),
+        )
+        sigs = tuple(sorted(set(body[3]) | {
+            s for s, _ in extract_signals(operand.condition.text)
+        }))
+        return states, trans, accept, sigs
+    return None
+
+
 def _nfa_product_intersect(
     n_left: int, t_left: tuple[tuple[int, str, int], ...], acc_left: frozenset[int],
     n_right: int, t_right: tuple[tuple[int, str, int], ...], acc_right: frozenset[int],
@@ -1675,6 +1751,30 @@ def _serialise_transitions(
 def _serialise_accept(accept: frozenset[int]) -> str:
     """Encode accept-state set as ``"i,j,k"`` (sorted for determinism)."""
     return ",".join(str(i) for i in sorted(accept))
+
+
+def _deserialise_transitions(
+    raw: list[str],
+) -> tuple[tuple[int, str, int], ...]:
+    """Decode NFA transitions from ``serialise_transitions`` format back."""
+    result: list[tuple[int, str, int]] = []
+    for part in raw:
+        part = part.strip()
+        if not part:
+            continue
+        s, g, t = part.split(",", 2)
+        result.append((int(s), g.strip(), int(t)))
+    return tuple(result)
+
+
+def _deserialise_accept(raw: list[str]) -> frozenset[int]:
+    """Decode accept set from ``serialise_accept`` format back."""
+    result: set[int] = set()
+    for part in raw:
+        part = part.strip()
+        if part:
+            result.add(int(part))
+    return frozenset(result)
 
 
 def _accept_bits(states: int, accept: frozenset[int]) -> str:
@@ -1828,8 +1928,11 @@ def _compose_intersect_nfa(
 
     Requires D3 budget: composed state count K = |L| * |R| ≤ 32.
     """
-    n_left, t_left, acc_left, sigs_left = _lift_to_nfa(node.left)
-    n_right, t_right, acc_right, sigs_right = _lift_to_nfa(node.right)
+    left_nfa = _try_lift_operand(node.left, clock, label, original_text)
+    right_nfa = _try_lift_operand(node.right, clock, label, original_text)
+    assert left_nfa and right_nfa, "pre-checked by _is_nfa_liftable"
+    n_left, t_left, acc_left, sigs_left = left_nfa
+    n_right, t_right, acc_right, sigs_right = right_nfa
     states, trans, accept = _nfa_product_intersect(
         n_left, t_left, acc_left, n_right, t_right, acc_right,
     )
@@ -1918,8 +2021,11 @@ def _compose_within_nfa(
     §16.9.10). Product construction: cross-product state IDs;
     transitions AND-composed; accept = inner_accept × outer_alive.
     """
-    n_inner, t_inner, acc_inner, sigs_inner = _lift_to_nfa(node.inner)
-    n_outer, t_outer, acc_outer, sigs_outer = _lift_to_nfa(node.outer)
+    inner_nfa = _try_lift_operand(node.inner, clock, label, original_text)
+    outer_nfa = _try_lift_operand(node.outer, clock, label, original_text)
+    assert inner_nfa and outer_nfa, "pre-checked by _is_nfa_liftable"
+    n_inner, t_inner, acc_inner, sigs_inner = inner_nfa
+    n_outer, t_outer, acc_outer, sigs_outer = outer_nfa
     states, trans, accept = _nfa_product_within(
         n_inner, t_inner, acc_inner, n_outer, t_outer, acc_outer,
     )
@@ -1984,7 +2090,9 @@ def _compose_throughout_nfa(
     cond_text = node.condition.text
     cond_signals = tuple(sorted({s for s, _ in extract_signals(cond_text)}))
 
-    n_body, t_body, acc_body, sigs_body = _lift_to_nfa(node.body)
+    body_nfa = _try_lift_operand(node.body, clock, label, original_text)
+    assert body_nfa, "pre-checked by _is_nfa_liftable"
+    n_body, t_body, acc_body, sigs_body = body_nfa
     states, trans, accept = _nfa_product_throughout(
         cond_text, n_body, t_body, acc_body, cond_signals,
     )
