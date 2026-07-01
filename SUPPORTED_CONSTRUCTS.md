@@ -177,18 +177,51 @@ proven non-circularly (FPV) in `tests/test_formal_sva_equiv.py`
 > separation. Use `a && b` for true same-cycle conjunction. This is a structural
 > limitation slated for the v1.5 NFA engine.
 
-### Semantic boundary: intersect / within with boolean operands
+### Semantic boundary: intersect / within / throughout (v1.5 update)
 
-The composed operators `intersect` and `within` are verified correct only for
-the single-completion-time sub-sequence case. With **boolean operands**, the
-behavioral oracle currently does not evaluate the operand values (it models a
-boolean expression as always-passing for timing purposes), so the value-level
-semantics of `a intersect b` / `a within b` are NOT independently guaranteed in
-this release. This boundary is recorded honestly as strict-xfail baseline tests
-in `tests/test_v13_independent_baseline.py`. The fix is the unified timing+data
-oracle planned for the v1.5 NFA composition engine. Use `throughout` (which does
-evaluate its condition) where value-level correctness is required, or wait for
-v1.5 for fully value-aware intersect/within.
+**v1.5.0 changes.** Two distinct boundary issues affecting the composed
+sequence operators `intersect`, `within`, `throughout` have been addressed:
+
+1. **RISK-02 (value-level oracle correctness for boolean operands) — FIXED.**
+   The behavioral oracle previously modelled a boolean expression as
+   always-passing (a `delay_fixed(0,0)` leaf), so `a intersect b` and
+   `a within b` verified vacuously true. v1.5 introduces
+   `_eval_bool_leaf(cond_node, signals)` — an independent RISK-01
+   boolean-atom evaluator that ANDs across `observed_signals` — and gates
+   the pass output of `_tick_prop_intersect` / `_tick_prop_within` by it.
+   The two strict-xfail baseline tests in
+   `tests/test_v13_independent_baseline.py` (`test_intersect_baseline_both_true`,
+   `test_within_baseline_inner_inside_outer`) are now real green pass.
+   Eight exhaustive gate tests in `tests/test_v15_risk02_gate.py` cover the
+   intersect TT/TF/FT/FF truth table and four within shape variants.
+   The RTL was already correct for boolean operands (`bool_expr.sv.j2`
+   evaluates `pass_q <= start & bool_result`); v1.5 aligned the oracle
+   with the RTL, closing RISK-01 independence for this case.
+
+2. **Silent-wrong multi-cycle composition — REJECTED.** Previously,
+   `(a ##2 b) intersect (c[*3])` silently compiled to
+   `prop_intersect(seq_concat, rep_consecutive)`, whose RTL
+   `left_pass & right_pass` matches IEEE 1800 §16.9.7 semantics only when
+   the two sub-sequences happen to complete on the same cycle by accident.
+   v1.5 closes this silent-wrong path with a compile-time
+   `UnsupportedConstruct` in `_compose_intersect / _compose_within /
+   _compose_throughout` whenever any operand is not a `BoolExpr` leaf.
+   The error names the offending operand position and IR type, mentions
+   the v1.5.1 NFA composition engine, and describes the split-property
+   workaround. Thirteen rejection tests in `tests/test_v15_g2a_reject.py`
+   cover intersect, within, throughout, nested composition, SeqOr /
+   SeqGotoRep / SeqNonconsecRep operands, and error-message quality
+   (source_loc, workaround hint).
+
+**Current honesty boundary.** After v1.5.0 the supported forms are:
+`a intersect b`, `a within b`, `c throughout b` **with boolean-atom
+operands only** — verified end-to-end (behavioral oracle, iverilog RTL
+simulation, single-cycle-completion IEEE semantics). Any multi-cycle
+sequence operand (`##N`, `[*N]`, `[->N]`, `[=N]`, nested intersect /
+within / throughout, SeqOr, etc.) is rejected at compile time. The full
+NFA composition engine — one-hot state encoding, product construction
+for the multi-cycle cases, and per-operator sby BMC non-circular proofs
+vs independent IEEE-1800 reference monitors — is scheduled for v1.5.1.
 
 ### RTL simulation: multi-module x-propagation
 
