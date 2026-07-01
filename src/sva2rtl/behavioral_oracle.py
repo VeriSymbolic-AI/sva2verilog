@@ -627,6 +627,8 @@ class _HierarchicalSim:
             return self._tick_first_match(node, signals)
         if tname in ("overlap_bitvec", "nonoverlap"):
             return self._tick_implication(node, signals, tname)
+        if tname == "implication_nfa":
+            return self._tick_implication_nfa(node, signals)
         if tname == "prop_or":
             return self._tick_prop_or(node, signals)
         if tname == "prop_and":
@@ -1182,6 +1184,48 @@ class _HierarchicalSim:
             "pass": ant_out["pass"] and cons_out["pass"],
             "fail": ant_out["pass"] and cons_out["fail"],
             "active": ant_out["active"] or cons_out["active"],
+            "overflow": False,
+        }
+
+    def _tick_implication_nfa(
+        self, node: CheckerNode, signals: dict[str, bool],
+    ) -> dict[str, bool]:
+        """v1.5.1 P2: implication with NFA consequent.
+
+        Antecedent evaluated combinationally from ``ant_guard`` param
+        (no child bool_expr).  child[0] = nfa_generic (consequent, prop).
+
+        For |->: con_start = ant_match (combinational same-cycle)
+        For |=>: con_start = delayed ant_match (prev cycle)
+        """
+        if not node.children:
+            return {"pass": False, "fail": False, "active": False, "overflow": False}
+
+        ant_guard = str(node.params.get("ant_guard", "1'b0"))
+        start = bool(signals.get("start", False))
+        ant_match = start and _eval_nfa_guard(ant_guard, signals)
+
+        overlapping = (
+            str(node.params.get("overlapping", "true")).lower()
+            in ("true", "1", "yes")
+        )
+        module = node.module_name
+        if not hasattr(self, "_impl_ant_q"):
+            self._impl_ant_q: dict[str, bool] = {}
+        if overlapping:
+            con_start = ant_match
+        else:
+            con_start = self._impl_ant_q.get(module, False)
+        self._impl_ant_q[module] = ant_match
+
+        con_signals = dict(signals)
+        con_signals["start"] = con_start
+        con_out = self._tick_node(node.children[0], con_signals)
+
+        return {
+            "pass": con_out["pass"],
+            "fail": con_out["fail"],
+            "active": con_out["active"],
             "overflow": False,
         }
 

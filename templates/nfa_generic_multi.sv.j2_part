@@ -1,0 +1,94 @@
+    // ── Multi-thread state encoding ──────────────────────────────────
+    // T = {{ T }} independent NFA threads, each K = {{ K }} bits one-hot.
+    // Packed: state_q[(s+1)*K-1 : s*K] = thread s's one-hot vector.
+    localparam STATE_BITS = {{ K }} * {{ T }};
+    {{ signal_type(verilog_mode) }} [STATE_BITS-1:0] state_q;
+    {{ wire_type(verilog_mode) }} [STATE_BITS-1:0] state_d;
+
+    // ── Priority slot allocator ──────────────────────────────────────
+    // On start pulse, allocate the FIRST free slot (all-zero state_q
+    // slice). Once a slot receives the seed bit, state_now[0] = 1
+    // combinational, so state_d becomes non-zero (unless the first
+    // transition fails to fire — then the slot frees immediately and
+    // can be reused next cycle).
+    wire [{{ T }} - 1:0] slot_free;
+{% for s in range(T) %}
+    assign slot_free[{{ s }}] = (state_q[{{ (s + 1) * K - 1 }}:{{ s * K }}] == {{ nfa_states }}'d0);
+{% endfor %}
+    wire [{{ T }} - 1:0] alloc;
+    assign alloc[0] = start & slot_free[0];
+{% for s in range(1, T) %}
+    assign alloc[{{ s }}] = start & slot_free[{{ s }}] & ~(|alloc[{{ s }} - 1:0]);
+{% endfor %}
+
+    // ── Per-slot combinational next-state logic ──────────────────────
+    // Each slot_s_now merges the slot's state_q slice with the
+    // alloc seed pulse, so the first transition fires on the SAME
+    // cycle as `start` (matches single-thread `state_now` contract).
+{% for s in range(T) %}
+    wire [{{ K }} - 1:0] slot{{ s }}_now;
+    assign slot{{ s }}_now = state_q[{{ (s + 1) * K - 1 }}:{{ s * K }}]
+                           | (alloc[{{ s }}] ? {{ nfa_states }}'d1 : {{ nfa_states }}'d0);
+{% endfor %}
+{{ nfa_state_d_body_multi }}
+
+    // ── attempt_fired sticky (any slot received start ever) ──────────
+    {{ signal_type(verilog_mode) }} attempt_fired_q;
+{{ attempt_fired_logic(verilog_mode, clock_edge, clock_signal, "start") }}
+
+    // ── Registered outputs ───────────────────────────────────────────
+    {{ signal_type(verilog_mode) }} active_q, pass_q, fail_q, disabled_q;
+
+    // pass_d: any slot's state_d has a bit in the accept mask set.
+    // Accept mask applies per-slot: check each slot's K-bit slice.
+    {{ wire_type(verilog_mode) }} pass_d;
+    wire any_pass;
+{% if T == 1 %}
+    assign any_pass = |({{ '{' }}state_d{{ '}' }} & {{ nfa_states }}'b{{ nfa_accept_bits }});
+{% else %}
+    wire [{{ T }} - 1:0] slot_pass;
+{% for s in range(T) %}
+    assign slot_pass[{{ s }}] = |({{ '{' }}state_d[{{ (s + 1) * K - 1 }}:{{ s * K }}]{{ '}' }} & {{ nfa_states }}'b{{ nfa_accept_bits }});
+{% endfor %}
+    assign any_pass = |slot_pass;
+{% endif %}
+    assign pass_d = any_pass & attempt_fired_q;
+
+    // fail_d: property NFAs fail on dead-end after attempt_fired.
+    //   Multi-thread: fail when attempt_fired AND all slots are zero
+    //   state (no active threads) AND no pass.
+    {{ wire_type(verilog_mode) }} fail_d;
+{% if nfa_kind == "property" %}
+    wire all_dead;
+{% if T == 1 %}
+    assign all_dead = (state_d == {{ nfa_states }}'d0);
+{% else %}
+    assign all_dead = (state_d == {{ nfa_states }}'d0);
+{% endif %}
+    assign fail_d = attempt_fired_q & all_dead & ~pass_d;
+{% else %}
+    assign fail_d = 1'b0;
+{% endif %}
+
+    // ── Registered outputs (always block) ────────────────────────────
+{{ always_block_header(verilog_mode, clock_edge, clock_signal) }}
+        if (!rst_n || disable_i) begin
+            state_q <= {{ nfa_states }}'d0;
+            active_q <= 1'b0;
+            pass_q <= 1'b0;
+            fail_q <= 1'b0;
+            disabled_q <= 1'b0;
+        end else begin
+            state_q <= state_d;
+            active_q <= |state_d;
+            pass_q <= pass_d;
+            fail_q <= fail_d;
+            disabled_q <= 1'b0;
+        end
+    end
+
+    assign active = disable_i ? 1'b0 : active_q;
+    assign pass = disable_i ? 1'b0 : pass_q;
+    assign fail = disable_i ? 1'b0 : fail_q;
+    assign attempt_fired = attempt_fired_q;
+    assign disabled_o = disable_i;

@@ -543,14 +543,19 @@ def test_compose_implication_delay_consequent_rejected() -> None:
         compose(node, clock, "impl_check", "a |-> a ##[2:5] b")
 
 
-def test_compose_implication_multi_delay_consequent_rejected() -> None:
-    """SeqConcat consequent with delays=((2,2),(3,3)) (BV_WIDTH=6>1) is rejected."""
-    from sva2rtl.errors import UnsupportedConstruct
+def test_compose_implication_multi_delay_consequent_nfa() -> None:
+    """SeqConcat consequent with delays=((2,2),(3,3)) (BV_WIDTH=6>1) compiles via NFA.
 
+    v1.5.1 P2: multi-delay consequent now uses the NFA composition engine
+    instead of being rejected.
+    """
     node = _make_impl_node(consequent_delays=((2, 2), (3, 3)))
     clock = _make_clock()
-    with pytest.raises(UnsupportedConstruct, match="sequence consequent"):
-        compose(node, clock, "impl_check", "a |-> a ##2 b ##3 c")
+    checker = compose(node, clock, "impl_check", "a |-> a ##2 b ##3 c")
+    assert checker.template_name == "implication_nfa"
+    # K = 1(a) + 1 + 1(wait) + 1(b) + 2(wait) + 1(c) = 7
+    # T = min(7, 4) = 4; K*T = 28 ≤ 32 ✓
+    assert checker.params["nfa_thread_slots"] == "4"
 
 
 def test_compose_implication_does_not_raise() -> None:

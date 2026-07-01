@@ -954,33 +954,50 @@ def _compose_implication_sc(
     original_text: str,
     cse_origin: str | None = None,
 ) -> CheckerNode:
-    """Build a single-clock PropImplication (byte-identical to pre-v1.4.1)."""
-    module_name = module_name_from_label(label, original_text)
-    template = "overlap_bitvec" if node.overlapping else "nonoverlap"
-    base = module_name[4:] if module_name.startswith("sva_") else module_name
-    ant_checker = compose(node.antecedent, clock, f"{base}_ant", original_text)
-    con_checker = compose(node.consequent, clock, f"{base}_con", original_text)
-    bv_width = _compute_bv_width(node.consequent)
+    """Build a single-clock PropImplication.
 
-    # v1.5 boundary (BUG-IMPL-01): only a SINGLE-CYCLE consequent (BV_WIDTH==1 —
-    # a boolean expression or sampled-value function) is formally proven correct
-    # against IEEE-1800 semantics. Multi-cycle sequence consequents need the
-    # v1.5 NFA composition engine.
+    - BV_WIDTH == 1 (boolean / sampled-value consequent): **direct path**
+      via ``overlap_bitvec`` / ``nonoverlap`` template. Single-cycle
+      consequent is formally proven correct against IEEE-1800 semantics
+      (see ``test_formal_sva_equiv.py``).
+
+    - BV_WIDTH > 1 (multi-cycle sequence consequent, v1.5.1 P2):
+      **NFA path** via ``_compose_implication_nfa`` when the consequent
+      is NFA-liftable (``SeqConcat`` fixed delays, ``SeqRepetition``
+      fixed count). Antecedent bool_expr matches gate the consequent
+      NFA start; multi-thread slots handle overlapping attempts.
+      Consequent NFA runs as nfa_kind="property" (dead-end = fail).
+
+    - Non-NFA-liftable consequent shape: still rejected
+      (``UnsupportedConstruct``, honesty boundary).
+    """
+    bv_width = _compute_bv_width(node.consequent)
     if bv_width > 1:
+        if _is_nfa_liftable(node.consequent):
+            return _compose_implication_nfa(
+                node, clock, label, original_text, cse_origin,
+            )
         raise UnsupportedConstruct(
             message=(
                 "implication ('|->' / '|=>') with a multi-cycle sequence "
                 "consequent is not yet supported: the consequent must be a "
                 "single-cycle boolean expression or sampled-value function "
                 "($rose/$fell/$stable/$past/$changed). Multi-cycle sequence "
-                "consequents (e.g. 'a |-> b ##2 c', 'a |-> b[*3]', "
-                "'a |-> (b ##[2:5] c)') are deferred to the v1.5 NFA composition "
-                "engine. Workaround: move the sequence into the antecedent, or "
-                "split into separate properties with a single-cycle consequent."
+                "consequents with fixed-delay ``SeqConcat`` or fixed-count "
+                "``SeqRepetition`` (e.g. 'a |-> b ##2 c', 'a |-> b[*3]') "
+                "are supported via the v1.5 NFA composition engine. "
+                "Ranged delays, SeqOr, goto/nonconsec repetition in the "
+                "consequent are deferred to a later version."
             ),
-            construct_name="implication with sequence consequent",
+            construct_name="implication with non-NFA-liftable sequence consequent",
             source_loc=node.source_loc,
         )
+
+    module_name = module_name_from_label(label, original_text)
+    template = "overlap_bitvec" if node.overlapping else "nonoverlap"
+    base = module_name[4:] if module_name.startswith("sva_") else module_name
+    ant_checker = compose(node.antecedent, clock, f"{base}_ant", original_text)
+    con_checker = compose(node.consequent, clock, f"{base}_con", original_text)
 
     all_signals = _collect_signals([ant_checker, con_checker])
 
@@ -1001,6 +1018,76 @@ def _compose_implication_sc(
         observed_signals=all_signals,
         source_loc=node.source_loc,
         children=(ant_checker, con_checker),
+        cse_origin=cse_origin,
+    )
+
+
+def _compose_implication_nfa(
+    node: PropImplication,
+    clock: ClockSpec,
+    label: str | None,
+    original_text: str,
+    cse_origin: str | None = None,
+) -> CheckerNode:
+    """Compose implication with a multi-cycle consequent via NFA (v1.5.1 P2).
+
+    Antecedent is evaluated COMBINATIONALLY in the wrapper template
+    (``ant_match = start & (ant_guard)``), eliminating the registered
+    pipeline latency that the old overlap_bitvec bv_q path suffered from
+    (BUG-IMPL-01).
+
+    Consequent is composed as a property-kind NFA with multi-thread slots.
+    Thread budget: T = min(K, 4), capped by K·T ≤ 32.
+    """
+    module_name = module_name_from_label(label, original_text)
+    base = module_name[4:] if module_name.startswith("sva_") else module_name
+
+    # Antecedent guard — raw boolean expression text (e.g. "a", "a && b").
+    assert isinstance(node.antecedent, BoolExpr), (
+        "implication antecedent must be BoolExpr"
+    )
+    ant_guard = node.antecedent.text
+    ant_sigs = tuple(sorted({s for s, _ in extract_signals(ant_guard)}))
+
+    # Consequent → sub-NFA (property-kind: dead-end = fail after attempt).
+    cons_states, cons_trans, cons_accept, cons_sigs = _lift_to_nfa(
+        node.consequent,
+    )
+
+    # Thread budget: worst-case concurrent = K (ant fires every cycle).
+    nfa_t = min(cons_states, 4)
+    if cons_states * nfa_t > 32:
+        nfa_t = max(1, 32 // cons_states)
+
+    cons_checker = _emit_nfa_checker(
+        "implication consequent", cons_states, cons_trans, cons_accept,
+        cons_sigs, "property",
+        clock, f"{base}_con", original_text,
+        node.source_loc, cse_origin=cse_origin,
+        thread_slots=nfa_t,
+    )
+
+    all_sigs = tuple(sorted(set(ant_sigs) | set(cons_sigs)))
+
+    params: dict[str, str] = {
+        "module_name": module_name,
+        "clock_signal": clock.signal, "clock_edge": clock.edge,
+        "source_loc": str(node.source_loc),
+        "sva2rtl_version": __version__,
+        "original_text": original_text,
+        "overlapping": node.overlapping,
+        "op_type": "|->" if node.overlapping else "|=>",
+        "nfa_thread_slots": str(nfa_t),
+        "ant_guard": ant_guard,
+    }
+
+    return CheckerNode(
+        template_name="implication_nfa",
+        module_name=module_name,
+        params=params,
+        observed_signals=tuple((s, s) for s in all_sigs),
+        source_loc=node.source_loc,
+        children=(cons_checker,),
         cse_origin=cse_origin,
     )
 
@@ -1492,15 +1579,24 @@ def _lift_to_nfa(operand: SVANode) -> tuple[
 
     if isinstance(operand, SeqConcat):
         # Chain of BoolExpr elements with fixed delays.
-        # State layout: element i's expression lives on transition
-        # (state_i --expr_i--> state_{i+1}); the delay ##N between
-        # elements i and i+1 becomes N-1 "true" transitions after
-        # matching element i and before checking element i+1.
-        #
-        # Total states = 1 + sum_i(1 + delay_before_element_i_plus_1)
-        # Element 0: delay 0 → state 0 --expr0--> state 1
-        # Between elements i and i+1: delay d → d-1 filler transitions.
-        # Element i+1 checked on state (accum + d).
+        # Normalise the delays tuple: it may be inter-element only
+        # (len=elements-1) or include a leading (0,0) for the first
+        # element (len=elements). We always normalise to the latter.
+        raw_delays = operand.delays
+        if len(raw_delays) == len(operand.elements) - 1:
+            raw_delays = ((0, 0),) + raw_delays
+        elif len(raw_delays) != len(operand.elements):
+            raise UnsupportedConstruct(
+                message=(
+                    f"SeqConcat has {len(operand.elements)} elements but "
+                    f"{len(raw_delays)} delays — expected {len(operand.elements)} "
+                    f"or {len(operand.elements) - 1}. This is an internal IR "
+                    f"invariant violation."
+                ),
+                construct_name="SeqConcat delay count mismatch",
+                source_loc=operand.source_loc,
+            )
+
         trans: list[tuple[int, str, int]] = []
         signal_set: set[str] = set()
         current = 0
@@ -1510,12 +1606,10 @@ def _lift_to_nfa(operand: SVANode) -> tuple[
             for s, _ in extract_signals(element.text):
                 signal_set.add(s)
             if i == 0:
-                # First element consumed on state 0 → state 1
                 trans.append((current, guard, current + 1))
                 current += 1
                 continue
-            # Delay before this element is operand.delays[i] = (d, d).
-            d = operand.delays[i][0]
+            d = raw_delays[i][0]
             # d-1 wait cycles then element check. d must be >= 1 for
             # slang SeqConcat (adjacent) — d == 0 means overlap which
             # slang normalises to a single expression AND. Here we
@@ -1621,6 +1715,46 @@ def _render_state_d_body(
     return "\n".join(lines)
 
 
+def _render_multi_state_d_body(
+    states: int, transitions: tuple[tuple[int, str, int], ...],
+    thread_slots: int,
+) -> str:
+    """Render per-slot combinational next-state assignments for multi-thread.
+
+    For each slot ``s`` in ``[0, thread_slots)``, emits the same transition
+    logic as ``_render_state_d_body`` but with slot-offset state_d indices.
+    Slot state source: ``state_q[(s+1)*K-1 : s*K]``, combined with
+    ``alloc[s]`` to seed state 0. Rendered via a local wire per slot
+    (``wire [K-1:0] slot_s_now``) so the guard expressions stay compact.
+    """
+    incoming: dict[int, list[tuple[int, str]]] = {b: [] for b in range(states)}
+    for from_s, guard, to_s in transitions:
+        incoming.setdefault(to_s, []).append((from_s, guard))
+
+    lines: list[str] = []
+    for s in range(thread_slots):
+        base = s * states
+        lines.append(f"    // Slot {s}")
+        for b in range(states):
+            arcs = incoming.get(b, [])
+            if not arcs:
+                lines.append(
+                    f"    assign state_d[{base + b}] = 1'b0;"
+                )
+                continue
+            terms = " | ".join(
+                f"(slot{s}_now[{from_s}] & ({g}))" for from_s, g in arcs
+            )
+            lines.append(
+                f"    assign state_d[{base + b}] = {terms};"
+            )
+        lines.append("")
+    # Remove trailing blank line.
+    if lines and lines[-1] == "":
+        lines.pop()
+    return "\n".join(lines)
+
+
 def _emit_nfa_checker(
     op_name: str, states: int,
     transitions: tuple[tuple[int, str, int], ...],
@@ -1629,24 +1763,28 @@ def _emit_nfa_checker(
     clock: ClockSpec, label: str | None,
     original_text: str, source_loc: SourceLoc,
     cse_origin: str | None,
+    *,
+    thread_slots: int = 1,
 ) -> CheckerNode:
     """Shared emitter for all NFA-composed operators.
 
     Encapsulates:
-    - D3 budget check (K ≤ 32) with actionable error naming the op.
+    - D3 budget check (K·T ≤ 32) with actionable error naming the op.
     - Serialisation of transitions / accept into ``params``.
     - Observed-signal derivation from the union of sub-NFA signal sets.
+    - Multi-thread state_d body when ``thread_slots > 1`` (v1.5.1 P2).
     """
-    if states > 32:
+    if states * thread_slots > 32:
         raise UnsupportedConstruct(
             message=(
-                f"'{op_name}' composed NFA has K={states} states, "
-                f"exceeding the D3 budget K ≤ 32. Workaround: split the "
+                f"'{op_name}' composed NFA has K={states} states × "
+                f"T={thread_slots} threads = {states * thread_slots} bits, "
+                f"exceeding the D3 budget K·T ≤ 32. Workaround: split the "
                 f"property so operands are shorter, or reduce repetition "
-                f"/ delay bounds. See SUPPORTED_CONSTRUCTS.md for the K "
-                f"budget rationale."
+                f"/ delay bounds / concurrent threads. See "
+                f"SUPPORTED_CONSTRUCTS.md for the budget rationale."
             ),
-            construct_name=f"{op_name} with K > 32",
+            construct_name=f"{op_name} with K·T > 32",
             source_loc=source_loc,
         )
     observed = tuple((s, s) for s in signals)
@@ -1664,7 +1802,12 @@ def _emit_nfa_checker(
         "nfa_accept_bits": _accept_bits(states, accept),
         "nfa_kind": nfa_kind,
         "nfa_state_d_body": _render_state_d_body(states, transitions),
+        "nfa_thread_slots": str(thread_slots),
     }
+    if thread_slots > 1:
+        params["nfa_state_d_body_multi"] = _render_multi_state_d_body(
+            states, transitions, thread_slots,
+        )
     return CheckerNode(
         template_name="nfa_generic", module_name=module_name, params=params,
         observed_signals=observed, source_loc=source_loc,

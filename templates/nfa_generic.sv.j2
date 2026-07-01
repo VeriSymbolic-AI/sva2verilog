@@ -6,6 +6,7 @@
 //
 // v1.5.1 NFA-based composition monitor.
 //   states K            = {{ nfa_states }}
+//   threads T           = {{ nfa_thread_slots | default(1) }}
 //   accept mask         = {{ nfa_accept_mask }}
 //   nfa_kind            = {{ nfa_kind }}  (0=sequence, 1=property)
 //   independent oracle  = tools/audit/probe_nfa_prototype.py (Python)
@@ -26,70 +27,11 @@ module {{ module_name }} (
 {{ port_decl(verilog_mode, "output", "attempt_fired") }},
 {{ port_decl(verilog_mode, "output", "disabled_o") }}
 );
-
-    // ── State encoding ────────────────────────────────────────────────
-    // One-hot: state_q[i] = 1 iff NFA state i is active this cycle.
-    // K = {{ nfa_states }}. state_q[0] is armed COMBINATIONALLY on `start`
-    // so the very first transition can observe operand values on the SAME
-    // cycle `start` is pulsed (matches oracle semantics — see v1.5-ROADMAP
-    // G1.2). Otherwise a naive `state_q <= start_seed | state_d` would
-    // introduce a 1-cycle skew between oracle and RTL.
-    {{ signal_type(verilog_mode) }} [{{ nfa_states|int - 1 }}:0] state_q;
-    {{ wire_type(verilog_mode) }} [{{ nfa_states|int - 1 }}:0] state_now;
-    {{ wire_type(verilog_mode) }} [{{ nfa_states|int - 1 }}:0] state_d;
-    // state_now: state_q merged combinationally with the start-seed pulse.
-    // This bit-vector drives all outgoing transitions this cycle.
-    assign state_now = state_q | (start ? {{ nfa_states }}'d1 : {{ nfa_states }}'d0);
-
-    // ── Combinational next-state logic (product construction) ────────
-    // Each bit is the OR of all transitions ((s, guard) → this_bit)
-    // enabled by state_now[s] & guard. Rendered by the composer from the
-    // NfaCompose IR transition table.
-{{ nfa_state_d_body }}
-
-    // ── attempt_fired sticky (v1.0 pitfall P1.1) ─────────────────────
-    {{ signal_type(verilog_mode) }} attempt_fired_q;
-{{ attempt_fired_logic(verilog_mode, clock_edge, clock_signal, "start") }}
-
-    // ── Registered outputs (1-cycle latency start → pass) ────────────
-    {{ signal_type(verilog_mode) }} active_q, pass_q, fail_q, disabled_q;
-
-    // pass_d: any state_d bit in the accept mask is set.
-    {{ wire_type(verilog_mode) }} pass_d;
-    assign pass_d = |({{ '{' }}state_d{{ '}' }} & {{ nfa_states }}'b{{ nfa_accept_bits }});
-
-    // fail_d: property NFAs fail on dead-end after attempt_fired.
-    //   sequence NFAs never fail here (vacuous drop, per v1.5-ROADMAP G1.2).
-    {{ wire_type(verilog_mode) }} fail_d;
-{% if nfa_kind == "property" %}
-    assign fail_d = attempt_fired_q & (state_d == {{ nfa_states }}'d0) & ~pass_d;
+{% set K = nfa_states | int %}
+{% set T = nfa_thread_slots | int if nfa_thread_slots is defined else 1 %}
+{% if T == 1 %}
+{% include 'nfa_generic_single.sv.j2_part' %}
 {% else %}
-    assign fail_d = 1'b0;
+{% include 'nfa_generic_multi.sv.j2_part' %}
 {% endif %}
-
-{{ always_block_header(verilog_mode, clock_edge, clock_signal) }}
-        if (!rst_n || disable_i) begin
-            state_q <= {{ nfa_states }}'d0;
-            active_q <= 1'b0;
-            pass_q <= 1'b0;
-            fail_q <= 1'b0;
-            disabled_q <= 1'b0;
-        end else begin
-            // state_now already merged start-seed with state_q combi-
-            // nationally, so state_d already reflects the "just-started"
-            // attempt. Register state_d as the new state_q.
-            state_q <= state_d;
-            active_q <= |state_d;
-            pass_q <= pass_d;
-            fail_q <= fail_d;
-            disabled_q <= 1'b0;
-        end
-    end
-
-    assign active = disable_i ? 1'b0 : active_q;
-    assign pass = disable_i ? 1'b0 : pass_q;
-    assign fail = disable_i ? 1'b0 : fail_q;
-    assign attempt_fired = attempt_fired_q;
-    assign disabled_o = disable_i;
-
 endmodule
