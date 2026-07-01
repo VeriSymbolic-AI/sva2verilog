@@ -143,7 +143,51 @@ def emit_all(
     env = _make_env(template_dir)
     results: dict[str, str] = {}
     _emit_recursive(checker, env, results, verilog_mode=verilog_mode)
+
+    # Auto-include transitive dependencies: if any sync_2dff module is emitted,
+    # the lfsr_8bit library module MUST also be emitted (sync_2dff instantiates
+    # it when META_ENABLE=1; iverilog needs the module definition present).
+    _ensure_deps(checker, env, results, verilog_mode=verilog_mode)
+
     return results
+
+
+def _ensure_deps(
+    checker: CheckerNode,
+    env: Environment,
+    results: dict[str, str],
+    *,
+    verilog_mode: bool = False,
+) -> None:
+    """Ensure transitive library modules are present in *results*.
+
+    Currently the only dependency is ``lfsr_8bit``, required by ``sync_2dff``.
+    """
+    _ensure_lfsr_8bit(checker, env, results, verilog_mode=verilog_mode)
+
+
+def _ensure_lfsr_8bit(
+    checker: CheckerNode,
+    env: Environment,
+    results: dict[str, str],
+    *,
+    verilog_mode: bool = False,
+) -> None:
+    """If any ``sync_2dff`` module is emitted, emit ``lfsr_8bit`` as well."""
+    def _has_sync(node: CheckerNode) -> bool:
+        if node.template_name == "sync_2dff":
+            return True
+        for child in node.children:
+            if _has_sync(child):
+                return True
+        return False
+
+    if _has_sync(checker) and "lfsr_8bit" not in results:
+        ctx: dict[str, object] = {
+            "module_name": "lfsr_8bit",
+            "verilog_mode": verilog_mode,
+        }
+        results["lfsr_8bit"] = env.get_template("lfsr_8bit.sv.j2").render(**ctx)
 
 
 def _emit_recursive(
