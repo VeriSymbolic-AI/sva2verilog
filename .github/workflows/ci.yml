@@ -96,6 +96,12 @@ jobs:
       - name: Install yosys
         run: sudo apt-get update && sudo apt-get install -y yosys
 
+      - name: Install SymbiYosys (sby)
+        run: |
+          sudo apt-get update && sudo apt-get install -y python3-pip libffi-dev
+          pip3 install --user --break-system-packages sby
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
       - name: Install slang
         run: |
           SLANG_VERSION="v11.0"
@@ -105,6 +111,6 @@ jobs:
           slang --version
 
       - name: Run formal equivalence tests
-        run: uv run pytest tests/test_formal_passes.py tests/test_formal_templates.py -v --timeout=600
+        run: uv run pytest tests/test_formal_passes.py tests/test_formal_templates.py tests/test_formal_sva_equiv.py tests/test_v151_nfa_bmc.py tests/test_v151_p2_bmc.py -v --timeout=600
         env:
           SLANG_PATH: /usr/local/bin/slang

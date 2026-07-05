@@ -30,7 +30,7 @@ module {{ module_name }} (
     {{ wire_type(verilog_mode) }} body_disabled_o_w;
 
     {{ child.module_name }} #(
-{% for key, value in child.params.items() %}{% if key not in ('module_name','source_loc','sva2rtl_version','original_text') %}        .{{ key }}({{ value }}){% if not loop.last %},{% endif %}
+{% for key, value in child.params.items() %}{% if key not in ('module_name','source_loc','sva2rtl_version','original_text','clock_edge','clock_signal') %}        .{{ key }}({{ value }}){% if not loop.last %},{% endif %}
 {% endif %}{% endfor %}
     ) u_body (
         .{{ clock_signal }}  ({{ clock_signal }}),

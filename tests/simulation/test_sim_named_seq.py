@@ -114,8 +114,7 @@ class TestNamedSeqPass:
         results = _run_stimulus(checker, stimulus, tmp_path)
 
         assert results[2]["pass"] is True, (
-            f"Expected pass at t=2, got pass={results[2]['pass']}. "
-            f"Full results: {results[:4]}"
+            f"Expected pass at t=2, got pass={results[2]['pass']}. Full results: {results[:4]}"
         )
         for t in [0, 1]:
             assert results[t]["pass"] is False, f"Unexpected pass at t={t}"
@@ -135,8 +134,7 @@ class TestNamedSeqPass:
         results = _run_stimulus(checker, stimulus, tmp_path)
 
         assert results[2]["fail"] is True, (
-            f"Expected fail at t=2, got fail={results[2]['fail']}. "
-            f"Full results: {results[:4]}"
+            f"Expected fail at t=2, got fail={results[2]['fail']}. Full results: {results[:4]}"
         )
         assert results[2]["pass"] is False
 
@@ -221,7 +219,7 @@ class TestNamedSeqOracleCrosscheck:
 
     @pytest.mark.xfail(
         reason="simulate_checker_hierarchy bool_expr oracle is passthrough — "
-               "does not produce fail events for expression evaluation",
+        "does not produce fail events for expression evaluation",
         strict=True,
     )
     def test_named_seq_oracle_fail_event(self, tmp_path: Path, simulator: str) -> None:

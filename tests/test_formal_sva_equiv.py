@@ -91,9 +91,7 @@ class TestBoolExprSvaEquiv:
             "    end\n"
         )
         reference = "valid_q && !prev_expr_q"
-        passed, output = run_sva_equiv_check(
-            checker, reference, helper_regs=helper, depth=15
-        )
+        passed, output = run_sva_equiv_check(checker, reference, helper_regs=helper, depth=15)
         assert passed, f"bool_simple SVA↔RTL equivalence FAILED:\n{output[-2000:]}"
 
 
@@ -125,9 +123,7 @@ class TestRoseSvaEquiv:
         # $rose detected iff sig high now AND low previous cycle; violation iff
         # not a rising edge.
         reference = f"!({sig} && !{sig}_prev_ref_q)"
-        passed, output = run_sva_equiv_check(
-            checker, reference, helper_regs=helper, depth=15
-        )
+        passed, output = run_sva_equiv_check(checker, reference, helper_regs=helper, depth=15)
         assert passed, f"rose SVA↔RTL equivalence FAILED:\n{output[-2000:]}"
 
 
@@ -254,10 +250,10 @@ class TestDelaySvaEquiv:
     @pytest.mark.parametrize(
         "m,n",
         [
-            (1, 1),   # ##1: gap-1 boundary (start-cycle combinational fire)
-            (3, 3),   # ##3: the operator whose +2 defect BUG-DELAY-01 first caught
-            (1, 3),   # ##[1:3]: range spanning the start-term and counter boundary
-            (2, 5),   # ##[2:5]: pure counter-path range
+            (1, 1),  # ##1: gap-1 boundary (start-cycle combinational fire)
+            (3, 3),  # ##3: the operator whose +2 defect BUG-DELAY-01 first caught
+            (1, 3),  # ##[1:3]: range spanning the start-term and counter boundary
+            (2, 5),  # ##[2:5]: pure counter-path range
         ],
     )
     def test_delay_gap_equiv(self, m: int, n: int) -> None:
@@ -265,9 +261,7 @@ class TestDelaySvaEquiv:
         checker = _build_delay_checker(m, n)
         ref_name = f"ref_a_{m}_{n}_b"
         ref = _delay_ref_module(ref_name, m, n)
-        passed, output = run_sva_miter_check(
-            checker, ref, ref_name, compare="pass", depth=20
-        )
+        passed, output = run_sva_miter_check(checker, ref, ref_name, compare="pass", depth=20)
         assert passed, f"a ##[{m}:{n}] b SVA↔RTL equivalence FAILED:\n{output[-2500:]}"
 
 
@@ -308,9 +302,7 @@ class TestImplicationSvaEquiv:
             "    end\n"
         )
         reference = f"vld1 & {a}_d1 & ~{b}_d1"
-        passed, output = run_sva_equiv_check(
-            checker, reference, helper_regs=helper, depth=15
-        )
+        passed, output = run_sva_equiv_check(checker, reference, helper_regs=helper, depth=15)
         assert passed, f"a |-> b SVA↔RTL equivalence FAILED:\n{output[-2500:]}"
 
     def test_nonoverlap_equiv(self) -> None:
@@ -330,9 +322,7 @@ class TestImplicationSvaEquiv:
             "    end\n"
         )
         reference = f"vld2 & {a}_d2 & ~{b}_d1"
-        passed, output = run_sva_equiv_check(
-            checker, reference, helper_regs=helper, depth=15
-        )
+        passed, output = run_sva_equiv_check(checker, reference, helper_regs=helper, depth=15)
         assert passed, f"a |=> b SVA↔RTL equivalence FAILED:\n{output[-2500:]}"
 
 
@@ -363,9 +353,7 @@ class TestPropertyNotSvaEquiv:
             "    end\n"
         )
         reference = f"vld2 & {a}_d2"
-        passed, output = run_sva_equiv_check(
-            checker, reference, helper_regs=helper, depth=15
-        )
+        passed, output = run_sva_equiv_check(checker, reference, helper_regs=helper, depth=15)
         assert passed, f"not (a) SVA↔RTL equivalence FAILED:\n{output[-2500:]}"
 
 
@@ -394,9 +382,7 @@ class TestPropIfElseSvaEquiv:
             "    end\n"
         )
         reference = "vld2 & (sel_d1 ? ~a_d2 : ~b_d2)"
-        passed, output = run_sva_equiv_check(
-            checker, reference, helper_regs=helper, depth=15
-        )
+        passed, output = run_sva_equiv_check(checker, reference, helper_regs=helper, depth=15)
         assert passed, f"if/else SVA↔RTL equivalence FAILED:\n{output[-2500:]}"
 
 
@@ -475,11 +461,11 @@ class TestSEventuallySvaEquiv:
     @pytest.mark.parametrize(
         "lo,hi",
         [
-            (1, 1),   # single offset, gap-1
-            (1, 3),   # range spanning start-relative window
-            (2, 2),   # single offset, deeper
-            (2, 5),   # wider counter range
-            (0, 2),   # lo==0: start-cycle offset included
+            (1, 1),  # single offset, gap-1
+            (1, 3),  # range spanning start-relative window
+            (2, 2),  # single offset, deeper
+            (2, 5),  # wider counter range
+            (0, 2),  # lo==0: start-cycle offset included
         ],
     )
     @pytest.mark.parametrize("compare", ["pass", "fail"])
@@ -488,12 +474,9 @@ class TestSEventuallySvaEquiv:
         checker = _build_se_checker(lo, hi)
         ref_name = f"ref_se_{lo}_{hi}"
         ref = _se_ref_module(ref_name, lo, hi)
-        passed, output = run_sva_miter_check(
-            checker, ref, ref_name, compare=compare, depth=20
-        )
+        passed, output = run_sva_miter_check(checker, ref, ref_name, compare=compare, depth=20)
         assert passed, (
-            f"s_eventually[{lo}:{hi}] {compare} SVA↔RTL equivalence FAILED:\n"
-            f"{output[-2500:]}"
+            f"s_eventually[{lo}:{hi}] {compare} SVA↔RTL equivalence FAILED:\n{output[-2500:]}"
         )
 
 
@@ -572,11 +555,11 @@ class TestSAlwaysSvaEquiv:
     @pytest.mark.parametrize(
         "lo,hi",
         [
-            (1, 1),   # single offset, gap-1
-            (1, 3),   # range spanning start-relative window
-            (2, 2),   # single offset, deeper
-            (2, 5),   # wider counter range
-            (0, 2),   # lo==0: start-cycle offset included
+            (1, 1),  # single offset, gap-1
+            (1, 3),  # range spanning start-relative window
+            (2, 2),  # single offset, deeper
+            (2, 5),  # wider counter range
+            (0, 2),  # lo==0: start-cycle offset included
         ],
     )
     @pytest.mark.parametrize("compare", ["pass", "fail"])
@@ -585,13 +568,8 @@ class TestSAlwaysSvaEquiv:
         checker = _build_sa_checker(lo, hi)
         ref_name = f"ref_sa_{lo}_{hi}"
         ref = _sa_ref_module(ref_name, lo, hi)
-        passed, output = run_sva_miter_check(
-            checker, ref, ref_name, compare=compare, depth=20
-        )
-        assert passed, (
-            f"always[{lo}:{hi}] {compare} SVA↔RTL equivalence FAILED:\n"
-            f"{output[-2500:]}"
-        )
+        passed, output = run_sva_miter_check(checker, ref, ref_name, compare=compare, depth=20)
+        assert passed, f"always[{lo}:{hi}] {compare} SVA↔RTL equivalence FAILED:\n{output[-2500:]}"
 
 
 # ── Weak until / until_with a until b (v1.4 Part A) ───────────────────────────
@@ -669,10 +647,303 @@ class TestUntilSvaEquiv:
         checker = _build_until_checker(with_)
         ref_name = f"ref_u_{'w' if with_ else 'u'}"
         ref = _until_ref_module(ref_name, with_)
-        passed, output = run_sva_miter_check(
-            checker, ref, ref_name, compare=compare, depth=20
-        )
+        passed, output = run_sva_miter_check(checker, ref, ref_name, compare=compare, depth=20)
         kw = "until_with" if with_ else "until"
-        assert passed, (
-            f"{kw} {compare} SVA↔RTL equivalence FAILED:\n{output[-2500:]}"
+        assert passed, f"{kw} {compare} SVA↔RTL equivalence FAILED:\n{output[-2500:]}"
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# v1.5.2: BMC miter proofs for the 6 operators that were previously
+# simulation-only (no formal equivalence). Each uses an independently
+# authored IEEE-1800 reference monitor (shift-register / counter structure
+# distinct from the generated RTL) to break RISK-01 circularity.
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+def _ref_disable_iff(name: str) -> str:
+    """Independent reference for ``disable iff (!rst_n) (a |-> b)``.
+
+    RTL: disable_iff_top wraps overlap_bitvec. effective_disable = !rst_n.
+    When rst_n=1 (enabled): pass = ant_pass_w & con_pass_w, fail = ant_pass_w
+    & con_fail_w. Both ant/con are bool_expr leaves (registered 1 cycle).
+    So pass at t+1 if a(t) & b(t).
+
+    Reference: independent prev_a + prev_b registers + combinational pass/fail.
+    pass at t+1 = a(t) & b(t) (both sampled at start, reported next cycle).
+    """
+    return f"""
+module {name} (
+    input  logic clk, rst_n, start, a, b,
+    output logic pass, fail
+);
+    logic prev_a_q, prev_b_q;
+    always_ff @(posedge clk) begin
+        if (!rst_n) begin
+            prev_a_q <= 1'b0;
+            prev_b_q <= 1'b0;
+        end else begin
+            prev_a_q <= start & a;
+            prev_b_q <= start & b;
+        end
+    end
+    assign pass = rst_n & prev_a_q & prev_b_q;
+    assign fail = rst_n & prev_a_q & ~prev_b_q;
+endmodule
+"""
+
+
+class TestDisableIffSvaEquiv:
+    """``disable iff`` monitor proven equiv to independent reference."""
+
+    @pytest.mark.parametrize("compare", ["pass", "fail"])
+    def test_disable_iff_equiv(self, compare: str) -> None:
+        checker = _build("disable_iff")
+        ref_name = "ref_diff"
+        ref = _ref_disable_iff(ref_name)
+        passed, output = run_sva_miter_check(
+            checker,
+            ref,
+            ref_name,
+            compare=compare,
+            depth=15,
         )
+        assert passed, f"disable_iff {compare} SVA↔RTL equiv FAILED:\n{output[-2500:]}"
+
+
+def _ref_rep_consecutive(name: str, n: int) -> str:
+    """Independent reference for ``a[*N]`` consecutive repetition.
+
+    RTL timing (rep_consecutive.sv.j2): count_q initialized to 1 at
+    start (registered), incremented each cycle while running && a.
+    pass is COMBINATIONAL: running_q && a && count_q == n.
+    """
+    return f"""
+module {name} (
+    input  logic clk, rst_n, start, a,
+    output logic pass
+);
+    logic [1:0] cnt_q;
+    logic running_q;
+    always_ff @(posedge clk) begin
+        if (!rst_n) begin
+            cnt_q     <= 0;
+            running_q <= 1'b0;
+        end else if (start && a) begin
+            cnt_q     <= 1;
+            running_q <= 1'b1;
+        end else if (running_q && a) begin
+            if (cnt_q < {n})
+                cnt_q <= cnt_q + 1'b1;
+        end else if (running_q && !a) begin
+            running_q <= 1'b0;
+            cnt_q     <= 0;
+        end
+    end
+    assign pass = running_q && a && (cnt_q == {n});
+endmodule
+"""
+
+
+class TestRepConsecutiveSvaEquiv:
+    """``[*N]`` consecutive repetition proven equiv to independent reference."""
+
+    def test_rep_fixed_equiv(self) -> None:
+        checker = _build("rep_fixed")
+        ref_name = "ref_rep3"
+        ref = _ref_rep_consecutive(ref_name, 3)
+        passed, output = run_sva_miter_check(
+            checker,
+            ref,
+            ref_name,
+            compare="pass",
+            depth=20,
+        )
+        assert passed, f"[*3] SVA↔RTL equiv FAILED:\n{output[-2500:]}"
+
+
+def _ref_past(name: str, depth: int) -> str:
+    """Independent reference for ``$past(sig, N)``.
+
+    IEEE 1800 §16.9.8.4: ``$past(sig, N)`` returns the value of sig N
+    cycles ago. Reference: independent N-stage shift register.
+    """
+    stages = "\n".join(
+        f"        s_q[{i}] <= s_q[{i - 1}];" if i > 0 else "        s_q[0] <= sig;"
+        for i in range(depth)
+    )
+    return f"""
+module {name} (
+    input  logic clk, rst_n, start, sig,
+    output logic pass, fail
+);
+    logic [0:{depth - 1}] s_q;
+    always_ff @(posedge clk) begin
+        if (!rst_n) begin
+            for (int i = 0; i < {depth}; i++) s_q[i] <= 1'b0;
+        end else begin
+{stages}
+        end
+    end
+    // pass: start & (past value is true); fail: start & (past value is false)
+    assign pass = start & s_q[{depth - 1}];
+    assign fail = start & ~s_q[{depth - 1}];
+endmodule
+"""
+
+
+class TestPastSvaEquiv:
+    """``$past(sig, N)`` proven equiv to independent shift-register reference."""
+
+    def test_past_equiv(self) -> None:
+        checker = _build("past")
+        ref_name = "ref_past3"
+        ref = _ref_past(ref_name, 3)
+        passed, output = run_sva_miter_check(
+            checker,
+            ref,
+            ref_name,
+            compare="pass",
+            depth=15,
+        )
+        assert passed, f"$past SVA↔RTL equiv FAILED:\n{output[-2500:]}"
+
+
+def _ref_first_match(name: str) -> str:
+    """Independent reference for ``first_match(a ##1 b)``.
+
+    RTL: seq_concat_top body (a ##1 b) has pass at start+2 (a sampled at
+    start, b at start+1, both through registered leaves + concat_delay).
+    locked_q registered when body_pass_w fires. pass = body_pass_w && !locked_q.
+
+    Reference: a_q at start+1 = a(start), match at start+1 = a_q & b.
+    pass_q registered: pass at start+2 = a(start) & b(start+1).
+    """
+    return f"""
+module {name} (
+    input  logic clk, rst_n, start, a, b,
+    output logic pass
+);
+    logic a_q;
+    logic match_w;
+    logic pass_q;
+    always_ff @(posedge clk) begin
+        if (!rst_n) begin
+            a_q    <= 1'b0;
+            pass_q <= 1'b0;
+        end else begin
+            a_q <= start & a;
+            pass_q <= match_w;
+        end
+    end
+    assign match_w = a_q & b;
+    assign pass = pass_q;
+endmodule
+"""
+
+
+class TestFirstMatchSvaEquiv:
+    """``first_match`` proven equiv to independent reference (v1.5.2 fix)."""
+
+    def test_first_match_equiv(self) -> None:
+        checker = _build("first_match")
+        ref_name = "ref_fm"
+        ref = _ref_first_match(ref_name)
+        passed, output = run_sva_miter_check(
+            checker,
+            ref,
+            ref_name,
+            compare="pass",
+            depth=15,
+        )
+        assert passed, f"first_match SVA↔RTL equiv FAILED:\n{output[-2500:]}"
+
+
+def _ref_goto_rep(name: str, n: int) -> str:
+    """Independent reference for ``a[->N]`` goto repetition.
+
+    RTL timing (goto_rep.sv.j2): count_q increments when start && !passed_q
+    && sig_eval && count_q < rep_max. passed_q set when sig_eval && count_q
+    == rep_max-1. Both registered. pass = passed_q (combinational read).
+    No reset on start — start gates counting.
+    """
+    return f"""
+module {name} (
+    input  logic clk, rst_n, start, a,
+    output logic pass
+);
+    logic [1:0] cnt_q;
+    logic passed_q;
+    always_ff @(posedge clk) begin
+        if (!rst_n) begin
+            cnt_q    <= 0;
+            passed_q <= 1'b0;
+        end else if (start && !passed_q) begin
+            if (a && cnt_q < {n})
+                cnt_q <= cnt_q + 1'b1;
+            if (a && cnt_q == {n - 1})
+                passed_q <= 1'b1;
+        end
+    end
+    assign pass = passed_q;
+endmodule
+"""
+
+
+class TestGotoRepSvaEquiv:
+    """``[->N]`` goto repetition proven equiv to independent reference."""
+
+    def test_goto_rep_equiv(self) -> None:
+        checker = _build("goto_rep")
+        ref_name = "ref_goto3"
+        ref = _ref_goto_rep(ref_name, 3)
+        passed, output = run_sva_miter_check(
+            checker,
+            ref,
+            ref_name,
+            compare="pass",
+            depth=25,
+        )
+        assert passed, f"[->3] SVA↔RTL equiv FAILED:\n{output[-2500:]}"
+
+
+def _ref_nonconsec_rep(name: str, n: int) -> str:
+    """Independent reference for ``a[=N]`` nonconsecutive repetition.
+
+    RTL timing (nonconsec_rep.sv.j2): count_q increments when start &&
+    sig_eval && count_q < rep_max. pass = count_q >= rep_min (combinational).
+    No done_q latch — pass stays high once count reaches N.
+    """
+    return f"""
+module {name} (
+    input  logic clk, rst_n, start, a,
+    output logic pass
+);
+    logic [2:0] cnt_q;
+    always_ff @(posedge clk) begin
+        if (!rst_n) begin
+            cnt_q <= 0;
+        end else if (start) begin
+            if (a && cnt_q < {n})
+                cnt_q <= cnt_q + 1'b1;
+        end
+    end
+    assign pass = (cnt_q >= {n});
+endmodule
+"""
+
+
+class TestNonconsecRepSvaEquiv:
+    """``[=N]`` nonconsecutive repetition proven equiv to independent ref."""
+
+    def test_nonconsec_rep_equiv(self) -> None:
+        checker = _build("nonconsec_rep")
+        ref_name = "ref_noncon5"
+        ref = _ref_nonconsec_rep(ref_name, 5)
+        passed, output = run_sva_miter_check(
+            checker,
+            ref,
+            ref_name,
+            compare="pass",
+            depth=30,
+        )
+        assert passed, f"[=5] SVA↔RTL equiv FAILED:\n{output[-2500:]}"

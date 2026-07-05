@@ -231,9 +231,7 @@ def import_all_assertions(
         if member.get("kind") == "Instance":
             body = member.get("body", {})
             if body.get("kind") == "InstanceBody":
-                results.extend(
-                    _find_all_assertions_in_members(body.get("members", []))
-                )
+                results.extend(_find_all_assertions_in_members(body.get("members", [])))
 
     if not results:
         raise SvaCompileError(
@@ -393,21 +391,9 @@ def extract_source_loc(node: dict[str, Any]) -> SourceLoc:
     (``source_file`` etc.) field names.  Falls back to ``"<unknown>"``
     / ``0`` when fields are absent.
     """
-    file = str(
-        node.get("source_file_start")
-        or node.get("source_file")
-        or "<unknown>"
-    )
-    line = int(
-        node.get("source_line_start")
-        or node.get("source_line")
-        or 0
-    )
-    col = int(
-        node.get("source_column_start")
-        or node.get("source_column")
-        or 0
-    )
+    file = str(node.get("source_file_start") or node.get("source_file") or "<unknown>")
+    line = int(node.get("source_line_start") or node.get("source_line") or 0)
+    col = int(node.get("source_column_start") or node.get("source_column") or 0)
     return SourceLoc(file=file, line=line, col=col)
 
 
@@ -523,8 +509,8 @@ def _find_assertion_in_members(
                 if block_body.get("kind") == "ConcurrentAssertion":
                     return _import_concurrent_assertion(block_body, label=label)
                 # Check statements
-                stmts: list[dict[str, Any]] = proc_body.get("statements", [])
-                for stmt in stmts:
+                proc_stmts: list[dict[str, Any]] = proc_body.get("statements", [])
+                for stmt in proc_stmts:
                     if stmt.get("kind") == "ConcurrentAssertion":
                         return _import_concurrent_assertion(stmt, label=label)
                 # Recurse into Block members if present
@@ -583,8 +569,8 @@ def _find_all_assertions_in_members(
                 if block_body.get("kind") == "ConcurrentAssertion":
                     results.append(_import_concurrent_assertion(block_body, label=label))
                 # Check statements
-                stmts: list[dict[str, Any]] = proc_body.get("statements", [])
-                for stmt in stmts:
+                all_proc_stmts: list[dict[str, Any]] = proc_body.get("statements", [])
+                for stmt in all_proc_stmts:
                     if stmt.get("kind") == "ConcurrentAssertion":
                         results.append(_import_concurrent_assertion(stmt, label=label))
                 # Recurse into Block members if present
@@ -601,7 +587,7 @@ def _extract_label(block: dict[str, Any]) -> str | None:
     v11.0 StatementBlock: uses ``name`` field directly.
     """
     # v11.0: StatementBlock uses "name" for the label
-    name = block.get("name", "")
+    name: str = str(block.get("name", ""))
     if block.get("kind") == "StatementBlock" and name:
         return name
     # v7.0: Block uses "block" field with "ADDRESS label_name" format
@@ -644,6 +630,8 @@ def _import_concurrent_assertion(
             f"ConcurrentAssertion, got '{body_kind}' at {source_loc}"
         )
 
+    # Declare ir_node with broad type so all match arms can assign to it.
+    ir_node: SVANode
     match expr_node.get("kind"):
         case "Simple":
             # v11.0: property is wrapped in Simple → unwrap
@@ -655,9 +643,9 @@ def _import_concurrent_assertion(
             rep = expr_node.get("repetition", {})
             rep_kind = rep.get("kind", "")
             if rep_kind == "GoTo":
-                rep_ir = _build_goto_rep(expr_node, source_loc)
+                rep_ir: SVANode = _build_goto_rep(expr_node, source_loc)
                 ir_node = rep_ir
-                text = _reconstruct_rep_text(rep_ir)
+                text = _reconstruct_rep_text(rep_ir)  # type: ignore[arg-type]
             elif rep_kind == "Nonconsecutive":
                 rep_ir = _build_nonconsec_rep(expr_node, source_loc)
                 ir_node = rep_ir
@@ -672,7 +660,7 @@ def _import_concurrent_assertion(
                     text = _reconstruct_signal_func_text(sf_ir)
                 else:
                     text = expr_to_sv(inner)
-                    ir_node: SVANode = BoolExpr(text=text, source_loc=source_loc)
+                    ir_node = BoolExpr(text=text, source_loc=source_loc)
             elif inner_kind == "SimpleAssertionExpr":
                 # v7.0 legacy: repetition inside SimpleAssertionExpr sub-node
                 rep_kind2 = inner.get("repetition", {}).get("kind", "")
@@ -685,28 +673,28 @@ def _import_concurrent_assertion(
                     text = _reconstruct_rep_text(rep_ir)
                 else:
                     text = expr_to_sv(inner)
-                    ir_node: SVANode = BoolExpr(text=text, source_loc=source_loc)
+                    ir_node = BoolExpr(text=text, source_loc=source_loc)
             else:
                 text = expr_to_sv(inner)
-                ir_node: SVANode = BoolExpr(text=text, source_loc=source_loc)
+                ir_node = BoolExpr(text=text, source_loc=source_loc)
         case "SequenceConcat":
             seq_ir = _build_seq_concat(expr_node, source_loc)
             ir_node = seq_ir
             text = _reconstruct_seq_text(seq_ir)
         case "SimpleAssertionExpr" if expr_node.get("repetition", {}).get("kind") == "Consecutive":
-            rep_ir = _build_seq_repetition(expr_node, source_loc)
-            ir_node = rep_ir
-            text = _reconstruct_rep_text(rep_ir)
+            rep_consec = _build_seq_repetition(expr_node, source_loc)
+            ir_node = rep_consec
+            text = _reconstruct_rep_text(rep_consec)
         case "SimpleAssertionExpr" if expr_node.get("repetition", {}).get("kind") == "GoTo":
-            rep_ir = _build_goto_rep(expr_node, source_loc)
-            ir_node = rep_ir
-            text = _reconstruct_rep_text(rep_ir)
+            rep_goto = _build_goto_rep(expr_node, source_loc)
+            ir_node = rep_goto
+            text = _reconstruct_rep_text(rep_goto)
         case "SimpleAssertionExpr" if (
             expr_node.get("repetition", {}).get("kind") == "Nonconsecutive"
         ):
-            rep_ir = _build_nonconsec_rep(expr_node, source_loc)
-            ir_node = rep_ir
-            text = _reconstruct_rep_text(rep_ir)
+            rep_nonconsec = _build_nonconsec_rep(expr_node, source_loc)
+            ir_node = rep_nonconsec
+            text = _reconstruct_rep_text(rep_nonconsec)
         case "CallExpression" if expr_node.get("subroutineName") in _SUPPORTED_SIGNAL_FUNCS:
             sf_ir = _build_signal_func(expr_node, source_loc)
             ir_node = sf_ir
@@ -718,12 +706,12 @@ def _import_concurrent_assertion(
             prop_ir = _build_prop_implication(expr_node, source_loc)
             ir_node = prop_ir
             text = _reconstruct_impl_text(prop_ir)
-        case "BinaryPropertyExpr" if (
-            expr_node.get("op") == "And" and not _is_boolean_binary(expr_node)
+        case "BinaryPropertyExpr" if expr_node.get("op") == "And" and not _is_boolean_binary(
+            expr_node
         ):
             ir_node, text = _build_binary_seq_op(expr_node, source_loc, "and")
-        case "BinaryPropertyExpr" if (
-            expr_node.get("op") == "Or" and not _is_boolean_binary(expr_node)
+        case "BinaryPropertyExpr" if expr_node.get("op") == "Or" and not _is_boolean_binary(
+            expr_node
         ):
             ir_node, text = _build_binary_seq_op(expr_node, source_loc, "or")
         # ── slang v11.0 uses plain Binary/Unary (not *PropertyExpr) for
@@ -751,9 +739,7 @@ def _import_concurrent_assertion(
             ir_node, text = _build_bounded_eventually(expr_node, source_loc)
         case "Unary" if expr_node.get("op") in ("Always", "SAlways"):
             ir_node, text = _build_bounded_always(expr_node, source_loc)
-        case "Binary" if expr_node.get("op") in (
-            "Until", "UntilWith", "SUntil", "SUntilWith"
-        ):
+        case "Binary" if expr_node.get("op") in ("Until", "UntilWith", "SUntil", "SUntilWith"):
             ir_node, text = _build_until(expr_node, source_loc)
         case "Conditional":
             ir_node, text = _build_prop_if_else(expr_node, source_loc)
@@ -822,9 +808,8 @@ def _dispatch_expr_to_ir(node: dict[str, Any], _visited: frozenset[str] = frozen
         case "SimpleAssertionExpr" if node.get("repetition", {}).get("kind") == "Nonconsecutive":
             return _build_nonconsec_rep(node, source_loc)
         case "CallExpression" | "Call" if (
-            (node.get("subroutineName") or node.get("subroutine", ""))
-            in _SUPPORTED_SIGNAL_FUNCS
-        ):
+            node.get("subroutineName") or node.get("subroutine", "")
+        ) in _SUPPORTED_SIGNAL_FUNCS:
             return _build_signal_func(node, source_loc)
         case "SequenceInstance":
             return _expand_named_sequence(node, source_loc, _visited)
@@ -843,9 +828,7 @@ def _dispatch_expr_to_ir(node: dict[str, Any], _visited: frozenset[str] = frozen
         case "Unary" if node.get("op") in ("Always", "SAlways"):
             ir_node, _text = _build_bounded_always(node, source_loc)
             return ir_node
-        case "Binary" if node.get("op") in (
-            "Until", "UntilWith", "SUntil", "SUntilWith"
-        ):
+        case "Binary" if node.get("op") in ("Until", "UntilWith", "SUntil", "SUntilWith"):
             ir_node, _text = _build_until(node, source_loc)
             return ir_node
         case "IntersectPropertyExpr" | "Intersect":
@@ -896,8 +879,7 @@ def _build_seq_repetition(
     if rep_min == 0 and rep_max == 0:
         raise SvaCompileError(
             message=(
-                f"SVA-E002: [*0] repetition (zero-length match) at {source_loc} "
-                "is not supported"
+                f"SVA-E002: [*0] repetition (zero-length match) at {source_loc} is not supported"
             )
         )
     inner_node = node.get("expr", {})
@@ -950,7 +932,9 @@ def _build_nonconsec_rep(
 
 
 def _build_binary_seq_op(
-    node: dict[str, Any], source_loc: SourceLoc, op_name: str,
+    node: dict[str, Any],
+    source_loc: SourceLoc,
+    op_name: str,
 ) -> tuple[SVANode, str]:
     """Build SeqAnd or SeqOr from a BinaryPropertyExpr with And/Or op."""
     left_node: dict[str, Any] = node.get("left", {})
@@ -960,6 +944,7 @@ def _build_binary_seq_op(
     left_text = _reconstruct_node_text(left_ir)
     right_text = _reconstruct_node_text(right_ir)
     text = f"({left_text} {op_name} {right_text})"
+    ir_node: SVANode
     if op_name == "and":
         ir_node = SeqAnd(left=left_ir, right=right_ir, source_loc=source_loc)
     else:
@@ -968,7 +953,8 @@ def _build_binary_seq_op(
 
 
 def _build_intersect(
-    node: dict[str, Any], source_loc: SourceLoc,
+    node: dict[str, Any],
+    source_loc: SourceLoc,
 ) -> tuple[SVANode, str]:
     """Build SeqIntersect from IntersectPropertyExpr."""
     left_node = node.get("left", node.get("lhs", {}))
@@ -982,7 +968,8 @@ def _build_intersect(
 
 
 def _build_within(
-    node: dict[str, Any], source_loc: SourceLoc,
+    node: dict[str, Any],
+    source_loc: SourceLoc,
 ) -> tuple[SVANode, str]:
     """Build SeqWithin from WithinPropertyExpr."""
     inner_node = node.get("left", node.get("inner", node.get("lhs", {})))
@@ -996,7 +983,8 @@ def _build_within(
 
 
 def _build_throughout(
-    node: dict[str, Any], source_loc: SourceLoc,
+    node: dict[str, Any],
+    source_loc: SourceLoc,
 ) -> tuple[SVANode, str]:
     """Build SeqThroughout from ThroughoutPropertyExpr."""
     cond_node = node.get("left", node.get("condition", node.get("lhs", {})))
@@ -1010,7 +998,8 @@ def _build_throughout(
 
 
 def _build_bounded_eventually(
-    node: dict[str, Any], source_loc: SourceLoc,
+    node: dict[str, Any],
+    source_loc: SourceLoc,
 ) -> tuple[SVANode, str]:
     """Build PropBoundedEventually from a v11 Unary SEventually/Eventually node.
 
@@ -1054,15 +1043,14 @@ def _build_bounded_eventually(
     body_text = _reconstruct_node_text(body_ir)
     text = f"{kw} [{lo}:{hi}] ({body_text})"
     return (
-        PropBoundedEventually(
-            body=body_ir, lo=lo, hi=hi, strong=strong, source_loc=source_loc
-        ),
+        PropBoundedEventually(body=body_ir, lo=lo, hi=hi, strong=strong, source_loc=source_loc),
         text,
     )
 
 
 def _build_bounded_always(
-    node: dict[str, Any], source_loc: SourceLoc,
+    node: dict[str, Any],
+    source_loc: SourceLoc,
 ) -> tuple[SVANode, str]:
     """Build PropBoundedAlways from a v11 Unary Always/SAlways node.
 
@@ -1106,15 +1094,14 @@ def _build_bounded_always(
     body_text = _reconstruct_node_text(body_ir)
     text = f"{kw} [{lo}:{hi}] ({body_text})"
     return (
-        PropBoundedAlways(
-            body=body_ir, lo=lo, hi=hi, strong=strong, source_loc=source_loc
-        ),
+        PropBoundedAlways(body=body_ir, lo=lo, hi=hi, strong=strong, source_loc=source_loc),
         text,
     )
 
 
 def _build_until(
-    node: dict[str, Any], source_loc: SourceLoc,
+    node: dict[str, Any],
+    source_loc: SourceLoc,
 ) -> tuple[SVANode, str]:
     """Build PropUntil from a v11 Binary Until/UntilWith node (weak forms only).
 
@@ -1157,15 +1144,14 @@ def _build_until(
     right_text = _reconstruct_node_text(right_ir)
     text = f"({left_text}) {kw} ({right_text})"
     return (
-        PropUntil(
-            left=left_ir, right=right_ir, with_=with_, source_loc=source_loc
-        ),
+        PropUntil(left=left_ir, right=right_ir, with_=with_, source_loc=source_loc),
         text,
     )
 
 
 def _build_prop_not(
-    node: dict[str, Any], source_loc: SourceLoc,
+    node: dict[str, Any],
+    source_loc: SourceLoc,
 ) -> tuple[SVANode, str]:
     """Build PropNot from UnaryPropertyExpr with Not op."""
     inner_node = node.get("operand", node.get("expr", {}))
@@ -1176,7 +1162,8 @@ def _build_prop_not(
 
 
 def _build_prop_if_else(
-    node: dict[str, Any], source_loc: SourceLoc,
+    node: dict[str, Any],
+    source_loc: SourceLoc,
 ) -> tuple[SVANode, str]:
     """Build PropIfElse from IfElsePropertyExpr or v11 Conditional node."""
     cond_node = node.get("condition", node.get("cond", {}))
@@ -1410,8 +1397,7 @@ def _reconstruct_seq_text(node: SeqConcat) -> str:
             parts.append(_reconstruct_signal_func_text(elem))
         elif isinstance(elem, ClockedSeq):
             parts.append(
-                f"@({elem.clock.edge} {elem.clock.signal}) "
-                f"{_reconstruct_node_text(elem.body)}"
+                f"@({elem.clock.edge} {elem.clock.signal}) {_reconstruct_node_text(elem.body)}"
             )
         else:
             parts.append("<expr>")
@@ -1490,8 +1476,7 @@ def _reconstruct_node_text(node: SVANode) -> str:
         return f"({_reconstruct_node_text(node.left)} or {_reconstruct_node_text(node.right)})"
     if isinstance(node, SeqIntersect):
         return (
-            f"({_reconstruct_node_text(node.left)} intersect "
-            f"{_reconstruct_node_text(node.right)})"
+            f"({_reconstruct_node_text(node.left)} intersect {_reconstruct_node_text(node.right)})"
         )
     if isinstance(node, SeqWithin):
         return f"({_reconstruct_node_text(node.inner)} within {_reconstruct_node_text(node.outer)})"

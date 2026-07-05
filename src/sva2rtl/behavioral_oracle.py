@@ -60,7 +60,7 @@ class SVABehavioralSim:
         self._params = params
 
         # ── Delay-operator state ───────────────────────────────────────────
-        self._counter: int = 0       # counts cycles since start
+        self._counter: int = 0  # counts cycles since start
         self._running: bool = False  # delay evaluation in progress
 
         # ── Repetition state ──────────────────────────────────────────────
@@ -75,7 +75,7 @@ class SVABehavioralSim:
         # ── Implication / bit-vector state ────────────────────────────────
         bv_width: int = int(params.get("bv_width", 1))
         self._bv_width: int = bv_width
-        self._bv: int = 0            # Python int used as BV_WIDTH-bit shift reg
+        self._bv: int = 0  # Python int used as BV_WIDTH-bit shift reg
         self._overflow_flag: bool = False
         self._ant_pass_delayed: bool = False  # 1-cycle pipeline for |=>
 
@@ -196,10 +196,7 @@ class SVABehavioralSim:
         cmax = max(delay_max - 2, 0)
         pass_at_start = start and (delay_min <= 1) and (delay_max >= 1)
         pass_counter = (
-            delay_max >= 2
-            and old_running
-            and (old_count >= cmin)
-            and (old_count <= cmax)
+            delay_max >= 2 and old_running and (old_count >= cmin) and (old_count <= cmax)
         )
         active_val = old_running
         pass_val = pass_at_start or pass_counter
@@ -255,11 +252,7 @@ class SVABehavioralSim:
             self._rep_count = 0
 
         # Outputs derived from OLD registered state (combinational in RTL)
-        pass_val = (
-            old_running and sig
-            and old_count >= rep_min
-            and old_count <= rep_max
-        )
+        pass_val = old_running and sig and old_count >= rep_min and old_count <= rep_max
         fail_val = old_running and not sig and old_count < rep_min
         active_val = old_running
 
@@ -446,7 +439,7 @@ class SVABehavioralSim:
             self._attempt_fired = True
 
         # Overflow: antecedent fires while ALL BV_WIDTH bit positions occupied
-        bv_full = (self._bv == (1 << self._bv_width) - 1)
+        bv_full = self._bv == (1 << self._bv_width) - 1
         overflow_event = ant_pass and bv_full and not self._overflow_flag
 
         if self._overflow_flag:
@@ -463,7 +456,7 @@ class SVABehavioralSim:
             return {
                 "active": False,
                 "pass": False,
-                "fail": True,   # overflow fires → fail on same cycle
+                "fail": True,  # overflow fires → fail on same cycle
                 "overflow": True,
             }
 
@@ -514,7 +507,7 @@ class SVABehavioralSim:
         self._ant_pass_delayed = ant_pass
 
         # Overflow: delayed antecedent fires while all BV positions occupied
-        bv_full = (self._bv == (1 << self._bv_width) - 1)
+        bv_full = self._bv == (1 << self._bv_width) - 1
         overflow_event = delayed_ant and bv_full and not self._overflow_flag
 
         if self._overflow_flag:
@@ -551,6 +544,7 @@ class SVABehavioralSim:
             "overflow": False,
         }
 
+
 # ── Hierarchical oracle: composes SVABehavioralSim instances ─────────────
 # Appended to behavioral_oracle.py for Phase 4 (ORACLE-01).
 
@@ -569,11 +563,24 @@ def simulate_checker_hierarchy(
     return [hier_sim.tick(cycle) for cycle in stimulus]
 
 
-_LEAF_TEMPLATES: frozenset[str] = frozenset({
-    "bool_expr", "concat_delay", "delay_fixed", "delay_range", "rep_consecutive",
-    "rose", "fell", "stable", "past", "changed", "goto_rep", "nonconsec_rep",
-    "overlap_bitvec", "nonoverlap",
-})
+_LEAF_TEMPLATES: frozenset[str] = frozenset(
+    {
+        "bool_expr",
+        "concat_delay",
+        "delay_fixed",
+        "delay_range",
+        "rep_consecutive",
+        "rose",
+        "fell",
+        "stable",
+        "past",
+        "changed",
+        "goto_rep",
+        "nonconsec_rep",
+        "overlap_bitvec",
+        "nonoverlap",
+    }
+)
 
 _TEMPLATE_ORACLE_MAP: dict[str, str] = {
     "bool_expr": "delay_fixed",
@@ -672,20 +679,52 @@ class _HierarchicalSim:
         return {"pass": prev_pass, "fail": any_fail, "active": any_active, "overflow": False}
 
     def _tick_disable_iff(self, node: CheckerNode, signals: dict[str, bool]) -> dict[str, bool]:
+        """Tick disable_iff_top: gate body outputs when disable is active.
+
+        RTL semantics: ``effective_disable = disable_i | cond_result``
+        where ``cond_result`` is the evaluated ``cond_expr`` (e.g. ``!rst_n``).
+        When effective_disable is true: all outputs are 0 and body state is
+        reset (mirrors RTL synchronous disable).
+
+        v1.5.2 fix: previously only checked ``cond_expr`` signals, ignoring the
+        external ``disable_i`` input. Also, the body was ticked with
+        ``{"disable": True}`` but composite nodes (overlap_bitvec, seq_concat_top)
+        do not propagate the ``"disable"`` key to leaf oracles — so leaf state
+        was never reset and accumulated fail events leaked through.
+        Now: on disable, walk the body tree and reset all leaf oracles, then
+        return all-zero outputs without ticking the body.
+        """
         body = node.children[0] if node.children else None
         if body is None:
             return {"pass": False, "fail": False, "active": False, "overflow": False}
         cond_text = node.params.get("cond_expr", "")
         cond_sigs = _re_oracle.findall(r"\b([a-zA-Z_]\w*)\b", cond_text)
-        cond_val = (
-            all(signals.get(s, False) for s in cond_sigs)
-            if cond_sigs
-            else signals.get("cond", False)
-        )
-        if cond_val:
-            self._tick_node(body, {**signals, "disable": True})
+        if cond_sigs:
+            is_negated = cond_text.lstrip().startswith(("!", "~"))
+            if is_negated:
+                cond_val = any(not signals.get(s, False) for s in cond_sigs)
+            else:
+                cond_val = all(signals.get(s, False) for s in cond_sigs)
+        else:
+            cond_val = signals.get("cond", False)
+
+        disable_i = signals.get("disable_i", False)
+        effective_disable = bool(disable_i) or cond_val
+
+        if effective_disable:
+            self._reset_subtree(body)
             return {"pass": False, "fail": False, "active": False, "overflow": False}
         return self._tick_node(body, signals)
+
+    def _reset_subtree(self, node: CheckerNode) -> None:
+        """Reset all leaf oracles in a checker subtree."""
+        tname = node.template_name
+        if tname in _LEAF_TEMPLATES:
+            oracle = self._leaf_oracles.get(node.module_name)
+            if oracle is not None:
+                oracle.reset()
+        for child in node.children:
+            self._reset_subtree(child)
 
     def _tick_first_match(self, node: CheckerNode, signals: dict[str, bool]) -> dict[str, bool]:
         """Tick a first_match_top wrapper: gate outputs once body passes.
@@ -843,10 +882,12 @@ class _HierarchicalSim:
         # RISK-02 fix: honour operand truth (see _tick_prop_intersect docstring).
         inner_ok = _eval_bool_leaf(node.children[0], signals)
         outer_ok = _eval_bool_leaf(node.children[1], signals)
-        return {"pass": inner["pass"] and outer["active"] and inner_ok and outer_ok,
-                "fail": inner["fail"] or outer["fail"],
-                "active": inner["active"] or outer["active"],
-                "overflow": inner.get("overflow", False) or outer.get("overflow", False)}
+        return {
+            "pass": inner["pass"] and outer["active"] and inner_ok and outer_ok,
+            "fail": inner["fail"] or outer["fail"],
+            "active": inner["active"] or outer["active"],
+            "overflow": inner.get("overflow", False) or outer.get("overflow", False),
+        }
 
     def _tick_prop_throughout(self, node: CheckerNode, signals: dict[str, bool]) -> dict[str, bool]:
         """prop_throughout: condition must hold throughout body sequence.
@@ -877,10 +918,12 @@ class _HierarchicalSim:
         # is detected (the boolexpr oracle always passes when started).
         cond_expr_ok = _eval_cond_expr(node.children[0], signals)
 
-        return {"pass": body["pass"] and cond_expr_ok,
-                "fail": body["fail"] or (body["active"] and not cond_expr_ok),
-                "active": body["active"],
-                "overflow": cond.get("overflow", False) or body.get("overflow", False)}
+        return {
+            "pass": body["pass"] and cond_expr_ok,
+            "fail": body["fail"] or (body["active"] and not cond_expr_ok),
+            "active": body["active"],
+            "overflow": cond.get("overflow", False) or body.get("overflow", False),
+        }
 
     def _tick_prop_not(self, node: CheckerNode, signals: dict[str, bool]) -> dict[str, bool]:
         """prop_not: invert pass/fail of body."""
@@ -888,8 +931,12 @@ class _HierarchicalSim:
         if body is None:
             return {"pass": False, "fail": False, "active": False, "overflow": False}
         out = self._tick_node(body, signals)
-        return {"pass": out["fail"], "fail": out["pass"],
-                "active": out["active"], "overflow": out.get("overflow", False)}
+        return {
+            "pass": out["fail"],
+            "fail": out["pass"],
+            "active": out["active"],
+            "overflow": out.get("overflow", False),
+        }
 
     def _tick_prop_if_else(self, node: CheckerNode, signals: dict[str, bool]) -> dict[str, bool]:
         """prop_if_else: multiplex between true/false branches."""
@@ -907,9 +954,7 @@ class _HierarchicalSim:
             return self._tick_node(node.children[1], signals)
         return {"pass": False, "fail": False, "active": False, "overflow": False}
 
-    def _tick_s_eventually(
-        self, node: CheckerNode, signals: dict[str, bool]
-    ) -> dict[str, bool]:
+    def _tick_s_eventually(self, node: CheckerNode, signals: dict[str, bool]) -> dict[str, bool]:
         """Bounded eventually ``s_eventually [lo:hi] p``.
 
         Independent contract model (derived from IEEE 1800 semantics, NOT from the
@@ -946,7 +991,7 @@ class _HierarchicalSim:
             st["off"] = 0
             st["sat"] = False
         if st["armed"]:
-            k = int(st["off"])
+            k = int(st["off"])  # type: ignore[call-overload]
             in_window = lo <= k <= hi
             hit = in_window and p and not bool(st["sat"])
             if hit:
@@ -962,9 +1007,7 @@ class _HierarchicalSim:
         st["o_fail"] = nxt_fail
         return out
 
-    def _tick_s_always(
-        self, node: CheckerNode, signals: dict[str, bool]
-    ) -> dict[str, bool]:
+    def _tick_s_always(self, node: CheckerNode, signals: dict[str, bool]) -> dict[str, bool]:
         """Bounded always ``always [lo:hi] p`` — the universal dual of eventually.
 
         Independent contract model (derived from IEEE 1800 semantics, NOT from the
@@ -999,7 +1042,7 @@ class _HierarchicalSim:
             st["off"] = 0
             st["viol"] = False
         if st["armed"]:
-            k = int(st["off"])
+            k = int(st["off"])  # type: ignore[call-overload]
             in_window = lo <= k <= hi
             miss = in_window and (not p) and not bool(st["viol"])
             if miss:
@@ -1015,9 +1058,7 @@ class _HierarchicalSim:
         st["o_fail"] = nxt_fail
         return out
 
-    def _tick_until_prop(
-        self, node: CheckerNode, signals: dict[str, bool]
-    ) -> dict[str, bool]:
+    def _tick_until_prop(self, node: CheckerNode, signals: dict[str, bool]) -> dict[str, bool]:
         """Weak ``a until b`` / ``a until_with b`` — safety FSM.
 
         Independent contract model (derived from IEEE 1800 semantics, NOT from the
@@ -1035,9 +1076,7 @@ class _HierarchicalSim:
         key = node.module_name
         if not hasattr(self, "_until_state"):
             self._until_state: dict[str, dict[str, object]] = {}
-        st = self._until_state.setdefault(
-            key, {"armed": False, "o_pass": False, "o_fail": False}
-        )
+        st = self._until_state.setdefault(key, {"armed": False, "o_pass": False, "o_fail": False})
 
         out = {
             "pass": bool(st["o_pass"]),
@@ -1075,9 +1114,7 @@ class _HierarchicalSim:
         st["o_fail"] = nxt_fail
         return out
 
-    def _tick_nfa_generic(
-        self, node: CheckerNode, signals: dict[str, bool]
-    ) -> dict[str, bool]:
+    def _tick_nfa_generic(self, node: CheckerNode, signals: dict[str, bool]) -> dict[str, bool]:
         """v1.5.1 rule-based NFA thread simulator (RISK-01 independent).
 
         Implements the NFA composition oracle for ``nfa_generic``-template
@@ -1132,7 +1169,7 @@ class _HierarchicalSim:
         }
 
         # Compute new active set for this cycle.
-        active: set[int] = set(st["active"])  # type: ignore[arg-type]
+        active: set[int] = set(st["active"])  # type: ignore[call-overload]
         if signals.get("start", False):
             active.add(0)
             st["attempt_fired"] = True
@@ -1145,11 +1182,7 @@ class _HierarchicalSim:
         nxt_pass = bool(next_active & accept)
         if nfa_kind == "property":
             # Dead-end after attempt_fired without accept = fail.
-            nxt_fail = (
-                bool(st["attempt_fired"])
-                and (not next_active)
-                and (not nxt_pass)
-            )
+            nxt_fail = bool(st["attempt_fired"]) and (not next_active) and (not nxt_pass)
         else:  # "sequence"
             # Dead-end = vacuous no-match, NOT fail.
             nxt_fail = False
@@ -1188,7 +1221,9 @@ class _HierarchicalSim:
         }
 
     def _tick_implication_nfa(
-        self, node: CheckerNode, signals: dict[str, bool],
+        self,
+        node: CheckerNode,
+        signals: dict[str, bool],
     ) -> dict[str, bool]:
         """v1.5.1 P2: implication with NFA consequent.
 
@@ -1205,10 +1240,7 @@ class _HierarchicalSim:
         start = bool(signals.get("start", False))
         ant_match = start and _eval_nfa_guard(ant_guard, signals)
 
-        overlapping = (
-            str(node.params.get("overlapping", "true")).lower()
-            in ("true", "1", "yes")
-        )
+        overlapping = str(node.params.get("overlapping", "true")).lower() in ("true", "1", "yes")
         module = node.module_name
         if not hasattr(self, "_impl_ant_q"):
             self._impl_ant_q: dict[str, bool] = {}
@@ -1252,8 +1284,14 @@ def _map_stimulus(tname: str, signals: dict[str, bool], node: CheckerNode) -> di
     if tname in ("delay_fixed", "delay_range"):
         return {"start": signals.get("start", False)}
     if tname in (
-        "rep_consecutive", "goto_rep", "nonconsec_rep",
-        "rose", "fell", "stable", "past", "changed",
+        "rep_consecutive",
+        "goto_rep",
+        "nonconsec_rep",
+        "rose",
+        "fell",
+        "stable",
+        "past",
+        "changed",
     ):
         sig_name = _extract_obs_sig(node, 0)
         return {"start": signals.get("start", False), "sig": signals.get(sig_name, False)}

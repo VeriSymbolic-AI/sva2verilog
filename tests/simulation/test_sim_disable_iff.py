@@ -98,7 +98,7 @@ def test_fail_fires_at_t1_when_b_false(tmp_path: Path) -> None:
     """
     checker = _build_checker()
     stimulus = [
-        {"start": True,  "a": True,  "b": False},  # t=0
+        {"start": True, "a": True, "b": False},  # t=0
         {"start": False, "a": False, "b": False},  # t=1: fail fires
         {"start": False, "a": False, "b": False},  # t=2: no more activity
         {"start": False, "a": False, "b": False},  # t=3
@@ -108,7 +108,7 @@ def test_fail_fires_at_t1_when_b_false(tmp_path: Path) -> None:
     assert len(rtl_out) == len(stimulus)
 
     assert not rtl_out[0]["fail"], "t=0: leaves not yet registered"
-    assert     rtl_out[1]["fail"], "t=1: a(0) & ~b(0) → fail"
+    assert rtl_out[1]["fail"], "t=1: a(0) & ~b(0) → fail"
     assert not rtl_out[2]["fail"], "t=2: attempt consumed"
     assert not rtl_out[3]["fail"], "t=3: idle"
 
@@ -117,16 +117,16 @@ def test_no_outputs_when_start_false(tmp_path: Path, simulator: str) -> None:
     """disable_iff: when start=F, body never becomes active."""
     checker = _build_checker()
     stimulus = [
-        {"start": False, "a": True,  "b": False},
-        {"start": False, "a": True,  "b": False},
+        {"start": False, "a": True, "b": False},
+        {"start": False, "a": True, "b": False},
         {"start": False, "a": False, "b": True},
     ]
     rtl_out = _run_stimulus(checker, stimulus, tmp_path)
 
     for i, row in enumerate(rtl_out):
         assert not row["active"], f"t={i}: start=F → active=0"
-        assert not row["pass"],   f"t={i}: start=F → pass=0"
-        assert not row["fail"],   f"t={i}: start=F → fail=0"
+        assert not row["pass"], f"t={i}: start=F → pass=0"
+        assert not row["fail"], f"t={i}: start=F → fail=0"
 
 
 def test_multiple_starts_produce_multiple_fails(tmp_path: Path, simulator: str) -> None:
@@ -139,20 +139,20 @@ def test_multiple_starts_produce_multiple_fails(tmp_path: Path, simulator: str) 
     # start at t=0, no b → fail at t=1
     # start at t=4, no b → fail at t=5
     stimulus = [
-        {"start": True,  "a": True,  "b": False},  # t=0
+        {"start": True, "a": True, "b": False},  # t=0
         {"start": False, "a": False, "b": False},  # t=1: first fail
         {"start": False, "a": False, "b": False},  # t=2: idle
         {"start": False, "a": False, "b": False},  # t=3: idle
-        {"start": True,  "a": True,  "b": False},  # t=4: second start
+        {"start": True, "a": True, "b": False},  # t=4: second start
         {"start": False, "a": False, "b": False},  # t=5: second fail
         {"start": False, "a": False, "b": False},  # t=6: idle
     ]
     rtl_out = _run_stimulus(checker, stimulus, tmp_path)
 
     assert len(rtl_out) == len(stimulus)
-    assert     rtl_out[1]["fail"], "t=1: first fail"
+    assert rtl_out[1]["fail"], "t=1: first fail"
     assert not rtl_out[2]["fail"], "t=2: idle"
-    assert     rtl_out[5]["fail"], "t=5: second fail"
+    assert rtl_out[5]["fail"], "t=5: second fail"
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -168,16 +168,16 @@ def test_external_disable_i_gates_outputs(tmp_path: Path, simulator: str) -> Non
     """
     checker = _build_checker()
     stimulus = [
-        {"start": True,  "a": True,  "b": False, "disable_i": True},  # t=0: disabled
-        {"start": True,  "a": True,  "b": False, "disable_i": True},  # t=1: still disabled
+        {"start": True, "a": True, "b": False, "disable_i": True},  # t=0: disabled
+        {"start": True, "a": True, "b": False, "disable_i": True},  # t=1: still disabled
         {"start": False, "a": False, "b": False, "disable_i": True},  # t=2: would-be fail
     ]
     rtl_out = _run_stimulus(checker, stimulus, tmp_path)
 
     for i, row in enumerate(rtl_out):
         assert not row["active"], f"t={i}: disable_i=1 → active=0"
-        assert not row["pass"],   f"t={i}: disable_i=1 → pass=0"
-        assert not row["fail"],   f"t={i}: disable_i=1 → fail=0"
+        assert not row["pass"], f"t={i}: disable_i=1 → pass=0"
+        assert not row["fail"], f"t={i}: disable_i=1 → fail=0"
 
 
 def test_disable_then_reenable(tmp_path: Path, simulator: str) -> None:
@@ -190,16 +190,16 @@ def test_disable_then_reenable(tmp_path: Path, simulator: str) -> None:
     """
     checker = _build_checker()
     stimulus = [
-        {"start": True,  "a": True,  "b": False},              # t=0: start
+        {"start": True, "a": True, "b": False},  # t=0: start
         {"start": False, "a": False, "b": False, "disable_i": True},  # t=1: disable
-        {"start": False, "a": False, "b": False},               # t=2: re-enable
-        {"start": False, "a": False, "b": False},               # t=3: idle
+        {"start": False, "a": False, "b": False},  # t=2: re-enable
+        {"start": False, "a": False, "b": False},  # t=3: idle
     ]
     rtl_out = _run_stimulus(checker, stimulus, tmp_path)
 
     # t=1: disabled → all 0
     assert not rtl_out[1]["active"], "t=1: disabled"
-    assert not rtl_out[1]["fail"],   "t=1: disabled → no fail"
+    assert not rtl_out[1]["fail"], "t=1: disabled → no fail"
 
     # t=2 and t=3: re-enabled but state was cleared → no fail
     assert not rtl_out[2]["fail"], "t=2: thread lost during disable → no fail"
@@ -248,8 +248,8 @@ def test_condition_disable_gates_body(tmp_path: Path, simulator: str) -> None:
 
     # t=1: rst_n=0 → condition=1 → disabled; all outputs must be 0
     assert not rtl_out[1]["active"], "t=1: condition disable → active=0"
-    assert not rtl_out[1]["pass"],   "t=1: condition disable → pass=0"
-    assert not rtl_out[1]["fail"],   "t=1: condition disable → fail=0 (gated)"
+    assert not rtl_out[1]["pass"], "t=1: condition disable → pass=0"
+    assert not rtl_out[1]["fail"], "t=1: condition disable → fail=0 (gated)"
 
     # t=2: rst_n=1 again; state was cleared → no fail (thread lost during rst_n=0)
     assert not rtl_out[2]["fail"], "t=2: thread was lost during rst_n=0 → no fail"
@@ -349,10 +349,10 @@ class TestDisableIffOracleCrosscheck:
         """disable_iff: with condition false, RTL and oracle produce same fail events."""
         checker = _build_checker()
         stimulus = [
-            {"start": True,  "a": True,  "b": False},
+            {"start": True, "a": True, "b": False},
             {"start": False, "a": False, "b": False},
             {"start": False, "a": False, "b": False},
-            {"start": True,  "a": True,  "b": False},
+            {"start": True, "a": True, "b": False},
             {"start": False, "a": False, "b": False},
             {"start": False, "a": False, "b": False},
         ]
@@ -383,17 +383,12 @@ class TestDisableIffOracleCrosscheck:
         assert rtl_events["fail"] > 0
         assert oracle_events["fail"] > 0
 
-    @pytest.mark.xfail(
-        reason="simulate_checker_hierarchy disable_iff oracle does not correctly "
-               "gate all fail events when disable_i=True",
-        strict=True,
-    )
     def test_disable_iff_oracle_disabled(self, tmp_path: Path, simulator: str) -> None:
         """disable_iff: with disable_i=True, both RTL and oracle produce zero events."""
         checker = _build_checker()
         stimulus = [
-            {"start": True,  "a": True,  "b": False, "disable_i": True},
-            {"start": True,  "a": True,  "b": False, "disable_i": True},
+            {"start": True, "a": True, "b": False, "disable_i": True},
+            {"start": True, "a": True, "b": False, "disable_i": True},
             {"start": False, "a": False, "b": False, "disable_i": True},
         ]
         modules = emit_all(checker)

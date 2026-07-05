@@ -683,10 +683,7 @@ def _compose_seq_concat_mc(
 
     all_signals = _collect_signals(children)
     # Remove clock signals from observed_signals (they are not data inputs)
-    all_signals = tuple(
-        (p, s) for p, s in all_signals
-        if s not in clock_signals
-    )
+    all_signals = tuple((p, s) for p, s in all_signals if s not in clock_signals)
 
     params: dict[str, str] = {
         "module_name": module_name,
@@ -835,7 +832,8 @@ def _compose_signal_func(
     )
 
 
-def _make_delay_node(    delay_min: int,
+def _make_delay_node(
+    delay_min: int,
     delay_max: int,
     clock: ClockSpec,
     source_loc: SourceLoc,
@@ -889,11 +887,9 @@ def _compute_bv_width(consequent: SVANode) -> int:
             max_delay = sum(d_max for _, d_max in consequent.delays)
             return max(max_delay + 1, 1)
         case SeqOr() | SeqAnd() | SeqIntersect():
-            return max(_compute_bv_width(consequent.left),
-                       _compute_bv_width(consequent.right))
+            return max(_compute_bv_width(consequent.left), _compute_bv_width(consequent.right))
         case SeqWithin():
-            return max(_compute_bv_width(consequent.inner),
-                       _compute_bv_width(consequent.outer))
+            return max(_compute_bv_width(consequent.inner), _compute_bv_width(consequent.outer))
         case SeqThroughout():
             return _compute_bv_width(consequent.body)
         case SeqFirstMatch():
@@ -939,12 +935,8 @@ def _compose_implication(
     domain, 2-DFF synchronizer on the token.
     """
     if isinstance(node.consequent, ClockedSeq):
-        return _compose_implication_mc(
-            node, clock, label, original_text, cse_origin
-        )
-    return _compose_implication_sc(
-        node, clock, label, original_text, cse_origin
-    )
+        return _compose_implication_mc(node, clock, label, original_text, cse_origin)
+    return _compose_implication_sc(node, clock, label, original_text, cse_origin)
 
 
 def _compose_implication_sc(
@@ -975,7 +967,11 @@ def _compose_implication_sc(
     if bv_width > 1:
         if _is_nfa_liftable(node.consequent):
             return _compose_implication_nfa(
-                node, clock, label, original_text, cse_origin,
+                node,
+                clock,
+                label,
+                original_text,
+                cse_origin,
             )
         raise UnsupportedConstruct(
             message=(
@@ -1043,9 +1039,7 @@ def _compose_implication_nfa(
     base = module_name[4:] if module_name.startswith("sva_") else module_name
 
     # Antecedent guard — raw boolean expression text (e.g. "a", "a && b").
-    assert isinstance(node.antecedent, BoolExpr), (
-        "implication antecedent must be BoolExpr"
-    )
+    assert isinstance(node.antecedent, BoolExpr), "implication antecedent must be BoolExpr"
     ant_guard = node.antecedent.text
     ant_sigs = tuple(sorted({s for s, _ in extract_signals(ant_guard)}))
 
@@ -1060,10 +1054,17 @@ def _compose_implication_nfa(
         nfa_t = max(1, 32 // cons_states)
 
     cons_checker = _emit_nfa_checker(
-        "implication consequent", cons_states, cons_trans, cons_accept,
-        cons_sigs, "property",
-        clock, f"{base}_con", original_text,
-        node.source_loc, cse_origin=cse_origin,
+        "implication consequent",
+        cons_states,
+        cons_trans,
+        cons_accept,
+        cons_sigs,
+        "property",
+        clock,
+        f"{base}_con",
+        original_text,
+        node.source_loc,
+        cse_origin=cse_origin,
         thread_slots=nfa_t,
     )
 
@@ -1071,11 +1072,12 @@ def _compose_implication_nfa(
 
     params: dict[str, str] = {
         "module_name": module_name,
-        "clock_signal": clock.signal, "clock_edge": clock.edge,
+        "clock_signal": clock.signal,
+        "clock_edge": clock.edge,
         "source_loc": str(node.source_loc),
         "sva2rtl_version": __version__,
         "original_text": original_text,
-        "overlapping": node.overlapping,
+        "overlapping": node.overlapping,  # type: ignore[dict-item]
         "op_type": "|->" if node.overlapping else "|=>",
         "nfa_thread_slots": str(nfa_t),
         "ant_guard": ant_guard,
@@ -1115,16 +1117,21 @@ def _compose_implication_mc(
 
     ant_checker = compose(node.antecedent, clock, f"{base}_ant", original_text)
     con_body = compose(
-        node.consequent.body, node.consequent.clock,
-        f"{base}_con", original_text,
+        node.consequent.body,  # type: ignore[attr-defined]
+        node.consequent.clock,  # type: ignore[attr-defined]
+        f"{base}_con",
+        original_text,
     )
     sync = _make_sync_2dff(
-        f"{module_name}_sync_0", clock.signal,
-        node.consequent.clock.signal, node.source_loc, 0,
+        f"{module_name}_sync_0",
+        clock.signal,
+        node.consequent.clock.signal,  # type: ignore[attr-defined]
+        node.source_loc,
+        0,
     )
 
     all_signals = _collect_signals([ant_checker, con_body])
-    clk_sigs = [clock.signal, node.consequent.clock.signal]
+    clk_sigs = [clock.signal, node.consequent.clock.signal]  # type: ignore[attr-defined]
     all_signals = tuple((p, s) for p, s in all_signals if s not in clk_sigs)
 
     params: dict[str, str] = {
@@ -1206,12 +1213,11 @@ def _compose_disable_iff(
     # Exclude rst_n and clock_signal — these are always hardcoded ports in every
     # generated module and must not appear again in the observed_signals loop.
     _reserved_ports = {"rst_n", clock.signal}
-    cond_signals = tuple(
-        (p, s) for p, s in extract_signals(cond_expr) if p not in _reserved_ports
-    )
+    cond_signals = tuple((p, s) for p, s in extract_signals(cond_expr) if p not in _reserved_ports)
     cond_seen = {p for p, _ in cond_signals}
     body_extra = tuple(
-        (p, s) for p, s in body_checker.observed_signals
+        (p, s)
+        for p, s in body_checker.observed_signals
         if p not in cond_seen and p not in _reserved_ports
     )
     all_signals = cond_signals + body_extra
@@ -1292,7 +1298,7 @@ def _compose_goto_rep(
     else:
         raise SvaCompileError(
             message=f"Goto repetition [->N] requires a boolean expression, "
-                    f"got {type(node.expr).__name__}",
+            f"got {type(node.expr).__name__}",
             source_loc=node.source_loc,
         )
 
@@ -1337,7 +1343,7 @@ def _compose_nonconsec_rep(
     else:
         raise SvaCompileError(
             message=f"Non-consecutive repetition [=N] requires a boolean expression, "
-                    f"got {type(node.expr).__name__}",
+            f"got {type(node.expr).__name__}",
             source_loc=node.source_loc,
         )
 
@@ -1369,8 +1375,11 @@ def _compose_nonconsec_rep(
 
 
 def _compose_seq_or(
-    node: SeqOr, clock: ClockSpec, label: str | None,
-    original_text: str, cse_origin: str | None = None,
+    node: SeqOr,
+    clock: ClockSpec,
+    label: str | None,
+    original_text: str,
+    cse_origin: str | None = None,
 ) -> CheckerNode:
     """Compose sequence OR: two sub-sequences, OR their pass outputs."""
     module_name = module_name_from_label(label, original_text)
@@ -1379,20 +1388,30 @@ def _compose_seq_or(
     right = compose(node.right, clock, f"{base}_right", original_text)
     all_signals = _collect_signals([left, right])
     params: dict[str, str] = {
-        "module_name": module_name, "clock_signal": clock.signal,
-        "clock_edge": clock.edge, "source_loc": str(node.source_loc),
-        "sva2rtl_version": __version__, "original_text": original_text,
+        "module_name": module_name,
+        "clock_signal": clock.signal,
+        "clock_edge": clock.edge,
+        "source_loc": str(node.source_loc),
+        "sva2rtl_version": __version__,
+        "original_text": original_text,
     }
     return CheckerNode(
-        template_name="prop_or", module_name=module_name, params=params,
-        observed_signals=all_signals, source_loc=node.source_loc,
-        children=(left, right), cse_origin=cse_origin,
+        template_name="prop_or",
+        module_name=module_name,
+        params=params,
+        observed_signals=all_signals,
+        source_loc=node.source_loc,
+        children=(left, right),
+        cse_origin=cse_origin,
     )
 
 
 def _compose_seq_and(
-    node: SeqAnd, clock: ClockSpec, label: str | None,
-    original_text: str, cse_origin: str | None = None,
+    node: SeqAnd,
+    clock: ClockSpec,
+    label: str | None,
+    original_text: str,
+    cse_origin: str | None = None,
 ) -> CheckerNode:
     """Compose sequence AND: two sub-sequences, AND their pass outputs."""
     module_name = module_name_from_label(label, original_text)
@@ -1401,14 +1420,21 @@ def _compose_seq_and(
     right = compose(node.right, clock, f"{base}_right", original_text)
     all_signals = _collect_signals([left, right])
     params: dict[str, str] = {
-        "module_name": module_name, "clock_signal": clock.signal,
-        "clock_edge": clock.edge, "source_loc": str(node.source_loc),
-        "sva2rtl_version": __version__, "original_text": original_text,
+        "module_name": module_name,
+        "clock_signal": clock.signal,
+        "clock_edge": clock.edge,
+        "source_loc": str(node.source_loc),
+        "sva2rtl_version": __version__,
+        "original_text": original_text,
     }
     return CheckerNode(
-        template_name="prop_and", module_name=module_name, params=params,
-        observed_signals=all_signals, source_loc=node.source_loc,
-        children=(left, right), cse_origin=cse_origin,
+        template_name="prop_and",
+        module_name=module_name,
+        params=params,
+        observed_signals=all_signals,
+        source_loc=node.source_loc,
+        children=(left, right),
+        cse_origin=cse_origin,
     )
 
 
@@ -1431,7 +1457,8 @@ def _is_boolean_leaf(operand: SVANode) -> bool:
 
 
 def _reject_non_boolean_composition(
-    op_name: str, positions: tuple[tuple[str, SVANode], ...],
+    op_name: str,
+    positions: tuple[tuple[str, SVANode], ...],
     source_loc: SourceLoc,
 ) -> None:
     """Raise UnsupportedConstruct if any operand is not a boolean leaf.
@@ -1439,8 +1466,7 @@ def _reject_non_boolean_composition(
     ``positions`` = tuple of (position_label, operand) pairs used in the
     error message to point the user at the exact offending operand.
     """
-    bad = [(pos, type(op).__name__) for pos, op in positions
-           if not _is_boolean_leaf(op)]
+    bad = [(pos, type(op).__name__) for pos, op in positions if not _is_boolean_leaf(op)]
     if not bad:
         return
     parts = ", ".join(f"{pos}={ty}" for pos, ty in bad)
@@ -1462,8 +1488,11 @@ def _reject_non_boolean_composition(
 
 
 def _compose_intersect(
-    node: SeqIntersect, clock: ClockSpec, label: str | None,
-    original_text: str, cse_origin: str | None = None,
+    node: SeqIntersect,
+    clock: ClockSpec,
+    label: str | None,
+    original_text: str,
+    cse_origin: str | None = None,
 ) -> CheckerNode:
     """Compose intersect: both sequences complete simultaneously.
 
@@ -1484,11 +1513,19 @@ def _compose_intersect(
     """
     if _is_boolean_leaf(node.left) and _is_boolean_leaf(node.right):
         return _compose_intersect_bool(
-            node, clock, label, original_text, cse_origin=cse_origin,
+            node,
+            clock,
+            label,
+            original_text,
+            cse_origin=cse_origin,
         )
     if _is_nfa_liftable(node.left) and _is_nfa_liftable(node.right):
         return _compose_intersect_nfa(
-            node, clock, label, original_text, cse_origin=cse_origin,
+            node,
+            clock,
+            label,
+            original_text,
+            cse_origin=cse_origin,
         )
     # Not liftable to NFA yet — keep the honesty boundary.
     _reject_non_boolean_composition(
@@ -1502,8 +1539,11 @@ def _compose_intersect(
 
 
 def _compose_intersect_bool(
-    node: SeqIntersect, clock: ClockSpec, label: str | None,
-    original_text: str, cse_origin: str | None = None,
+    node: SeqIntersect,
+    clock: ClockSpec,
+    label: str | None,
+    original_text: str,
+    cse_origin: str | None = None,
 ) -> CheckerNode:
     """Direct path for ``bool intersect bool`` — unchanged v1.5.0 behaviour.
 
@@ -1518,14 +1558,21 @@ def _compose_intersect_bool(
     right = compose(node.right, clock, f"{base}_right", original_text)
     all_signals = _collect_signals([left, right])
     params: dict[str, str] = {
-        "module_name": module_name, "clock_signal": clock.signal,
-        "clock_edge": clock.edge, "source_loc": str(node.source_loc),
-        "sva2rtl_version": __version__, "original_text": original_text,
+        "module_name": module_name,
+        "clock_signal": clock.signal,
+        "clock_edge": clock.edge,
+        "source_loc": str(node.source_loc),
+        "sva2rtl_version": __version__,
+        "original_text": original_text,
     }
     return CheckerNode(
-        template_name="prop_intersect", module_name=module_name, params=params,
-        observed_signals=all_signals, source_loc=node.source_loc,
-        children=(left, right), cse_origin=cse_origin,
+        template_name="prop_intersect",
+        module_name=module_name,
+        params=params,
+        observed_signals=all_signals,
+        source_loc=node.source_loc,
+        children=(left, right),
+        cse_origin=cse_origin,
     )
 
 
@@ -1557,16 +1604,13 @@ def _is_nfa_liftable(operand: SVANode) -> bool:
     if isinstance(operand, SeqWithin):
         return _is_nfa_liftable(operand.inner) and _is_nfa_liftable(operand.outer)
     if isinstance(operand, SeqThroughout):
-        return (
-            isinstance(operand.condition, BoolExpr)
-            and _is_nfa_liftable(operand.body)
-        )
+        return isinstance(operand.condition, BoolExpr) and _is_nfa_liftable(operand.body)
     return False
 
 
-def _lift_to_nfa(operand: SVANode) -> tuple[
-    int, tuple[tuple[int, str, int], ...], frozenset[int], tuple[str, ...]
-]:
+def _lift_to_nfa(
+    operand: SVANode,
+) -> tuple[int, tuple[tuple[int, str, int], ...], frozenset[int], tuple[str, ...]]:
     """Convert a liftable operand into a small NFA (states, transitions,
     accept, observed_signals_ports).
 
@@ -1630,18 +1674,17 @@ def _lift_to_nfa(operand: SVANode) -> tuple[
         assert isinstance(operand.expr, BoolExpr)
         n = operand.rep_min
         guard = f"({operand.expr.text})"
-        trans = tuple((i, guard, i + 1) for i in range(n))
+        rep_trans: tuple[tuple[int, str, int], ...] = tuple((i, guard, i + 1) for i in range(n))
         signals = tuple(sorted({s for s, _ in extract_signals(operand.expr.text)}))
-        return n + 1, trans, frozenset({n}), signals
+        return n + 1, rep_trans, frozenset({n}), signals
 
     raise ValueError(f"cannot lift {type(operand).__name__} to NFA yet")
 
 
-def _extract_nfa_from_checker(checker: CheckerNode) -> tuple[
-    int, tuple[tuple[int, str, int], ...], frozenset[int], tuple[str, ...]
-]:
-    """Extract NFA data from an already-composed ``nfa_generic`` CheckerNode.
-    """
+def _extract_nfa_from_checker(
+    checker: CheckerNode,
+) -> tuple[int, tuple[tuple[int, str, int], ...], frozenset[int], tuple[str, ...]]:
+    """Extract NFA data from an already-composed ``nfa_generic`` CheckerNode."""
     assert checker.template_name == "nfa_generic", (
         f"expected nfa_generic, got {checker.template_name}"
     )
@@ -1659,9 +1702,7 @@ def _try_lift_operand(
     clock: ClockSpec,
     label: str | None,
     original_text: str,
-) -> tuple[
-    int, tuple[tuple[int, str, int], ...], frozenset[int], tuple[str, ...]
-] | None:
+) -> tuple[int, tuple[tuple[int, str, int], ...], frozenset[int], tuple[str, ...]] | None:
     """Try to obtain NFA data from an operand.
 
     - Primitive shapes (BoolExpr, SeqConcat, SeqRepetition): lifted
@@ -1678,7 +1719,12 @@ def _try_lift_operand(
         if not left or not right:
             return None
         states, trans, accept = _nfa_product_intersect(
-            left[0], left[1], left[2], right[0], right[1], right[2],
+            left[0],
+            left[1],
+            left[2],
+            right[0],
+            right[1],
+            right[2],
         )
         sigs = tuple(sorted(set(left[3]) | set(right[3])))
         return states, trans, accept, sigs
@@ -1688,7 +1734,12 @@ def _try_lift_operand(
         if not inner or not outer:
             return None
         states, trans, accept = _nfa_product_within(
-            inner[0], inner[1], inner[2], outer[0], outer[1], outer[2],
+            inner[0],
+            inner[1],
+            inner[2],
+            outer[0],
+            outer[1],
+            outer[2],
         )
         sigs = tuple(sorted(set(inner[3]) | set(outer[3])))
         return states, trans, accept, sigs
@@ -1698,21 +1749,23 @@ def _try_lift_operand(
             return None
         states, trans, accept = _nfa_product_throughout(
             operand.condition.text,
-            body[0], body[1], body[2],
-            tuple(sorted({
-                s for s, _ in extract_signals(operand.condition.text)
-            })),
+            body[0],
+            body[1],
+            body[2],
+            tuple(sorted({s for s, _ in extract_signals(operand.condition.text)})),
         )
-        sigs = tuple(sorted(set(body[3]) | {
-            s for s, _ in extract_signals(operand.condition.text)
-        }))
+        sigs = tuple(sorted(set(body[3]) | {s for s, _ in extract_signals(operand.condition.text)}))
         return states, trans, accept, sigs
     return None
 
 
 def _nfa_product_intersect(
-    n_left: int, t_left: tuple[tuple[int, str, int], ...], acc_left: frozenset[int],
-    n_right: int, t_right: tuple[tuple[int, str, int], ...], acc_right: frozenset[int],
+    n_left: int,
+    t_left: tuple[tuple[int, str, int], ...],
+    acc_left: frozenset[int],
+    n_right: int,
+    t_right: tuple[tuple[int, str, int], ...],
+    acc_right: frozenset[int],
 ) -> tuple[int, tuple[tuple[int, str, int], ...], frozenset[int]]:
     """Cross-product NFA for ``intersect`` — see spike-notes §G0.4.
 
@@ -1721,12 +1774,13 @@ def _nfa_product_intersect(
     product has ``(sid(i,j), gL & gR, sid(i',j'))``.
     Accept: ``{sid(i,j) : i ∈ acc_L, j ∈ acc_R}``.
     """
+
     def sid(i: int, j: int) -> int:
         return i * n_right + j
 
     trans: list[tuple[int, str, int]] = []
-    for (li, gl, lt) in t_left:
-        for (rj, gr, rt) in t_right:
+    for li, gl, lt in t_left:
+        for rj, gr, rt in t_right:
             g = f"({gl}) & ({gr})"
             trans.append((sid(li, rj), g, sid(lt, rt)))
     accept = frozenset(sid(i, j) for i in acc_left for j in acc_right)
@@ -1785,7 +1839,8 @@ def _accept_bits(states: int, accept: frozenset[int]) -> str:
 
 
 def _render_state_d_body(
-    states: int, transitions: tuple[tuple[int, str, int], ...],
+    states: int,
+    transitions: tuple[tuple[int, str, int], ...],
 ) -> str:
     """Render the combinational next-state assignments for the NFA template.
 
@@ -1808,15 +1863,14 @@ def _render_state_d_body(
         if not arcs:
             lines.append(f"    assign state_d[{b}] = 1'b0;")
             continue
-        terms = " | ".join(
-            f"(state_now[{s}] & ({g}))" for s, g in arcs
-        )
+        terms = " | ".join(f"(state_now[{s}] & ({g}))" for s, g in arcs)
         lines.append(f"    assign state_d[{b}] = {terms};")
     return "\n".join(lines)
 
 
 def _render_multi_state_d_body(
-    states: int, transitions: tuple[tuple[int, str, int], ...],
+    states: int,
+    transitions: tuple[tuple[int, str, int], ...],
     thread_slots: int,
 ) -> str:
     """Render per-slot combinational next-state assignments for multi-thread.
@@ -1838,16 +1892,10 @@ def _render_multi_state_d_body(
         for b in range(states):
             arcs = incoming.get(b, [])
             if not arcs:
-                lines.append(
-                    f"    assign state_d[{base + b}] = 1'b0;"
-                )
+                lines.append(f"    assign state_d[{base + b}] = 1'b0;")
                 continue
-            terms = " | ".join(
-                f"(slot{s}_now[{from_s}] & ({g}))" for from_s, g in arcs
-            )
-            lines.append(
-                f"    assign state_d[{base + b}] = {terms};"
-            )
+            terms = " | ".join(f"(slot{s}_now[{from_s}] & ({g}))" for from_s, g in arcs)
+            lines.append(f"    assign state_d[{base + b}] = {terms};")
         lines.append("")
     # Remove trailing blank line.
     if lines and lines[-1] == "":
@@ -1856,12 +1904,16 @@ def _render_multi_state_d_body(
 
 
 def _emit_nfa_checker(
-    op_name: str, states: int,
+    op_name: str,
+    states: int,
     transitions: tuple[tuple[int, str, int], ...],
-    accept: frozenset[int], signals: tuple[str, ...],
+    accept: frozenset[int],
+    signals: tuple[str, ...],
     nfa_kind: str,
-    clock: ClockSpec, label: str | None,
-    original_text: str, source_loc: SourceLoc,
+    clock: ClockSpec,
+    label: str | None,
+    original_text: str,
+    source_loc: SourceLoc,
     cse_origin: str | None,
     *,
     thread_slots: int = 1,
@@ -1891,7 +1943,8 @@ def _emit_nfa_checker(
     module_name = module_name_from_label(label, original_text)
     params: dict[str, str] = {
         "module_name": module_name,
-        "clock_signal": clock.signal, "clock_edge": clock.edge,
+        "clock_signal": clock.signal,
+        "clock_edge": clock.edge,
         "source_loc": str(source_loc),
         "sva2rtl_version": __version__,
         "original_text": original_text,
@@ -1906,18 +1959,27 @@ def _emit_nfa_checker(
     }
     if thread_slots > 1:
         params["nfa_state_d_body_multi"] = _render_multi_state_d_body(
-            states, transitions, thread_slots,
+            states,
+            transitions,
+            thread_slots,
         )
     return CheckerNode(
-        template_name="nfa_generic", module_name=module_name, params=params,
-        observed_signals=observed, source_loc=source_loc,
-        children=(), cse_origin=cse_origin,
+        template_name="nfa_generic",
+        module_name=module_name,
+        params=params,
+        observed_signals=observed,
+        source_loc=source_loc,
+        children=(),
+        cse_origin=cse_origin,
     )
 
 
 def _compose_intersect_nfa(
-    node: SeqIntersect, clock: ClockSpec, label: str | None,
-    original_text: str, cse_origin: str | None = None,
+    node: SeqIntersect,
+    clock: ClockSpec,
+    label: str | None,
+    original_text: str,
+    cse_origin: str | None = None,
 ) -> CheckerNode:
     """Compose ``intersect`` via NFA product (v1.5.1 slice 1).
 
@@ -1934,12 +1996,26 @@ def _compose_intersect_nfa(
     n_left, t_left, acc_left, sigs_left = left_nfa
     n_right, t_right, acc_right, sigs_right = right_nfa
     states, trans, accept = _nfa_product_intersect(
-        n_left, t_left, acc_left, n_right, t_right, acc_right,
+        n_left,
+        t_left,
+        acc_left,
+        n_right,
+        t_right,
+        acc_right,
     )
     all_sigs = tuple(sorted(set(sigs_left) | set(sigs_right)))
     return _emit_nfa_checker(
-        "intersect", states, trans, accept, all_sigs, "sequence",
-        clock, label, original_text, node.source_loc, cse_origin,
+        "intersect",
+        states,
+        trans,
+        accept,
+        all_sigs,
+        "sequence",
+        clock,
+        label,
+        original_text,
+        node.source_loc,
+        cse_origin,
     )
 
 
@@ -1947,7 +2023,8 @@ def _compose_intersect_nfa(
 
 
 def _nfa_reachable_states(
-    states: int, transitions: tuple[tuple[int, str, int], ...],
+    states: int,
+    transitions: tuple[tuple[int, str, int], ...],
 ) -> frozenset[int]:
     """Compute states reachable from state 0 in the NFA transition graph.
 
@@ -1969,7 +2046,8 @@ def _nfa_reachable_states(
 
 
 def _nfa_alive_states(
-    states: int, transitions: tuple[tuple[int, str, int], ...],
+    states: int,
+    transitions: tuple[tuple[int, str, int], ...],
     accept: frozenset[int],
 ) -> frozenset[int]:
     """Compute "alive" states for a sub-NFA: any state that either has
@@ -1982,9 +2060,11 @@ def _nfa_alive_states(
 
 
 def _nfa_product_within(
-    n_inner: int, t_inner: tuple[tuple[int, str, int], ...],
+    n_inner: int,
+    t_inner: tuple[tuple[int, str, int], ...],
     acc_inner: frozenset[int],
-    n_outer: int, t_outer: tuple[tuple[int, str, int], ...],
+    n_outer: int,
+    t_outer: tuple[tuple[int, str, int], ...],
     acc_outer: frozenset[int],
 ) -> tuple[int, tuple[tuple[int, str, int], ...], frozenset[int]]:
     """Cross-product NFA for ``within`` — spike-notes §G0.4 (mode='within').
@@ -1998,12 +2078,13 @@ def _nfa_product_within(
     themselves accept. This encodes IEEE 1800 §16.9.10: the inner
     match cycle must fall inside the outer's active window.
     """
+
     def sid(i: int, j: int) -> int:
         return i * n_outer + j
 
     trans: list[tuple[int, str, int]] = []
-    for (li, gl, lt) in t_inner:
-        for (rj, gr, rt) in t_outer:
+    for li, gl, lt in t_inner:
+        for rj, gr, rt in t_outer:
             g = f"({gl}) & ({gr})"
             trans.append((sid(li, rj), g, sid(lt, rt)))
     alive_outer = _nfa_alive_states(n_outer, t_outer, acc_outer)
@@ -2012,8 +2093,11 @@ def _nfa_product_within(
 
 
 def _compose_within_nfa(
-    node: SeqWithin, clock: ClockSpec, label: str | None,
-    original_text: str, cse_origin: str | None = None,
+    node: SeqWithin,
+    clock: ClockSpec,
+    label: str | None,
+    original_text: str,
+    cse_origin: str | None = None,
 ) -> CheckerNode:
     """Compose ``within`` via NFA product (v1.5.1 slice 2).
 
@@ -2027,12 +2111,26 @@ def _compose_within_nfa(
     n_inner, t_inner, acc_inner, sigs_inner = inner_nfa
     n_outer, t_outer, acc_outer, sigs_outer = outer_nfa
     states, trans, accept = _nfa_product_within(
-        n_inner, t_inner, acc_inner, n_outer, t_outer, acc_outer,
+        n_inner,
+        t_inner,
+        acc_inner,
+        n_outer,
+        t_outer,
+        acc_outer,
     )
     all_sigs = tuple(sorted(set(sigs_inner) | set(sigs_outer)))
     return _emit_nfa_checker(
-        "within", states, trans, accept, all_sigs, "sequence",
-        clock, label, original_text, node.source_loc, cse_origin,
+        "within",
+        states,
+        trans,
+        accept,
+        all_sigs,
+        "sequence",
+        clock,
+        label,
+        original_text,
+        node.source_loc,
+        cse_origin,
     )
 
 
@@ -2041,7 +2139,8 @@ def _compose_within_nfa(
 
 def _nfa_product_throughout(
     cond_text: str,
-    n_body: int, t_body: tuple[tuple[int, str, int], ...],
+    n_body: int,
+    t_body: tuple[tuple[int, str, int], ...],
     acc_body: frozenset[int],
     cond_signals: tuple[str, ...],
 ) -> tuple[int, tuple[tuple[int, str, int], ...], frozenset[int]]:
@@ -2059,16 +2158,16 @@ def _nfa_product_throughout(
     Result: same K as body (no state explosion), same accept set.
     """
     cond_guard = f"({cond_text})"
-    trans = tuple(
-        (from_s, f"({g}) & {cond_guard}", to_s)
-        for from_s, g, to_s in t_body
-    )
+    trans = tuple((from_s, f"({g}) & {cond_guard}", to_s) for from_s, g, to_s in t_body)
     return n_body, trans, acc_body
 
 
 def _compose_throughout_nfa(
-    node: SeqThroughout, clock: ClockSpec, label: str | None,
-    original_text: str, cse_origin: str | None = None,
+    node: SeqThroughout,
+    clock: ClockSpec,
+    label: str | None,
+    original_text: str,
+    cse_origin: str | None = None,
 ) -> CheckerNode:
     """Compose ``throughout`` via NFA (v1.5.1 slice 2).
 
@@ -2094,18 +2193,34 @@ def _compose_throughout_nfa(
     assert body_nfa, "pre-checked by _is_nfa_liftable"
     n_body, t_body, acc_body, sigs_body = body_nfa
     states, trans, accept = _nfa_product_throughout(
-        cond_text, n_body, t_body, acc_body, cond_signals,
+        cond_text,
+        n_body,
+        t_body,
+        acc_body,
+        cond_signals,
     )
     all_sigs = tuple(sorted(set(cond_signals) | set(sigs_body)))
     return _emit_nfa_checker(
-        "throughout", states, trans, accept, all_sigs, "sequence",
-        clock, label, original_text, node.source_loc, cse_origin,
+        "throughout",
+        states,
+        trans,
+        accept,
+        all_sigs,
+        "sequence",
+        clock,
+        label,
+        original_text,
+        node.source_loc,
+        cse_origin,
     )
 
 
 def _compose_within(
-    node: SeqWithin, clock: ClockSpec, label: str | None,
-    original_text: str, cse_origin: str | None = None,
+    node: SeqWithin,
+    clock: ClockSpec,
+    label: str | None,
+    original_text: str,
+    cse_origin: str | None = None,
 ) -> CheckerNode:
     """Compose within: inner sequence completes within outer's window.
 
@@ -2117,11 +2232,19 @@ def _compose_within(
     """
     if _is_boolean_leaf(node.inner) and _is_boolean_leaf(node.outer):
         return _compose_within_bool(
-            node, clock, label, original_text, cse_origin=cse_origin,
+            node,
+            clock,
+            label,
+            original_text,
+            cse_origin=cse_origin,
         )
     if _is_nfa_liftable(node.inner) and _is_nfa_liftable(node.outer):
         return _compose_within_nfa(
-            node, clock, label, original_text, cse_origin=cse_origin,
+            node,
+            clock,
+            label,
+            original_text,
+            cse_origin=cse_origin,
         )
     _reject_non_boolean_composition(
         "within",
@@ -2132,8 +2255,11 @@ def _compose_within(
 
 
 def _compose_within_bool(
-    node: SeqWithin, clock: ClockSpec, label: str | None,
-    original_text: str, cse_origin: str | None = None,
+    node: SeqWithin,
+    clock: ClockSpec,
+    label: str | None,
+    original_text: str,
+    cse_origin: str | None = None,
 ) -> CheckerNode:
     """Direct path for bool ``within`` bool — unchanged v1.5.0 behaviour."""
     module_name = module_name_from_label(label, original_text)
@@ -2142,20 +2268,30 @@ def _compose_within_bool(
     outer = compose(node.outer, clock, f"{base}_outer", original_text)
     all_signals = _collect_signals([inner, outer])
     params: dict[str, str] = {
-        "module_name": module_name, "clock_signal": clock.signal,
-        "clock_edge": clock.edge, "source_loc": str(node.source_loc),
-        "sva2rtl_version": __version__, "original_text": original_text,
+        "module_name": module_name,
+        "clock_signal": clock.signal,
+        "clock_edge": clock.edge,
+        "source_loc": str(node.source_loc),
+        "sva2rtl_version": __version__,
+        "original_text": original_text,
     }
     return CheckerNode(
-        template_name="prop_within", module_name=module_name, params=params,
-        observed_signals=all_signals, source_loc=node.source_loc,
-        children=(inner, outer), cse_origin=cse_origin,
+        template_name="prop_within",
+        module_name=module_name,
+        params=params,
+        observed_signals=all_signals,
+        source_loc=node.source_loc,
+        children=(inner, outer),
+        cse_origin=cse_origin,
     )
 
 
 def _compose_throughout(
-    node: SeqThroughout, clock: ClockSpec, label: str | None,
-    original_text: str, cse_origin: str | None = None,
+    node: SeqThroughout,
+    clock: ClockSpec,
+    label: str | None,
+    original_text: str,
+    cse_origin: str | None = None,
 ) -> CheckerNode:
     """Compose throughout: condition must hold continuously through body sequence.
 
@@ -2168,11 +2304,19 @@ def _compose_throughout(
     """
     if _is_boolean_leaf(node.condition) and _is_boolean_leaf(node.body):
         return _compose_throughout_bool(
-            node, clock, label, original_text, cse_origin=cse_origin,
+            node,
+            clock,
+            label,
+            original_text,
+            cse_origin=cse_origin,
         )
     if _is_boolean_leaf(node.condition) and _is_nfa_liftable(node.body):
         return _compose_throughout_nfa(
-            node, clock, label, original_text, cse_origin=cse_origin,
+            node,
+            clock,
+            label,
+            original_text,
+            cse_origin=cse_origin,
         )
     _reject_non_boolean_composition(
         "throughout",
@@ -2183,8 +2327,11 @@ def _compose_throughout(
 
 
 def _compose_throughout_bool(
-    node: SeqThroughout, clock: ClockSpec, label: str | None,
-    original_text: str, cse_origin: str | None = None,
+    node: SeqThroughout,
+    clock: ClockSpec,
+    label: str | None,
+    original_text: str,
+    cse_origin: str | None = None,
 ) -> CheckerNode:
     """Direct path for bool ``throughout`` bool — unchanged v1.5.0 behaviour."""
     module_name = module_name_from_label(label, original_text)
@@ -2197,15 +2344,22 @@ def _compose_throughout_bool(
     else:
         cond_text = "<cond>"
     params: dict[str, str] = {
-        "module_name": module_name, "cond_expr": cond_text,
-        "clock_signal": clock.signal, "clock_edge": clock.edge,
+        "module_name": module_name,
+        "cond_expr": cond_text,
+        "clock_signal": clock.signal,
+        "clock_edge": clock.edge,
         "source_loc": str(node.source_loc),
-        "sva2rtl_version": __version__, "original_text": original_text,
+        "sva2rtl_version": __version__,
+        "original_text": original_text,
     }
     return CheckerNode(
-        template_name="prop_throughout", module_name=module_name, params=params,
-        observed_signals=all_signals, source_loc=node.source_loc,
-        children=(cond_checker, body_checker), cse_origin=cse_origin,
+        template_name="prop_throughout",
+        module_name=module_name,
+        params=params,
+        observed_signals=all_signals,
+        source_loc=node.source_loc,
+        children=(cond_checker, body_checker),
+        cse_origin=cse_origin,
     )
 
 
@@ -2213,29 +2367,41 @@ def _compose_throughout_bool(
 
 
 def _compose_prop_not(
-    node: PropNot, clock: ClockSpec, label: str | None,
-    original_text: str, cse_origin: str | None = None,
+    node: PropNot,
+    clock: ClockSpec,
+    label: str | None,
+    original_text: str,
+    cse_origin: str | None = None,
 ) -> CheckerNode:
     """Compose property NOT: invert pass/fail of the body checker."""
     module_name = module_name_from_label(label, original_text)
     base = module_name[4:] if module_name.startswith("sva_") else module_name
     body_checker = compose(node.body, clock, f"{base}_body", original_text)
     params: dict[str, str] = {
-        "module_name": module_name, "clock_signal": clock.signal,
-        "clock_edge": clock.edge, "source_loc": str(node.source_loc),
-        "sva2rtl_version": __version__, "original_text": original_text,
+        "module_name": module_name,
+        "clock_signal": clock.signal,
+        "clock_edge": clock.edge,
+        "source_loc": str(node.source_loc),
+        "sva2rtl_version": __version__,
+        "original_text": original_text,
     }
     return CheckerNode(
-        template_name="prop_not", module_name=module_name, params=params,
+        template_name="prop_not",
+        module_name=module_name,
+        params=params,
         observed_signals=body_checker.observed_signals,
-        source_loc=node.source_loc, children=(body_checker,),
+        source_loc=node.source_loc,
+        children=(body_checker,),
         cse_origin=cse_origin,
     )
 
 
 def _compose_prop_if_else(
-    node: PropIfElse, clock: ClockSpec, label: str | None,
-    original_text: str, cse_origin: str | None = None,
+    node: PropIfElse,
+    clock: ClockSpec,
+    label: str | None,
+    original_text: str,
+    cse_origin: str | None = None,
 ) -> CheckerNode:
     """Compose property if-else: multiplex between true/false branches."""
     module_name = module_name_from_label(label, original_text)
@@ -2244,6 +2410,7 @@ def _compose_prop_if_else(
     children = [true_checker]
     has_else = node.false_branch is not None
     if has_else:
+        assert node.false_branch is not None
         false_checker = compose(node.false_branch, clock, f"{base}_false", original_text)
         children.append(false_checker)
     all_signals = _collect_signals(children)
@@ -2257,22 +2424,32 @@ def _compose_prop_if_else(
     else:
         cond_text = "<cond>"
     params: dict[str, str] = {
-        "module_name": module_name, "cond_expr": cond_text,
+        "module_name": module_name,
+        "cond_expr": cond_text,
         "has_else": "1" if has_else else "0",
-        "clock_signal": clock.signal, "clock_edge": clock.edge,
+        "clock_signal": clock.signal,
+        "clock_edge": clock.edge,
         "source_loc": str(node.source_loc),
-        "sva2rtl_version": __version__, "original_text": original_text,
+        "sva2rtl_version": __version__,
+        "original_text": original_text,
     }
     return CheckerNode(
-        template_name="prop_if_else", module_name=module_name, params=params,
-        observed_signals=all_signals, source_loc=node.source_loc,
-        children=tuple(children), cse_origin=cse_origin,
+        template_name="prop_if_else",
+        module_name=module_name,
+        params=params,
+        observed_signals=all_signals,
+        source_loc=node.source_loc,
+        children=tuple(children),
+        cse_origin=cse_origin,
     )
 
 
 def _compose_bounded_eventually(
-    node: PropBoundedEventually, clock: ClockSpec, label: str | None,
-    original_text: str, cse_origin: str | None = None,
+    node: PropBoundedEventually,
+    clock: ClockSpec,
+    label: str | None,
+    original_text: str,
+    cse_origin: str | None = None,
 ) -> CheckerNode:
     """Compose bounded eventually ``s_eventually [lo:hi] p`` as a leaf monitor.
 
@@ -2317,8 +2494,11 @@ def _compose_bounded_eventually(
 
 
 def _compose_bounded_always(
-    node: PropBoundedAlways, clock: ClockSpec, label: str | None,
-    original_text: str, cse_origin: str | None = None,
+    node: PropBoundedAlways,
+    clock: ClockSpec,
+    label: str | None,
+    original_text: str,
+    cse_origin: str | None = None,
 ) -> CheckerNode:
     """Compose bounded always ``always [lo:hi] p`` as a leaf monitor.
 
@@ -2363,8 +2543,11 @@ def _compose_bounded_always(
 
 
 def _compose_until(
-    node: PropUntil, clock: ClockSpec, label: str | None,
-    original_text: str, cse_origin: str | None = None,
+    node: PropUntil,
+    clock: ClockSpec,
+    label: str | None,
+    original_text: str,
+    cse_origin: str | None = None,
 ) -> CheckerNode:
     """Compose weak ``a until b`` / ``a until_with b`` as a leaf safety monitor.
 

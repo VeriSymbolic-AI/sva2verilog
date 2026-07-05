@@ -57,20 +57,43 @@ sva2rtl input.sv --property req_ack_prop -o monitor.sv
 
 ## Supported SVA Constructs
 
+### Tier 1 — Core Sequential Operators
+
 | Operator | Description | Example |
 |----------|-------------|---------|
 | `##N` | Fixed delay | `a ##2 b` |
 | `##[M:N]` | Delay range | `a ##[1:3] b` |
-| <code>\|-></code> | Overlapping implication | <code>a \|-> b</code> |
-| <code>\|=></code> | Non-overlapping implication | <code>a \|=> b</code> |
+| <code>\|-></code> | Overlapping implication (incl. multi-cycle consequent) | <code>a \|-> b</code> |
+| <code>\|=></code> | Non-overlapping implication (incl. multi-cycle consequent) | <code>a \|=> b</code> |
 | `[*N]` | Consecutive repetition | `a[*3]` |
 | `[*M:N]` | Repetition range | `a[*1:4]` |
 | `$rose()` | Rising edge detection | `$rose(sig)` |
 | `$fell()` | Falling edge detection | `$fell(sig)` |
 | `$stable()` | No change detection | `$stable(sig)` |
 | `$past()` | Previous value reference | `$past(sig, 2)` |
+| `$changed()` | Signal changed since previous cycle | `$changed(sig)` |
 | `disable iff` | Asynchronous disable | `disable iff (reset) ...` |
 | Named sequences | Sequence instantiation | `sequence s; ... endsequence` |
+
+### Tier 2 — Complex Sequence Operators (v1.3 + v1.5.1 NFA)
+
+| Operator | Description | Example |
+|----------|-------------|---------|
+| `first_match` | Earliest completion wins | `first_match(a ##[1:3] b)` |
+| `[->N]` | Goto repetition (N non-consecutive) | `a[->3]` |
+| `[=N]` | Non-consecutive repetition | `a[=2]` |
+| `and` | Both sequences match (same start) | `s1 and s2` |
+| `or` | Either sequence matches | `s1 or s2` |
+| `intersect` | Both sequences complete simultaneously (incl. multi-cycle via NFA) | `s1 intersect s2` |
+| `within` | Inner sequence within outer's window (incl. multi-cycle via NFA) | `s1 within s2` |
+| `throughout` | Condition holds throughout sequence (incl. multi-cycle via NFA) | `en throughout s1` |
+| `not` | Invert pass/fail (property) | `not (prop)` |
+| `if...else` | Conditional property selection | `if (cond) p1 else p2` |
+
+### Tier 3 — Bounded Liveness Operators (v1.4)
+
+| Operator | Description | Example |
+|----------|-------------|---------|
 | `s_eventually [m:n]` | Bounded eventually (liveness) | `s_eventually [1:3] a` |
 | `eventually [m:n]` | Bounded eventually (weak) | `eventually [0:4] a` |
 | `always [m:n]` | Bounded always (liveness) | `always [1:3] a` |
@@ -78,9 +101,19 @@ sva2rtl input.sv --property req_ack_prop -o monitor.sv
 | `until` | Weak until (safety) | `a until b` |
 | `until_with` | Weak until-with (safety) | `a until_with b` |
 
+### Multi-clock Properties (v1.4.1)
+
+| Mode | Description | Example |
+|------|-------------|---------|
+| Multi-clock sequence | Per-domain sub-checkers + 2-DFF sync | `@(clk1) a ##1 @(clk2) b` |
+| Multi-clock implication | Antecedent sync → consequent | `@(clk1) a \|=> @(clk2) b` |
+| Multi-stage chaining | Transitive domain composition | `@(clk1) ... ##1 @(clk2) ... ##1 @(clk3) ...` |
+
 Unbounded liveness (`s_eventually a`, unbounded `always a`) and the strong
 `s_until` / `s_until_with` forms are rejected at compile time — they are not
-synthesizable on finite state. See [SUPPORTED_CONSTRUCTS.md](SUPPORTED_CONSTRUCTS.md).
+synthesizable on finite state. Nested multi-path composition (intersect /
+within / throughout) is supported up to a total of K ≤ 32 NFA states
+(compile-time enforced). See [SUPPORTED_CONSTRUCTS.md](SUPPORTED_CONSTRUCTS.md).
 
 For the full construct reference with generated templates, see [SUPPORTED_CONSTRUCTS.md](SUPPORTED_CONSTRUCTS.md).
 
