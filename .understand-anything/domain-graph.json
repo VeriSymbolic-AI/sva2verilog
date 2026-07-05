@@ -1,0 +1,1170 @@
+{
+  "version": "1.0.0",
+  "project": {
+    "name": "sva2rtl",
+    "languages": ["python", "sv", "markdown", "json", "j2", "yaml", "toml"],
+    "frameworks": ["Click", "Jinja2", "Pytest", "Hypothesis", "GitHub Actions"],
+    "description": "开源的 SVA(SystemVerilog Assertion)→ 可综合 RTL 监视器编译器：将 SVA 时序属性/序列编译为带统一接口 (clk, rst_n, start, pass, fail, active) 的 SystemVerilog 监视器，可在 Verilator/Icarus 仿真并综合到 FPGA，填补开源 EDA 工具链空白。",
+    "analyzedAt": "2026-06-01T00:00:00.000Z",
+    "gitCommitHash": "1c3204d1057f16a852efe1ddfd7232040e40b56a"
+  },
+  "nodes": [
+    {
+      "id": "domain:compilation-pipeline",
+      "type": "domain",
+      "name": "编译流水线",
+      "summary": "驱动 SVA 源文件经 slang AST → IR → normalizer → composer → optimizer → emitter 的端到端编译流水线，是 sva2rtl 工具的主干能力面。负责阶段编排、异常聚合以及多属性/单属性两类入口的整体调度。",
+      "tags": ["compiler", "pipeline", "orchestration", "core"],
+      "complexity": "complex",
+      "domainMeta": {
+        "entities": ["SVA 源文件", "slang AST JSON", "IR 树", "CheckerNode 树", "RTL 模块文本"],
+        "businessRules": [
+          "每个生成的 monitor 必须暴露 (clk, rst_n, start, pass, fail, active) 标准接口",
+          "编译器不重写 SVA 解析器，前端必须通过 slang --ast-json 拿到 AST",
+          "未支持构造必须以 UnsupportedConstruct 异常显式抛出，不静默降级",
+          "优化 pass 迭代到结构哈希不动点才能输出 RTL"
+        ],
+        "crossDomainInteractions": [
+          "依赖 SVA 算子支持域将 AST 翻译成 IR 并组合成硬件树",
+          "调用 RTL 代码生成域把 CheckerNode 树渲染为 .sv 文本",
+          "结果由验证与测试域通过仿真和 oracle 做等价性校验"
+        ]
+      }
+    },
+    {
+      "id": "domain:sva-operator-support",
+      "type": "domain",
+      "name": "SVA 算子支持",
+      "summary": "建模 SVA 语言子集的 IR 与语义：布尔表达式、序列拼接 ##N/##[M:N]、连续重复 [*M:N]、$rose/$fell/$stable/$past、蕴涵 |->/|=>、disable iff、命名 sequence。负责把 slang AST 翻译成 frozen-dataclass IR、规范化重写以及组合成 token-passing 硬件树。",
+      "tags": ["sva", "ir", "language-frontend", "token-passing"],
+      "complexity": "complex",
+      "domainMeta": {
+        "entities": ["SVANode", "BoolExpr", "SeqConcat", "SeqRepetition", "SignalFunc", "PropImplication", "DisableIff", "ClockSpec", "CheckerNode"],
+        "businessRules": [
+          "IR 节点必须是 frozen dataclass，支持结构哈希用于 CSE",
+          "命名 sequence 必须在 IR 构建期内联展开，递归调用以 visited frozenset 阻断",
+          "范围算子 ##[M:N] 与 [*M:N] 一律采用 counter-encoded 模板而非状态机展开",
+          "组合阶段每个 IR 算子都要选择对应模板，未知 kind 必须抛出 UnsupportedConstruct"
+        ],
+        "crossDomainInteractions": [
+          "为编译流水线提供 IR 与 CheckerNode 树作为各阶段输入输出",
+          "为 RTL 代码生成域确定模板名与参数",
+          "为验证与测试域的行为 oracle 提供算子语义参考"
+        ]
+      }
+    },
+    {
+      "id": "domain:rtl-code-generation",
+      "type": "domain",
+      "name": "RTL 代码生成",
+      "summary": "通过 Jinja2 模板把 CheckerNode 树渲染为 SystemVerilog 或 Verilog-2001 监视器模块文本，并产出 bind 包装以便绑定到 DUT。包含 12 个算子模板（bool_expr / concat_delay / rep_consecutive / rose / fell / stable / past / overlap_bitvec / nonoverlap / disable_iff_top / seq_concat_top / bind）以及面向多模块的批量发射逻辑。",
+      "tags": ["rtl", "codegen", "jinja2", "templates"],
+      "complexity": "complex",
+      "domainMeta": {
+        "entities": ["CheckerNode", "Jinja2 模板", "module_name → sv_text 字典", "bind 包装", "SV/Verilog-2001 输出"],
+        "businessRules": [
+          "默认输出 SystemVerilog，--verilog 标志切换到 Verilog-2001 模板变体",
+          "同一模板名只渲染一次，多次出现共享同一 .sv 文件",
+          "所有模板必须实现 (clk, rst_n, start, pass, fail, active) 标准端口契约",
+          "bind 包装需指向 ast_importer 识别出的非 sva_pkg 顶层模块"
+        ],
+        "crossDomainInteractions": [
+          "消费 SVA 算子支持域产出的 CheckerNode 树及结构哈希",
+          "被编译流水线域作为最后一阶段调用",
+          "其黄金输出被验证与测试域用于 golden parity 比对"
+        ]
+      }
+    },
+    {
+      "id": "domain:verification-and-testing",
+      "type": "domain",
+      "name": "验证与测试",
+      "summary": "围绕生成监视器的正确性建立的多层验证体系：纯 Python 行为 oracle 给出 SVA 算子的黄金语义；Icarus Verilog 仿真在真硬件迹上验证生成 RTL；golden .sv 基线锁定回归；pytest/hypothesis 覆盖各编译阶段单元与端到端集成。",
+      "tags": ["verification", "testing", "simulation", "oracle", "golden"],
+      "complexity": "complex",
+      "domainMeta": {
+        "entities": ["BehavioralOracle", "tb_generator", "iverilog/vvp 仿真", "golden RTL fixtures", "pytest 测试套"],
+        "businessRules": [
+          "每个 SVA 算子必须有行为 oracle 的 _tick_* 实现作为黄金参考",
+          "仿真测试需通过 tb_generator 动态合成 Verilog testbench 并解析 $display 输出",
+          "golden parity 测试要求生成的 .sv 与 tests/golden/ 字节级一致",
+          "实现的算子必须同时通过单元、集成、仿真三层测试"
+        ],
+        "crossDomainInteractions": [
+          "调用编译流水线域产出 RTL，再回放到 oracle/仿真做等价比较",
+          "依赖 SVA 算子支持域的语义来构造 oracle 状态机",
+          "通过 RTL 代码生成域产出的 .sv 文件驱动 iverilog 仿真"
+        ]
+      }
+    },
+    {
+      "id": "domain:project-tooling",
+      "type": "domain",
+      "name": "项目工具",
+      "summary": "支撑 sva2rtl 开发与协作的辅助能力：click CLI 入口与 --dump-ast/--dump-ir/--dump-tree 调试视图、pyproject + uv 构建、GitHub Actions CI 流水线（ruff + mypy + pytest），以及 .planning/ 下的 GSD 工作流文档（PROJECT/REQUIREMENTS/ROADMAP/STATE 与各阶段 PLAN/SUMMARY/RESEARCH/VERIFICATION）。",
+      "tags": ["cli", "tooling", "infrastructure", "docs", "ci"],
+      "complexity": "moderate",
+      "domainMeta": {
+        "entities": ["click 命令", "--dump-* 调试模式", "pyproject.toml", "GitHub Actions ci.yml", ".planning/ 文档"],
+        "businessRules": [
+          "CLI 必须集中捕获 frontend / normalizer / optimizer 的所有自定义异常并退出码非零",
+          "CI 矩阵必须跑 ruff + mypy + pytest 三类质量门槛",
+          "每个 ROADMAP 阶段必须留下 PLAN/SUMMARY/VERIFICATION 三件套以满足 GSD 工作流"
+        ],
+        "crossDomainInteractions": [
+          "CLI 是编译流水线域的唯一对外入口",
+          "调试转储依赖 SVA 算子支持域的 IR 与 CheckerNode 表示",
+          "CI 把验证与测试域的 pytest/仿真测试自动化"
+        ]
+      }
+    },
+
+    {
+      "id": "flow:end-to-end-compile",
+      "type": "flow",
+      "name": "SVA 端到端编译流程",
+      "summary": "用户通过 sva2rtl CLI 输入一份 SVA 源文件，依次经 slang 前端解析、AST→IR 导入、IR 规范化、Token-Passing 组合、优化、Jinja2 发射六个阶段，最终输出可综合的 SystemVerilog/Verilog-2001 监视器模块。",
+      "tags": ["pipeline", "end-to-end", "cli", "compilation"],
+      "complexity": "complex",
+      "domainMeta": {
+        "entryPoint": "sva2rtl <input.sv>",
+        "entryType": "cli"
+      }
+    },
+    {
+      "id": "flow:optimizer-fixed-point",
+      "type": "flow",
+      "name": "CheckerNode 优化-降面积流程",
+      "summary": "在 composer 产出 CheckerNode 树后，optimizer 迭代调度常量折叠、concat 合并、CSE、counter 合并、死节点裁剪 5 个 pass，到结构哈希不动点为止，以最小化最终 RTL 的寄存器与模块数量。",
+      "tags": ["optimizer", "cse", "fixed-point", "area-reduction"],
+      "complexity": "complex",
+      "domainMeta": {
+        "entryPoint": "optimizer.run(checker_tree)",
+        "entryType": "manual"
+      }
+    },
+    {
+      "id": "flow:multi-property-compile",
+      "type": "flow",
+      "name": "多属性批量编译流程",
+      "summary": "当输入文件含多条 ConcurrentAssertionStatement 时，CLI 调用 ast_importer 抽取所有顶层断言，逐条按上述端到端管线编译并通过 emit_all 输出多模块 .sv 文件集合。",
+      "tags": ["pipeline", "batch", "multi-property"],
+      "complexity": "moderate",
+      "domainMeta": {
+        "entryPoint": "ast_importer.collect_top_assertions",
+        "entryType": "cli"
+      }
+    },
+
+    {
+      "id": "flow:ast-to-ir",
+      "type": "flow",
+      "name": "slang AST → IR 构建",
+      "summary": "ast_importer 遍历 slang 给出的并发断言 AST，依据 propertySpec/exprKind 派发到 BoolExpr / SeqConcat / SeqRepetition / SignalFunc / PropImplication / DisableIff 各 IR 构建器，并回填 ClockSpec 与 SourceLoc。",
+      "tags": ["ir-build", "ast-importer", "frontend"],
+      "complexity": "complex",
+      "domainMeta": {
+        "entryPoint": "ast_importer.import_assertion(ast)",
+        "entryType": "manual"
+      }
+    },
+    {
+      "id": "flow:ir-normalization",
+      "type": "flow",
+      "name": "IR 规范化重写",
+      "summary": "normalizer 对 IR 树做模式分派的递归重写，主要扁平化嵌套 SeqConcat、统一 cycle delay 形态，确保 composer 与 optimizer 始终在标准形态上工作。",
+      "tags": ["normalizer", "ir-rewrite", "canonicalization"],
+      "complexity": "moderate",
+      "domainMeta": {
+        "entryPoint": "normalizer.normalize(ir)",
+        "entryType": "manual"
+      }
+    },
+    {
+      "id": "flow:named-sequence-expansion",
+      "type": "flow",
+      "name": "命名 sequence 内联展开",
+      "summary": "当 SVA 源里使用 sequence S; ... endsequence 并在断言中引用时，ast_importer 在导入期把命名 sequence 内联展开成对应 IR 子树，并用 visited frozenset 防止循环引用。",
+      "tags": ["named-sequence", "macro-expansion", "ast-importer"],
+      "complexity": "moderate",
+      "domainMeta": {
+        "entryPoint": "ast_importer._expand_named_sequence",
+        "entryType": "manual"
+      }
+    },
+    {
+      "id": "flow:token-passing-composition",
+      "type": "flow",
+      "name": "Token-Passing 硬件组合",
+      "summary": "composer 把规范化后的 IR 节点逐一映射为 CheckerNode 子树：每个算子选择对应模板（bool_expr/seq_concat/repetition/signal_func/implication/disable_iff），范围算子使用计数器编码，最终构成带 (start, pass, fail, active) token 的硬件树。",
+      "tags": ["composer", "token-passing", "checker-tree", "tima"],
+      "complexity": "complex",
+      "domainMeta": {
+        "entryPoint": "composer.compose(ir)",
+        "entryType": "manual"
+      }
+    },
+
+    {
+      "id": "flow:single-module-emission",
+      "type": "flow",
+      "name": "CheckerNode 单模块 RTL 渲染",
+      "summary": "emitter.emit 把单一根 CheckerNode 喂给 Jinja2，根据 verilog_mode 选择 SystemVerilog 或 Verilog-2001 模板变体，渲染出带标准接口的 monitor 模块文本。",
+      "tags": ["emitter", "jinja2", "single-module"],
+      "complexity": "moderate",
+      "domainMeta": {
+        "entryPoint": "emitter.emit(checker_node)",
+        "entryType": "manual"
+      }
+    },
+    {
+      "id": "flow:multi-module-emission",
+      "type": "flow",
+      "name": "多模块树发射与文件写入",
+      "summary": "emitter.emit_all 深度优先遍历整个 CheckerNode 树，按 module_name 去重，把每个独特模块渲染成 .sv 文本字典并写入目标目录，对应 CSE 之后多模块共享场景。",
+      "tags": ["emitter", "multi-module", "io"],
+      "complexity": "moderate",
+      "domainMeta": {
+        "entryPoint": "emitter.emit_all(root)",
+        "entryType": "manual"
+      }
+    },
+    {
+      "id": "flow:bind-wrapper-emission",
+      "type": "flow",
+      "name": "bind 包装与 DUT 绑定",
+      "summary": "emit_bind 利用 ast_importer 识别出的非 sva_pkg 顶层模块作为 DUT，借助 bind.sv.j2 渲染 SystemVerilog `bind` 语句，把生成的 monitor 自动挂载到 DUT，简化测试集成。",
+      "tags": ["emitter", "bind", "dut-integration"],
+      "complexity": "moderate",
+      "domainMeta": {
+        "entryPoint": "emitter.emit_bind(checker, dut)",
+        "entryType": "manual"
+      }
+    },
+
+    {
+      "id": "flow:behavioral-oracle-equivalence",
+      "type": "flow",
+      "name": "行为 oracle 等价性验证",
+      "summary": "BehavioralOracle 按 SVA 算子 kind 分发到 _tick_delay / _tick_repetition / _tick_rose 等实现，对每个时钟周期推进 active/pass/fail/overflow，作为黄金参考与生成 RTL 的仿真输出在所有迹上做等价比较。",
+      "tags": ["oracle", "behavioral", "equivalence", "verification"],
+      "complexity": "complex",
+      "domainMeta": {
+        "entryPoint": "BehavioralOracle.tick()",
+        "entryType": "manual"
+      }
+    },
+    {
+      "id": "flow:icarus-simulation",
+      "type": "flow",
+      "name": "Icarus Verilog 仿真验证",
+      "summary": "tests/simulation 下的 tb_generator 为生成的 checker 模块动态合成 Verilog testbench，通过 iverilog/vvp 编译并仿真，解析 $display 输出为 (cycle, pass, fail, active) 时序，再由 pytest 与 oracle 比对。",
+      "tags": ["simulation", "icarus-verilog", "testbench-generator", "verification"],
+      "complexity": "complex",
+      "domainMeta": {
+        "entryPoint": "tests/simulation/test_sim_*.py",
+        "entryType": "cli"
+      }
+    },
+    {
+      "id": "flow:golden-parity",
+      "type": "flow",
+      "name": "黄金 RTL 字节级对比",
+      "summary": "test_golden_parity 与 tests/fixtures + tests/golden 协同：以预冻结的 slang AST JSON 作为前端输入桩，运行完整管线后将生成 .sv 与 golden/*.sv 字节级比对，锁定输出格式回归。",
+      "tags": ["golden", "regression", "fixtures"],
+      "complexity": "moderate",
+      "domainMeta": {
+        "entryPoint": "tests/test_golden_parity.py",
+        "entryType": "cli"
+      }
+    },
+    {
+      "id": "flow:unit-and-integration-tests",
+      "type": "flow",
+      "name": "pytest 单元与集成测试",
+      "summary": "pytest 驱动的测试矩阵覆盖 frontend / ast_importer / ir / normalizer / composer / optimizer / emitter / cli 各模块以及 e2e 集成、disable_iff、命名 sequence、--verilog 模式等专题，由 conftest 提供共享 fixture。",
+      "tags": ["pytest", "unit-test", "integration-test"],
+      "complexity": "moderate",
+      "domainMeta": {
+        "entryPoint": "pytest tests/",
+        "entryType": "cli"
+      }
+    },
+
+    {
+      "id": "flow:debug-dump",
+      "type": "flow",
+      "name": "调试转储 (--dump-ast/--dump-ir/--dump-tree)",
+      "summary": "CLI 的 --dump-ast/--dump-ir/--dump-tree 选项触发 debug.py 渲染 slang AST、IR 树、CheckerNode 树以及节点/模块计数与 CSE 节省比例，为开发者提供编译过程的可观测视图。",
+      "tags": ["cli", "debug", "diagnostics", "observability"],
+      "complexity": "moderate",
+      "domainMeta": {
+        "entryPoint": "sva2rtl --dump-ir / --dump-tree",
+        "entryType": "cli"
+      }
+    },
+    {
+      "id": "flow:ci-build-and-quality",
+      "type": "flow",
+      "name": "CI 构建与质量门禁",
+      "summary": "GitHub Actions ci.yml 在每次 push/PR 时使用 uv 安装依赖，依次运行 ruff（lint+format）、mypy（类型）与 pytest（包括仿真测试），任一失败即阻断合并。",
+      "tags": ["ci", "github-actions", "ruff", "mypy", "pytest"],
+      "complexity": "moderate",
+      "domainMeta": {
+        "entryPoint": ".github/workflows/ci.yml",
+        "entryType": "event"
+      }
+    },
+    {
+      "id": "flow:gsd-planning",
+      "type": "flow",
+      "name": "GSD 阶段规划与文档化",
+      "summary": ".planning/ 维护 PROJECT/REQUIREMENTS/ROADMAP/STATE 顶层工件以及每个 ROADMAP 阶段下的 PLAN/RESEARCH/SKELETON/SUMMARY/VERIFICATION 文档，记录从需求、研究到执行验证的完整决策链。",
+      "tags": ["docs", "planning", "gsd", "process"],
+      "complexity": "moderate",
+      "domainMeta": {
+        "entryPoint": ".planning/STATE.md",
+        "entryType": "manual"
+      }
+    },
+
+    {
+      "id": "step:end-to-end-compile:parse-with-slang",
+      "type": "step",
+      "name": "调用 slang 解析 SystemVerilog 源",
+      "summary": "frontend.run_slang 通过子进程调用 slang --ast-json，对输入 .sv 文件解析得到 AST JSON，处理 FileNotFound/非零退出/JSON 解析失败等异常并返回结构化 dict。",
+      "tags": ["frontend", "slang", "subprocess"],
+      "complexity": "complex",
+      "filePath": "src/sva2rtl/frontend.py",
+      "lineRange": [0, 0]
+    },
+    {
+      "id": "step:end-to-end-compile:import-ast-to-ir",
+      "type": "step",
+      "name": "AST → IR 导入",
+      "summary": "ast_importer.import_assertion 在 AST 中定位首个 ConcurrentAssertionStatement 并通过 _dispatch_expr_to_ir 派发，构建 BoolExpr/SeqConcat/SignalFunc/PropImplication/DisableIff 等 IR 节点。",
+      "tags": ["ast-importer", "ir-build"],
+      "complexity": "complex",
+      "filePath": "src/sva2rtl/ast_importer.py",
+      "lineRange": [0, 0]
+    },
+    {
+      "id": "step:end-to-end-compile:normalize-ir",
+      "type": "step",
+      "name": "IR 规范化",
+      "summary": "normalizer.normalize 递归对 IR 应用 _flatten_concat 等重写规则，统一 SeqConcat 与 cycle delay 形态。",
+      "tags": ["normalizer", "ir-rewrite"],
+      "complexity": "moderate",
+      "filePath": "src/sva2rtl/normalizer.py",
+      "lineRange": [0, 0]
+    },
+    {
+      "id": "step:end-to-end-compile:compose-checker-tree",
+      "type": "step",
+      "name": "Token-Passing 组合 CheckerNode 树",
+      "summary": "composer.compose 按 IR kind 分派到 _compose_bool / _compose_seq_concat / _compose_repetition / _compose_signal_func / _compose_implication / _compose_disable_iff，组合出带 token 接口的 CheckerNode 树。",
+      "tags": ["composer", "token-passing"],
+      "complexity": "complex",
+      "filePath": "src/sva2rtl/composer.py",
+      "lineRange": [0, 0]
+    },
+    {
+      "id": "step:end-to-end-compile:run-optimizer",
+      "type": "step",
+      "name": "运行优化 pass 序列",
+      "summary": "optimizer.run 迭代调度 constant_fold → concat_merge → cse → counter_merge → dead_node 五个 pass，到结构哈希不动点退出。",
+      "tags": ["optimizer", "fixed-point"],
+      "complexity": "complex",
+      "filePath": "src/sva2rtl/optimizer.py",
+      "lineRange": [0, 0]
+    },
+    {
+      "id": "step:end-to-end-compile:emit-rtl",
+      "type": "step",
+      "name": "Jinja2 渲染 RTL 模块",
+      "summary": "emitter.emit / emit_all 按 verilog_mode 选模板把每个独特 CheckerNode 渲染成 .sv 模块文本并写入文件或 stdout。",
+      "tags": ["emitter", "jinja2", "io"],
+      "complexity": "complex",
+      "filePath": "src/sva2rtl/emitter.py",
+      "lineRange": [0, 0]
+    },
+
+    {
+      "id": "step:optimizer-fixed-point:constant-fold",
+      "type": "step",
+      "name": "常量折叠",
+      "summary": "constant_fold 检测 antecedent 恒真/恒假等模式，简化 implication 模板或裁剪不可达分支。",
+      "tags": ["optimizer", "constant-fold"],
+      "complexity": "moderate",
+      "filePath": "src/sva2rtl/optimizer.py",
+      "lineRange": [0, 0]
+    },
+    {
+      "id": "step:optimizer-fixed-point:concat-merge",
+      "type": "step",
+      "name": "delay/SeqConcat 合并",
+      "summary": "concat_merge 把相邻 delay 节点与 seq_concat 子节点合并成单一 cycle counter，减少触发器数量。",
+      "tags": ["optimizer", "concat-merge"],
+      "complexity": "complex",
+      "filePath": "src/sva2rtl/optimizer.py",
+      "lineRange": [0, 0]
+    },
+    {
+      "id": "step:optimizer-fixed-point:cse",
+      "type": "step",
+      "name": "结构哈希 CSE",
+      "summary": "cse 按 structural_hash 分组等价子树，选规范模块名，把重复子树替换为单一 module 实例并记录 cse_origin。",
+      "tags": ["optimizer", "cse", "structural-hash"],
+      "complexity": "complex",
+      "filePath": "src/sva2rtl/optimizer.py",
+      "lineRange": [0, 0]
+    },
+    {
+      "id": "step:optimizer-fixed-point:counter-merge",
+      "type": "step",
+      "name": "Counter 合并",
+      "summary": "counter_merge 把语义等价但参数不同的 counter-encoded 重复实例合并到统一计数器宽度，避免多套独立 counter 逻辑。",
+      "tags": ["optimizer", "counter-merge", "repetition"],
+      "complexity": "complex",
+      "filePath": "src/sva2rtl/optimizer.py",
+      "lineRange": [0, 0]
+    },
+    {
+      "id": "step:optimizer-fixed-point:dead-node",
+      "type": "step",
+      "name": "死节点裁剪",
+      "summary": "dead_node 移除参数表明永不命中或永远成立的计数器/序列子节点，避免生成不会被激活的硬件资源。",
+      "tags": ["optimizer", "dead-code"],
+      "complexity": "complex",
+      "filePath": "src/sva2rtl/optimizer.py",
+      "lineRange": [0, 0]
+    },
+    {
+      "id": "step:optimizer-fixed-point:fixed-point-loop",
+      "type": "step",
+      "name": "结构哈希不动点判定",
+      "summary": "run 比较前后两次 CheckerNode 树的整体结构哈希，相等才退出循环，保证多 pass 间的相互暴露的优化机会被收敛吸收。",
+      "tags": ["optimizer", "fixed-point", "structural-hash"],
+      "complexity": "moderate",
+      "filePath": "src/sva2rtl/optimizer.py",
+      "lineRange": [0, 0]
+    },
+
+    {
+      "id": "step:multi-property-compile:collect-assertions",
+      "type": "step",
+      "name": "抽取所有顶层并发断言",
+      "summary": "ast_importer.collect_top_assertions 遍历 AST，返回 (label, assertion) 列表供 CLI 多属性批处理。",
+      "tags": ["ast-importer", "batch"],
+      "complexity": "moderate",
+      "filePath": "src/sva2rtl/ast_importer.py",
+      "lineRange": [0, 0]
+    },
+    {
+      "id": "step:multi-property-compile:per-property-pipeline",
+      "type": "step",
+      "name": "逐属性走完整管线",
+      "summary": "CLI 对每条断言独立执行 normalize → compose → optimize，得到一组 CheckerNode 子树及其模块名集合。",
+      "tags": ["cli", "pipeline", "loop"],
+      "complexity": "complex",
+      "filePath": "src/sva2rtl/cli.py",
+      "lineRange": [0, 0]
+    },
+    {
+      "id": "step:multi-property-compile:aggregate-modules",
+      "type": "step",
+      "name": "聚合模块去重",
+      "summary": "emit_all 按 module_name 去重收集所有属性产生的独特模块，避免在多属性间重复渲染相同 checker。",
+      "tags": ["emitter", "dedupe"],
+      "complexity": "moderate",
+      "filePath": "src/sva2rtl/emitter.py",
+      "lineRange": [0, 0]
+    },
+    {
+      "id": "step:multi-property-compile:write-multi-file",
+      "type": "step",
+      "name": "多文件写出",
+      "summary": "把 module_name → sv_text 字典写入目标目录，每个模块写成单独的 .sv 文件并自动创建父目录。",
+      "tags": ["emitter", "io", "multi-file"],
+      "complexity": "simple",
+      "filePath": "src/sva2rtl/emitter.py",
+      "lineRange": [0, 0]
+    },
+
+    {
+      "id": "step:ast-to-ir:locate-assertion",
+      "type": "step",
+      "name": "定位 ConcurrentAssertionStatement",
+      "summary": "在 slang AST 中找到首个并发断言语句作为单属性编译入口，未找到时抛 SvaCompileError。",
+      "tags": ["ast-importer", "entry"],
+      "complexity": "moderate",
+      "filePath": "src/sva2rtl/ast_importer.py",
+      "lineRange": [0, 0]
+    },
+    {
+      "id": "step:ast-to-ir:extract-clock",
+      "type": "step",
+      "name": "提取 ClockSpec",
+      "summary": "从 default clocking 或断言的 clocking event 中提取 posedge/negedge 与时钟信号名构造 ClockSpec。",
+      "tags": ["ast-importer", "clock"],
+      "complexity": "moderate",
+      "filePath": "src/sva2rtl/ast_importer.py",
+      "lineRange": [0, 0]
+    },
+    {
+      "id": "step:ast-to-ir:dispatch-by-kind",
+      "type": "step",
+      "name": "按 propertySpec/exprKind 派发",
+      "summary": "_dispatch_expr_to_ir 根据 AST kind 选择对应构建器（序列、信号函数、蕴涵、命名 sequence 引用），并处理 disable iff 包装。",
+      "tags": ["ast-importer", "dispatch"],
+      "complexity": "complex",
+      "filePath": "src/sva2rtl/ast_importer.py",
+      "lineRange": [0, 0]
+    },
+    {
+      "id": "step:ast-to-ir:build-bool-expr",
+      "type": "step",
+      "name": "序列化布尔表达式",
+      "summary": "把 slang 表达式 AST 反序列化为 SystemVerilog 源码字符串并写入 BoolExpr.text，覆盖名字、字面量、一/二元运算与选择运算。",
+      "tags": ["ast-importer", "bool-expr", "serializer"],
+      "complexity": "complex",
+      "filePath": "src/sva2rtl/ast_importer.py",
+      "lineRange": [0, 0]
+    },
+    {
+      "id": "step:ast-to-ir:annotate-source-loc",
+      "type": "step",
+      "name": "回填 SourceLoc",
+      "summary": "_make_source_loc 从 AST 的 sourceFile/line/col 字段构造 SourceLoc，用于错误诊断与 dump 输出。",
+      "tags": ["ast-importer", "source-loc"],
+      "complexity": "simple",
+      "filePath": "src/sva2rtl/ast_importer.py",
+      "lineRange": [0, 0]
+    },
+
+    {
+      "id": "step:ir-normalization:dispatch-recurse",
+      "type": "step",
+      "name": "模式分派递归",
+      "summary": "normalize 用 match/case 对 SeqConcat / SeqRepetition / PropImplication / DisableIff 派发，递归规范化子节点。",
+      "tags": ["normalizer", "dispatch"],
+      "complexity": "complex",
+      "filePath": "src/sva2rtl/normalizer.py",
+      "lineRange": [0, 0]
+    },
+    {
+      "id": "step:ir-normalization:apply-rules",
+      "type": "step",
+      "name": "应用单节点规则",
+      "summary": "_normalize_node 主要触发 _flatten_concat 等规则，其它节点保持不变。",
+      "tags": ["normalizer", "rules"],
+      "complexity": "moderate",
+      "filePath": "src/sva2rtl/normalizer.py",
+      "lineRange": [0, 0]
+    },
+    {
+      "id": "step:ir-normalization:flatten-seq-concat",
+      "type": "step",
+      "name": "扁平化 SeqConcat",
+      "summary": "_flatten_concat 把嵌套 SeqConcat 收平为一层，合并子序列元素列表与 cycle delay。",
+      "tags": ["normalizer", "flatten"],
+      "complexity": "complex",
+      "filePath": "src/sva2rtl/normalizer.py",
+      "lineRange": [0, 0]
+    },
+
+    {
+      "id": "step:named-sequence-expansion:lookup-definition",
+      "type": "step",
+      "name": "解析 sequence 定义",
+      "summary": "在 AST 中找到对应 sequence 名字的定义节点，作为内联展开模板。",
+      "tags": ["ast-importer", "named-sequence"],
+      "complexity": "moderate",
+      "filePath": "src/sva2rtl/ast_importer.py",
+      "lineRange": [0, 0]
+    },
+    {
+      "id": "step:named-sequence-expansion:guard-recursion",
+      "type": "step",
+      "name": "递归保护 visited frozenset",
+      "summary": "用 frozenset 记录已展开的 sequence 名，阻断循环引用，触发时抛 SvaCompileError。",
+      "tags": ["ast-importer", "recursion-guard"],
+      "complexity": "moderate",
+      "filePath": "src/sva2rtl/ast_importer.py",
+      "lineRange": [0, 0]
+    },
+    {
+      "id": "step:named-sequence-expansion:reenter-dispatch",
+      "type": "step",
+      "name": "回到 _dispatch_expr_to_ir",
+      "summary": "把展开后的子表达式重新喂给 _dispatch_expr_to_ir，让其按普通算子规则继续构建 IR。",
+      "tags": ["ast-importer", "dispatch"],
+      "complexity": "moderate",
+      "filePath": "src/sva2rtl/ast_importer.py",
+      "lineRange": [0, 0]
+    },
+
+    {
+      "id": "step:token-passing-composition:dispatch-template",
+      "type": "step",
+      "name": "按 IR kind 选模板",
+      "summary": "composer.compose 把 IR 节点派发到 _compose_* 对应实现，决定当前算子映射到哪个 Jinja2 模板。",
+      "tags": ["composer", "dispatch"],
+      "complexity": "complex",
+      "filePath": "src/sva2rtl/composer.py",
+      "lineRange": [0, 0]
+    },
+    {
+      "id": "step:token-passing-composition:wrap-bool-and-signals",
+      "type": "step",
+      "name": "封装 BoolExpr 与系统函数",
+      "summary": "_compose_bool / _compose_signal_func 包装 BoolExpr 与 $rose/$fell/$stable/$past 为 CheckerNode，记录观察信号与 depth 参数。",
+      "tags": ["composer", "bool-expr", "signal-func"],
+      "complexity": "moderate",
+      "filePath": "src/sva2rtl/composer.py",
+      "lineRange": [0, 0]
+    },
+    {
+      "id": "step:token-passing-composition:counter-encode-range",
+      "type": "step",
+      "name": "范围算子的 counter 编码",
+      "summary": "_compose_repetition / _compose_delay 为 [*M:N] 与 ##[M:N] 计算计数器位宽，选 counter-encoded 模板实现面积高效的范围匹配。",
+      "tags": ["composer", "counter-encoding", "range"],
+      "complexity": "complex",
+      "filePath": "src/sva2rtl/composer.py",
+      "lineRange": [0, 0]
+    },
+    {
+      "id": "step:token-passing-composition:assemble-implication",
+      "type": "step",
+      "name": "组合蕴涵与 disable iff",
+      "summary": "_compose_implication / _compose_disable_iff 把 antecedent、consequent 与异步禁用条件接入 implication / disable_iff_top 模板，估算流水线寄存器位宽并保留 overlapping 标志区分 |-> / |=>。",
+      "tags": ["composer", "implication", "disable-iff"],
+      "complexity": "complex",
+      "filePath": "src/sva2rtl/composer.py",
+      "lineRange": [0, 0]
+    },
+    {
+      "id": "step:token-passing-composition:hash-checker",
+      "type": "step",
+      "name": "结构哈希计算",
+      "summary": "structural_hash 对 CheckerNode 子树取 SHA-256，作为 CSE 与 counter_merge 等优化判断子树等价性的稳定键。",
+      "tags": ["composer", "structural-hash", "sha256"],
+      "complexity": "moderate",
+      "filePath": "src/sva2rtl/composer.py",
+      "lineRange": [0, 0]
+    },
+
+    {
+      "id": "step:single-module-emission:select-template",
+      "type": "step",
+      "name": "按 verilog_mode 选模板",
+      "summary": "emit 根据 verilog_mode 选择 SystemVerilog 或 Verilog-2001 模板变体，加载 templates/*.sv.j2。",
+      "tags": ["emitter", "template-select"],
+      "complexity": "moderate",
+      "filePath": "src/sva2rtl/emitter.py",
+      "lineRange": [0, 0]
+    },
+    {
+      "id": "step:single-module-emission:fill-params",
+      "type": "step",
+      "name": "填充模板参数",
+      "summary": "把 CheckerNode 上的 module_name、template_params、observed_signals 等字段绑定到 Jinja2 上下文。",
+      "tags": ["emitter", "jinja2", "params"],
+      "complexity": "moderate",
+      "filePath": "src/sva2rtl/emitter.py",
+      "lineRange": [0, 0]
+    },
+    {
+      "id": "step:single-module-emission:render-and-write",
+      "type": "step",
+      "name": "渲染并写出",
+      "summary": "render 模板得到 .sv 文本后通过 write_to_file 写入指定路径或 stdout，自动创建缺失父目录。",
+      "tags": ["emitter", "io"],
+      "complexity": "simple",
+      "filePath": "src/sva2rtl/emitter.py",
+      "lineRange": [0, 0]
+    },
+
+    {
+      "id": "step:multi-module-emission:dfs-traverse",
+      "type": "step",
+      "name": "深度优先遍历 CheckerNode 树",
+      "summary": "_emit_recursive 深度优先遍历子树，遇到尚未渲染的 module_name 时入字典。",
+      "tags": ["emitter", "tree-traversal"],
+      "complexity": "moderate",
+      "filePath": "src/sva2rtl/emitter.py",
+      "lineRange": [0, 0]
+    },
+    {
+      "id": "step:multi-module-emission:dedupe-by-module",
+      "type": "step",
+      "name": "按 module_name 去重",
+      "summary": "确保同一 module_name 只渲染一次，对应 CSE 之后多处复用同一 checker 模块的场景。",
+      "tags": ["emitter", "dedupe", "cse"],
+      "complexity": "moderate",
+      "filePath": "src/sva2rtl/emitter.py",
+      "lineRange": [0, 0]
+    },
+    {
+      "id": "step:multi-module-emission:write-files",
+      "type": "step",
+      "name": "批量写出多文件",
+      "summary": "write_modules_to_dir 把 module_name → sv_text 字典逐项写到目标目录，每个模块独立 .sv 文件。",
+      "tags": ["emitter", "io", "multi-file"],
+      "complexity": "simple",
+      "filePath": "src/sva2rtl/emitter.py",
+      "lineRange": [0, 0]
+    },
+
+    {
+      "id": "step:bind-wrapper-emission:identify-dut",
+      "type": "step",
+      "name": "识别 DUT 顶层模块",
+      "summary": "ast_importer 从 slang AST 中找出非 sva_pkg 的顶层模块名，作为 emit_bind 时绑定的目标 DUT。",
+      "tags": ["ast-importer", "dut"],
+      "complexity": "moderate",
+      "filePath": "src/sva2rtl/ast_importer.py",
+      "lineRange": [0, 0]
+    },
+    {
+      "id": "step:bind-wrapper-emission:render-bind-template",
+      "type": "step",
+      "name": "渲染 bind.sv.j2",
+      "summary": "emit_bind 用 bind.sv.j2 渲染 SystemVerilog `bind` 语句，把 monitor 端口连到 DUT 同名信号。",
+      "tags": ["emitter", "bind", "jinja2"],
+      "complexity": "moderate",
+      "filePath": "src/sva2rtl/emitter.py",
+      "lineRange": [0, 0]
+    },
+    {
+      "id": "step:bind-wrapper-emission:write-bind-file",
+      "type": "step",
+      "name": "写出 bind 包装文件",
+      "summary": "把 bind 包装文本写入与 monitor 同目录的 .sv 文件，供仿真/综合工程一并加载。",
+      "tags": ["emitter", "io"],
+      "complexity": "simple",
+      "filePath": "src/sva2rtl/emitter.py",
+      "lineRange": [0, 0]
+    },
+
+    {
+      "id": "step:behavioral-oracle-equivalence:init-state",
+      "type": "step",
+      "name": "构造器初始化算子状态",
+      "summary": "BehavioralOracle.__init__ 校验 kind 合法性，按算子类型初始化延时计数、重复计数、past 移位寄存器与 overlap/nonoverlap 位向量。",
+      "tags": ["oracle", "constructor"],
+      "complexity": "moderate",
+      "filePath": "src/sva2rtl/behavioral_oracle.py",
+      "lineRange": [0, 0]
+    },
+    {
+      "id": "step:behavioral-oracle-equivalence:reset",
+      "type": "step",
+      "name": "同步复位状态",
+      "summary": "reset 清空所有内部寄存器，建模 RTL 中 rst_n 同步有效或 disable_i 触发时的行为。",
+      "tags": ["oracle", "reset"],
+      "complexity": "simple",
+      "filePath": "src/sva2rtl/behavioral_oracle.py",
+      "lineRange": [0, 0]
+    },
+    {
+      "id": "step:behavioral-oracle-equivalence:tick-dispatch",
+      "type": "step",
+      "name": "tick 顶层分发",
+      "summary": "tick 先处理 disable_i 同步禁用，再依 kind 派发到 _tick_delay/_tick_repetition/_tick_rose 等实现，输出 (active, pass, fail, overflow)。",
+      "tags": ["oracle", "tick", "dispatch"],
+      "complexity": "moderate",
+      "filePath": "src/sva2rtl/behavioral_oracle.py",
+      "lineRange": [0, 0]
+    },
+    {
+      "id": "step:behavioral-oracle-equivalence:operator-models",
+      "type": "step",
+      "name": "算子级状态机建模",
+      "summary": "_tick_delay/_tick_repetition/_tick_rose/_tick_fell/_tick_stable/_tick_past/_tick_overlap/_tick_nonoverlap 分别精确对齐 RTL always_ff 的 NBA 时序与 overflow 行为。",
+      "tags": ["oracle", "operator-model", "sva-semantics"],
+      "complexity": "complex",
+      "filePath": "src/sva2rtl/behavioral_oracle.py",
+      "lineRange": [0, 0]
+    },
+    {
+      "id": "step:behavioral-oracle-equivalence:compare-traces",
+      "type": "step",
+      "name": "比对 oracle 与 RTL 轨迹",
+      "summary": "test_behavioral_oracle 把生成 RTL 仿真输出与 oracle 同步推进的 (active, pass, fail) 轨迹逐周期比较，断言完全一致。",
+      "tags": ["test", "equivalence"],
+      "complexity": "complex",
+      "filePath": "tests/test_behavioral_oracle.py",
+      "lineRange": [0, 0]
+    },
+
+    {
+      "id": "step:icarus-simulation:extract-extra-inputs",
+      "type": "step",
+      "name": "提取额外输入端口",
+      "summary": "tb_generator 扫描 CheckerModule 端口列表，过滤掉标准接口 (clk/rst_n/start/pass/fail/active)，得到需在 testbench 中驱动的输入信号集合。",
+      "tags": ["tb-generator", "port-extraction"],
+      "complexity": "simple",
+      "filePath": "tests/simulation/tb_generator.py",
+      "lineRange": [0, 0]
+    },
+    {
+      "id": "step:icarus-simulation:synthesize-testbench",
+      "type": "step",
+      "name": "合成 Verilog testbench",
+      "summary": "依据 checker 名、时钟、额外输入与时刻化激励字典，合成完整 Verilog testbench（时钟驱动 + 复位 + stimulus + 每周期 $display）。",
+      "tags": ["tb-generator", "code-generation"],
+      "complexity": "complex",
+      "filePath": "tests/simulation/tb_generator.py",
+      "lineRange": [0, 0]
+    },
+    {
+      "id": "step:icarus-simulation:compile-and-run",
+      "type": "step",
+      "name": "iverilog/vvp 编译仿真",
+      "summary": "把 DUT 与 testbench 写入临时目录，先调 iverilog 编译再用 vvp 运行，捕获 stdout 供后续解析。",
+      "tags": ["simulation", "iverilog", "vvp"],
+      "complexity": "complex",
+      "filePath": "tests/simulation/tb_generator.py",
+      "lineRange": [0, 0]
+    },
+    {
+      "id": "step:icarus-simulation:parse-display",
+      "type": "step",
+      "name": "解析 $display 输出",
+      "summary": "_parse_output 把每行 $display 拆为 (cycle, pass, fail, active[, overflow]) 元组，得到结构化时序结果。",
+      "tags": ["parser", "simulation"],
+      "complexity": "moderate",
+      "filePath": "tests/simulation/tb_generator.py",
+      "lineRange": [0, 0]
+    },
+    {
+      "id": "step:icarus-simulation:assert-against-oracle",
+      "type": "step",
+      "name": "pytest 断言 vs oracle",
+      "summary": "test_sim_*.py 把仿真结果与同输入下 BehavioralOracle 的 tick 序列逐周期比对，差异即测试失败。",
+      "tags": ["pytest", "assertion", "oracle"],
+      "complexity": "moderate",
+      "filePath": "tests/simulation/test_sim_delay.py",
+      "lineRange": [0, 0]
+    },
+
+    {
+      "id": "step:golden-parity:load-fixture-ast",
+      "type": "step",
+      "name": "加载冻结 AST fixture",
+      "summary": "tests/fixtures/*.json 提供预先冻结的 slang AST JSON 作为前端输入桩，绕开外部 slang 二进制依赖。",
+      "tags": ["fixtures", "ast-stub"],
+      "complexity": "simple",
+      "filePath": "tests/fixtures",
+      "lineRange": [0, 0]
+    },
+    {
+      "id": "step:golden-parity:run-pipeline",
+      "type": "step",
+      "name": "运行完整管线",
+      "summary": "对 fixture AST 跑 ast_importer → normalizer → composer → optimizer → emitter，得到生成 .sv 文本。",
+      "tags": ["pipeline", "test"],
+      "complexity": "moderate",
+      "filePath": "tests/test_golden_parity.py",
+      "lineRange": [0, 0]
+    },
+    {
+      "id": "step:golden-parity:compare-bytes",
+      "type": "step",
+      "name": "字节级比对 golden",
+      "summary": "把生成 .sv 与 tests/golden/*.sv 字节级比较，任何空白/参数变化都会触发回归告警。",
+      "tags": ["golden", "byte-compare"],
+      "complexity": "simple",
+      "filePath": "tests/test_golden_parity.py",
+      "lineRange": [0, 0]
+    },
+
+    {
+      "id": "step:unit-and-integration-tests:share-fixtures",
+      "type": "step",
+      "name": "conftest 共享 fixture",
+      "summary": "tests/conftest.py 与 tests/simulation/conftest.py 提供 SVA 源样例、AST 桩、tmp 输出目录等共享 fixture。",
+      "tags": ["pytest", "conftest", "fixtures"],
+      "complexity": "moderate",
+      "filePath": "tests/conftest.py",
+      "lineRange": [0, 0]
+    },
+    {
+      "id": "step:unit-and-integration-tests:per-module-units",
+      "type": "step",
+      "name": "各模块单元测试",
+      "summary": "test_frontend / test_ast_importer / test_ir / test_normalizer / test_composer / test_optimizer / test_emitter / test_errors 分别覆盖对应模块的局部行为。",
+      "tags": ["pytest", "unit-test"],
+      "complexity": "moderate",
+      "filePath": "tests/test_composer.py",
+      "lineRange": [0, 0]
+    },
+    {
+      "id": "step:unit-and-integration-tests:e2e-pipeline",
+      "type": "step",
+      "name": "端到端集成测试",
+      "summary": "test_pipeline_e2e / test_integration / test_integration_full 跑真实 SVA → RTL 全管线，并对生成模块做语法/行为级断言。",
+      "tags": ["pytest", "integration", "e2e"],
+      "complexity": "complex",
+      "filePath": "tests/test_pipeline_e2e.py",
+      "lineRange": [0, 0]
+    },
+    {
+      "id": "step:unit-and-integration-tests:topic-suites",
+      "type": "step",
+      "name": "专题测试套",
+      "summary": "test_disable_iff / test_named_sequences / test_repetition / test_signal_functions / test_verilog_mode / test_bind / test_cli_phase6 等专题测试覆盖关键算子与 CLI 模式。",
+      "tags": ["pytest", "topic-suite"],
+      "complexity": "moderate",
+      "filePath": "tests/test_disable_iff.py",
+      "lineRange": [0, 0]
+    },
+
+    {
+      "id": "step:debug-dump:dump-ast",
+      "type": "step",
+      "name": "--dump-ast 输出 slang AST",
+      "summary": "CLI 在 --dump-ast 模式下直接打印 slang 返回的 AST JSON，方便定位前端解析问题。",
+      "tags": ["cli", "debug", "dump-ast"],
+      "complexity": "simple",
+      "filePath": "src/sva2rtl/cli.py",
+      "lineRange": [0, 0]
+    },
+    {
+      "id": "step:debug-dump:dump-ir",
+      "type": "step",
+      "name": "--dump-ir 输出 IR 树",
+      "summary": "debug.format_ir 把 IR 节点渲染为带缩进的人类可读文本，对应 --dump-ir 模式。",
+      "tags": ["cli", "debug", "dump-ir"],
+      "complexity": "simple",
+      "filePath": "src/sva2rtl/debug.py",
+      "lineRange": [0, 0]
+    },
+    {
+      "id": "step:debug-dump:dump-tree",
+      "type": "step",
+      "name": "--dump-tree 输出优化报告",
+      "summary": "debug.format_dump_tree 渲染 IR + CheckerNode 树以及节点/模块计数与 CSE 节省比例，对应 --dump-tree 模式。",
+      "tags": ["cli", "debug", "dump-tree", "cse"],
+      "complexity": "complex",
+      "filePath": "src/sva2rtl/debug.py",
+      "lineRange": [0, 0]
+    },
+    {
+      "id": "step:debug-dump:catch-errors",
+      "type": "step",
+      "name": "集中捕获自定义异常",
+      "summary": "CLI 的主回调对 SlangNotFound / SvaCompileError / UnsupportedConstruct / InternalError / PropertyNotFound 做集中捕获并打印源码定位。",
+      "tags": ["cli", "error-handling"],
+      "complexity": "moderate",
+      "filePath": "src/sva2rtl/cli.py",
+      "lineRange": [0, 0]
+    },
+
+    {
+      "id": "step:ci-build-and-quality:setup-uv",
+      "type": "step",
+      "name": "uv 安装依赖",
+      "summary": "ci.yml 用 uv sync 在 Python 3.12 环境中装好 click、Jinja2、automata-lib、networkx、pytest、hypothesis 等依赖。",
+      "tags": ["ci", "uv", "setup"],
+      "complexity": "simple",
+      "filePath": ".github/workflows/ci.yml",
+      "lineRange": [0, 0]
+    },
+    {
+      "id": "step:ci-build-and-quality:lint-format",
+      "type": "step",
+      "name": "ruff lint + format",
+      "summary": "ruff check 与 ruff format --check 双重把关代码风格，发现未格式化或 lint 违规即失败。",
+      "tags": ["ci", "ruff", "lint"],
+      "complexity": "simple",
+      "filePath": ".github/workflows/ci.yml",
+      "lineRange": [0, 0]
+    },
+    {
+      "id": "step:ci-build-and-quality:type-check",
+      "type": "step",
+      "name": "mypy 类型检查",
+      "summary": "mypy 校验 src/sva2rtl 目录的类型注解，py.typed 暴露给下游使用方。",
+      "tags": ["ci", "mypy", "type-check"],
+      "complexity": "simple",
+      "filePath": ".github/workflows/ci.yml",
+      "lineRange": [0, 0]
+    },
+    {
+      "id": "step:ci-build-and-quality:run-tests",
+      "type": "step",
+      "name": "pytest 全量回归",
+      "summary": "运行 tests/ 与 tests/simulation/，包含单元、集成、golden parity、行为 oracle 与 iverilog 仿真，任一失败阻断合并。",
+      "tags": ["ci", "pytest", "regression"],
+      "complexity": "moderate",
+      "filePath": ".github/workflows/ci.yml",
+      "lineRange": [0, 0]
+    },
+
+    {
+      "id": "step:gsd-planning:project-state",
+      "type": "step",
+      "name": "维护 PROJECT/REQUIREMENTS/STATE",
+      "summary": ".planning/PROJECT.md 跟踪 Validated/Active/Out-of-Scope 范围，REQUIREMENTS.md 与 STATE.md 给出当前进度切片。",
+      "tags": ["docs", "gsd", "project"],
+      "complexity": "moderate",
+      "filePath": ".planning/PROJECT.md",
+      "lineRange": [0, 0]
+    },
+    {
+      "id": "step:gsd-planning:roadmap-phasing",
+      "type": "step",
+      "name": "ROADMAP 阶段化",
+      "summary": ".planning/ROADMAP.md 把工作切成六个阶段（foundation / core seq / tier-1 ops / advanced / optimization / CLI），驱动阶段目录组织。",
+      "tags": ["docs", "gsd", "roadmap"],
+      "complexity": "moderate",
+      "filePath": ".planning/ROADMAP.md",
+      "lineRange": [0, 0]
+    },
+    {
+      "id": "step:gsd-planning:phase-artifacts",
+      "type": "step",
+      "name": "阶段 PLAN/SUMMARY/VERIFICATION",
+      "summary": "每个阶段目录下的 PLAN/RESEARCH/SKELETON/SUMMARY/VERIFICATION 文档记录从需求拆解到执行验证的完整链路。",
+      "tags": ["docs", "gsd", "phase"],
+      "complexity": "moderate",
+      "filePath": ".planning/phases",
+      "lineRange": [0, 0]
+    },
+    {
+      "id": "step:gsd-planning:supported-constructs",
+      "type": "step",
+      "name": "SUPPORTED_CONSTRUCTS 清单",
+      "summary": "SUPPORTED_CONSTRUCTS.md 列出当前可编译的 SVA 算子（##N、##[M:N]、|->、|=>、[*N]、[*M:N]、$rose/$fell/$stable/$past、disable iff、named sequences），是工具能力面的对外契约。",
+      "tags": ["docs", "supported-constructs"],
+      "complexity": "simple",
+      "filePath": "SUPPORTED_CONSTRUCTS.md",
+      "lineRange": [0, 0]
+    }
+  ],
+  "edges": [
+    { "source": "domain:compilation-pipeline", "target": "flow:end-to-end-compile", "type": "contains_flow", "direction": "forward", "weight": 1.0 },
+    { "source": "domain:compilation-pipeline", "target": "flow:optimizer-fixed-point", "type": "contains_flow", "direction": "forward", "weight": 1.0 },
+    { "source": "domain:compilation-pipeline", "target": "flow:multi-property-compile", "type": "contains_flow", "direction": "forward", "weight": 1.0 },
+
+    { "source": "domain:sva-operator-support", "target": "flow:ast-to-ir", "type": "contains_flow", "direction": "forward", "weight": 1.0 },
+    { "source": "domain:sva-operator-support", "target": "flow:ir-normalization", "type": "contains_flow", "direction": "forward", "weight": 1.0 },
+    { "source": "domain:sva-operator-support", "target": "flow:named-sequence-expansion", "type": "contains_flow", "direction": "forward", "weight": 1.0 },
+    { "source": "domain:sva-operator-support", "target": "flow:token-passing-composition", "type": "contains_flow", "direction": "forward", "weight": 1.0 },
+
+    { "source": "domain:rtl-code-generation", "target": "flow:single-module-emission", "type": "contains_flow", "direction": "forward", "weight": 1.0 },
+    { "source": "domain:rtl-code-generation", "target": "flow:multi-module-emission", "type": "contains_flow", "direction": "forward", "weight": 1.0 },
+    { "source": "domain:rtl-code-generation", "target": "flow:bind-wrapper-emission", "type": "contains_flow", "direction": "forward", "weight": 1.0 },
+
+    { "source": "domain:verification-and-testing", "target": "flow:behavioral-oracle-equivalence", "type": "contains_flow", "direction": "forward", "weight": 1.0 },
+    { "source": "domain:verification-and-testing", "target": "flow:icarus-simulation", "type": "contains_flow", "direction": "forward", "weight": 1.0 },
+    { "source": "domain:verification-and-testing", "target": "flow:golden-parity", "type": "contains_flow", "direction": "forward", "weight": 1.0 },
+    { "source": "domain:verification-and-testing", "target": "flow:unit-and-integration-tests", "type": "contains_flow", "direction": "forward", "weight": 1.0 },
+
+    { "source": "domain:project-tooling", "target": "flow:debug-dump", "type": "contains_flow", "direction": "forward", "weight": 1.0 },
+    { "source": "domain:project-tooling", "target": "flow:ci-build-and-quality", "type": "contains_flow", "direction": "forward", "weight": 1.0 },
+    { "source": "domain:project-tooling", "target": "flow:gsd-planning", "type": "contains_flow", "direction": "forward", "weight": 1.0 },
+
+    { "source": "flow:end-to-end-compile", "target": "step:end-to-end-compile:parse-with-slang", "type": "flow_step", "direction": "forward", "weight": 0.2 },
+    { "source": "flow:end-to-end-compile", "target": "step:end-to-end-compile:import-ast-to-ir", "type": "flow_step", "direction": "forward", "weight": 0.3 },
+    { "source": "flow:end-to-end-compile", "target": "step:end-to-end-compile:normalize-ir", "type": "flow_step", "direction": "forward", "weight": 0.5 },
+    { "source": "flow:end-to-end-compile", "target": "step:end-to-end-compile:compose-checker-tree", "type": "flow_step", "direction": "forward", "weight": 0.7 },
+    { "source": "flow:end-to-end-compile", "target": "step:end-to-end-compile:run-optimizer", "type": "flow_step", "direction": "forward", "weight": 0.8 },
+    { "source": "flow:end-to-end-compile", "target": "step:end-to-end-compile:emit-rtl", "type": "flow_step", "direction": "forward", "weight": 1.0 },
+
+    { "source": "flow:optimizer-fixed-point", "target": "step:optimizer-fixed-point:constant-fold", "type": "flow_step", "direction": "forward", "weight": 0.2 },
+    { "source": "flow:optimizer-fixed-point", "target": "step:optimizer-fixed-point:concat-merge", "type": "flow_step", "direction": "forward", "weight": 0.3 },
+    { "source": "flow:optimizer-fixed-point", "target": "step:optimizer-fixed-point:cse", "type": "flow_step", "direction": "forward", "weight": 0.5 },
+    { "source": "flow:optimizer-fixed-point", "target": "step:optimizer-fixed-point:counter-merge", "type": "flow_step", "direction": "forward", "weight": 0.7 },
+    { "source": "flow:optimizer-fixed-point", "target": "step:optimizer-fixed-point:dead-node", "type": "flow_step", "direction": "forward", "weight": 0.8 },
+    { "source": "flow:optimizer-fixed-point", "target": "step:optimizer-fixed-point:fixed-point-loop", "type": "flow_step", "direction": "forward", "weight": 1.0 },
+
+    { "source": "flow:multi-property-compile", "target": "step:multi-property-compile:collect-assertions", "type": "flow_step", "direction": "forward", "weight": 0.3 },
+    { "source": "flow:multi-property-compile", "target": "step:multi-property-compile:per-property-pipeline", "type": "flow_step", "direction": "forward", "weight": 0.5 },
+    { "source": "flow:multi-property-compile", "target": "step:multi-property-compile:aggregate-modules", "type": "flow_step", "direction": "forward", "weight": 0.8 },
+    { "source": "flow:multi-property-compile", "target": "step:multi-property-compile:write-multi-file", "type": "flow_step", "direction": "forward", "weight": 1.0 },
+
+    { "source": "flow:ast-to-ir", "target": "step:ast-to-ir:locate-assertion", "type": "flow_step", "direction": "forward", "weight": 0.2 },
+    { "source": "flow:ast-to-ir", "target": "step:ast-to-ir:extract-clock", "type": "flow_step", "direction": "forward", "weight": 0.4 },
+    { "source": "flow:ast-to-ir", "target": "step:ast-to-ir:dispatch-by-kind", "type": "flow_step", "direction": "forward", "weight": 0.6 },
+    { "source": "flow:ast-to-ir", "target": "step:ast-to-ir:build-bool-expr", "type": "flow_step", "direction": "forward", "weight": 0.8 },
+    { "source": "flow:ast-to-ir", "target": "step:ast-to-ir:annotate-source-loc", "type": "flow_step", "direction": "forward", "weight": 1.0 },
+
+    { "source": "flow:ir-normalization", "target": "step:ir-normalization:dispatch-recurse", "type": "flow_step", "direction": "forward", "weight": 0.3 },
+    { "source": "flow:ir-normalization", "target": "step:ir-normalization:apply-rules", "type": "flow_step", "direction": "forward", "weight": 0.7 },
+    { "source": "flow:ir-normalization", "target": "step:ir-normalization:flatten-seq-concat", "type": "flow_step", "direction": "forward", "weight": 1.0 },
+
+    { "source": "flow:named-sequence-expansion", "target": "step:named-sequence-expansion:lookup-definition", "type": "flow_step", "direction": "forward", "weight": 0.3 },
+    { "source": "flow:named-sequence-expansion", "target": "step:named-sequence-expansion:guard-recursion", "type": "flow_step", "direction": "forward", "weight": 0.7 },
+    { "source": "flow:named-sequence-expansion", "target": "step:named-sequence-expansion:reenter-dispatch", "type": "flow_step", "direction": "forward", "weight": 1.0 },
+
+    { "source": "flow:token-passing-composition", "target": "step:token-passing-composition:dispatch-template", "type": "flow_step", "direction": "forward", "weight": 0.2 },
+    { "source": "flow:token-passing-composition", "target": "step:token-passing-composition:wrap-bool-and-signals", "type": "flow_step", "direction": "forward", "weight": 0.4 },
+    { "source": "flow:token-passing-composition", "target": "step:token-passing-composition:counter-encode-range", "type": "flow_step", "direction": "forward", "weight": 0.6 },
+    { "source": "flow:token-passing-composition", "target": "step:token-passing-composition:assemble-implication", "type": "flow_step", "direction": "forward", "weight": 0.8 },
+    { "source": "flow:token-passing-composition", "target": "step:token-passing-composition:hash-checker", "type": "flow_step", "direction": "forward", "weight": 1.0 },
+
+    { "source": "flow:single-module-emission", "target": "step:single-module-emission:select-template", "type": "flow_step", "direction": "forward", "weight": 0.3 },
+    { "source": "flow:single-module-emission", "target": "step:single-module-emission:fill-params", "type": "flow_step", "direction": "forward", "weight": 0.7 },
+    { "source": "flow:single-module-emission", "target": "step:single-module-emission:render-and-write", "type": "flow_step", "direction": "forward", "weight": 1.0 },
+
+    { "source": "flow:multi-module-emission", "target": "step:multi-module-emission:dfs-traverse", "type": "flow_step", "direction": "forward", "weight": 0.3 },
+    { "source": "flow:multi-module-emission", "target": "step:multi-module-emission:dedupe-by-module", "type": "flow_step", "direction": "forward", "weight": 0.7 },
+    { "source": "flow:multi-module-emission", "target": "step:multi-module-emission:write-files", "type": "flow_step", "direction": "forward", "weight": 1.0 },
+
+    { "source": "flow:bind-wrapper-emission", "target": "step:bind-wrapper-emission:identify-dut", "type": "flow_step", "direction": "forward", "weight": 0.3 },
+    { "source": "flow:bind-wrapper-emission", "target": "step:bind-wrapper-emission:render-bind-template", "type": "flow_step", "direction": "forward", "weight": 0.7 },
+    { "source": "flow:bind-wrapper-emission", "target": "step:bind-wrapper-emission:write-bind-file", "type": "flow_step", "direction": "forward", "weight": 1.0 },
+
+    { "source": "flow:behavioral-oracle-equivalence", "target": "step:behavioral-oracle-equivalence:init-state", "type": "flow_step", "direction": "forward", "weight": 0.2 },
+    { "source": "flow:behavioral-oracle-equivalence", "target": "step:behavioral-oracle-equivalence:reset", "type": "flow_step", "direction": "forward", "weight": 0.4 },
+    { "source": "flow:behavioral-oracle-equivalence", "target": "step:behavioral-oracle-equivalence:tick-dispatch", "type": "flow_step", "direction": "forward", "weight": 0.6 },
+    { "source": "flow:behavioral-oracle-equivalence", "target": "step:behavioral-oracle-equivalence:operator-models", "type": "flow_step", "direction": "forward", "weight": 0.8 },
+    { "source": "flow:behavioral-oracle-equivalence", "target": "step:behavioral-oracle-equivalence:compare-traces", "type": "flow_step", "direction": "forward", "weight": 1.0 },
+
+    { "source": "flow:icarus-simulation", "target": "step:icarus-simulation:extract-extra-inputs", "type": "flow_step", "direction": "forward", "weight": 0.2 },
+    { "source": "flow:icarus-simulation", "target": "step:icarus-simulation:synthesize-testbench", "type": "flow_step", "direction": "forward", "weight": 0.4 },
+    { "source": "flow:icarus-simulation", "target": "step:icarus-simulation:compile-and-run", "type": "flow_step", "direction": "forward", "weight": 0.6 },
+    { "source": "flow:icarus-simulation", "target": "step:icarus-simulation:parse-display", "type": "flow_step", "direction": "forward", "weight": 0.8 },
+    { "source": "flow:icarus-simulation", "target": "step:icarus-simulation:assert-against-oracle", "type": "flow_step", "direction": "forward", "weight": 1.0 },
+
+    { "source": "flow:golden-parity", "target": "step:golden-parity:load-fixture-ast", "type": "flow_step", "direction": "forward", "weight": 0.3 },
+    { "source": "flow:golden-parity", "target": "step:golden-parity:run-pipeline", "type": "flow_step", "direction": "forward", "weight": 0.7 },
+    { "source": "flow:golden-parity", "target": "step:golden-parity:compare-bytes", "type": "flow_step", "direction": "forward", "weight": 1.0 },
+
+    { "source": "flow:unit-and-integration-tests", "target": "step:unit-and-integration-tests:share-fixtures", "type": "flow_step", "direction": "forward", "weight": 0.3 },
+    { "source": "flow:unit-and-integration-tests", "target": "step:unit-and-integration-tests:per-module-units", "type": "flow_step", "direction": "forward", "weight": 0.5 },
+    { "source": "flow:unit-and-integration-tests", "target": "step:unit-and-integration-tests:e2e-pipeline", "type": "flow_step", "direction": "forward", "weight": 0.8 },
+    { "source": "flow:unit-and-integration-tests", "target": "step:unit-and-integration-tests:topic-suites", "type": "flow_step", "direction": "forward", "weight": 1.0 },
+
+    { "source": "flow:debug-dump", "target": "step:debug-dump:dump-ast", "type": "flow_step", "direction": "forward", "weight": 0.3 },
+    { "source": "flow:debug-dump", "target": "step:debug-dump:dump-ir", "type": "flow_step", "direction": "forward", "weight": 0.5 },
+    { "source": "flow:debug-dump", "target": "step:debug-dump:dump-tree", "type": "flow_step", "direction": "forward", "weight": 0.8 },
+    { "source": "flow:debug-dump", "target": "step:debug-dump:catch-errors", "type": "flow_step", "direction": "forward", "weight": 1.0 },
+
+    { "source": "flow:ci-build-and-quality", "target": "step:ci-build-and-quality:setup-uv", "type": "flow_step", "direction": "forward", "weight": 0.3 },
+    { "source": "flow:ci-build-and-quality", "target": "step:ci-build-and-quality:lint-format", "type": "flow_step", "direction": "forward", "weight": 0.5 },
+    { "source": "flow:ci-build-and-quality", "target": "step:ci-build-and-quality:type-check", "type": "flow_step", "direction": "forward", "weight": 0.8 },
+    { "source": "flow:ci-build-and-quality", "target": "step:ci-build-and-quality:run-tests", "type": "flow_step", "direction": "forward", "weight": 1.0 },
+
+    { "source": "flow:gsd-planning", "target": "step:gsd-planning:project-state", "type": "flow_step", "direction": "forward", "weight": 0.3 },
+    { "source": "flow:gsd-planning", "target": "step:gsd-planning:roadmap-phasing", "type": "flow_step", "direction": "forward", "weight": 0.5 },
+    { "source": "flow:gsd-planning", "target": "step:gsd-planning:phase-artifacts", "type": "flow_step", "direction": "forward", "weight": 0.8 },
+    { "source": "flow:gsd-planning", "target": "step:gsd-planning:supported-constructs", "type": "flow_step", "direction": "forward", "weight": 1.0 },
+
+    { "source": "domain:compilation-pipeline", "target": "domain:sva-operator-support", "type": "cross_domain", "direction": "forward", "description": "编译流水线在 frontend → composer 之间消费 SVA 算子域提供的 IR 与 CheckerNode 抽象", "weight": 0.8 },
+    { "source": "domain:compilation-pipeline", "target": "domain:rtl-code-generation", "type": "cross_domain", "direction": "forward", "description": "编译流水线在最后阶段调用 emitter 把 CheckerNode 树渲染为 .sv 文本", "weight": 0.8 },
+    { "source": "domain:sva-operator-support", "target": "domain:rtl-code-generation", "type": "cross_domain", "direction": "forward", "description": "SVA 算子的模板名/参数直接决定 RTL 代码生成域使用的 Jinja2 模板", "weight": 0.7 },
+    { "source": "domain:verification-and-testing", "target": "domain:compilation-pipeline", "type": "cross_domain", "direction": "forward", "description": "验证域驱动整条编译流水线产出 RTL，再在仿真/golden 上做正确性校验", "weight": 0.7 },
+    { "source": "domain:verification-and-testing", "target": "domain:sva-operator-support", "type": "cross_domain", "direction": "forward", "description": "行为 oracle 的算子状态机与 SVA 算子域的 IR 语义一一对齐", "weight": 0.7 },
+    { "source": "domain:verification-and-testing", "target": "domain:rtl-code-generation", "type": "cross_domain", "direction": "forward", "description": "iverilog 仿真直接消费 RTL 代码生成域产出的 .sv 文件作为 DUT", "weight": 0.6 },
+    { "source": "domain:project-tooling", "target": "domain:compilation-pipeline", "type": "cross_domain", "direction": "forward", "description": "click CLI 是编译流水线域的唯一对外入口，并集中处理流水线异常", "weight": 0.6 },
+    { "source": "domain:project-tooling", "target": "domain:sva-operator-support", "type": "cross_domain", "direction": "forward", "description": "--dump-ir/--dump-tree 调试视图直接渲染 SVA 算子域的 IR 与 CheckerNode 表示", "weight": 0.5 },
+    { "source": "domain:project-tooling", "target": "domain:verification-and-testing", "type": "cross_domain", "direction": "forward", "description": "GitHub Actions CI 把验证与测试域的 pytest/仿真测试自动化为质量门禁", "weight": 0.6 }
+  ],
+  "layers": [],
+  "tour": []
+}

@@ -1,0 +1,103 @@
+{
+  "design": {
+    "members": [
+      {
+        "kind": "Instance",
+        "name": "nonconsec_rep",
+        "source_file_start": "nonconsec_rep.sv",
+        "source_line_start": 1,
+        "source_column_start": 1,
+        "body": {
+          "kind": "InstanceBody",
+          "members": [
+            {
+              "kind": "Port",
+              "name": "clk",
+              "source_file_start": "nonconsec_rep.sv",
+              "source_line_start": 1,
+              "source_column_start": 20
+            },
+            {
+              "kind": "Port",
+              "name": "a",
+              "source_file_start": "nonconsec_rep.sv",
+              "source_line_start": 1,
+              "source_column_start": 25
+            },
+            {
+              "kind": "Variable",
+              "name": "clk",
+              "source_file_start": "nonconsec_rep.sv",
+              "source_line_start": 1,
+              "source_column_start": 13
+            },
+            {
+              "kind": "Variable",
+              "name": "a",
+              "source_file_start": "nonconsec_rep.sv",
+              "source_line_start": 1,
+              "source_column_start": 26
+            },
+            {
+              "kind": "ProceduralBlock",
+              "source_file_start": "nonconsec_rep.sv",
+              "source_line_start": 2,
+              "source_column_start": 3,
+              "body": {
+                "kind": "ConcurrentAssertion",
+                "assertionKind": "assert",
+                "source_file_start": "nonconsec_rep.sv",
+                "source_line_start": 2,
+                "source_column_start": 3,
+                "propertySpec": {
+                  "kind": "Clocking",
+                  "source_file_start": "nonconsec_rep.sv",
+                  "source_line_start": 2,
+                  "source_column_start": 22,
+                  "clocking": {
+                    "kind": "SignalEvent",
+                    "edge": "posedge",
+                    "source_file_start": "nonconsec_rep.sv",
+                    "source_line_start": 2,
+                    "source_column_start": 20,
+                    "expr": {
+                      "kind": "NamedValue",
+                      "symbol": "100 clk",
+                      "source_file_start": "nonconsec_rep.sv",
+                      "source_line_start": 2,
+                      "source_column_start": 28
+                    }
+                  },
+                  "expr": {
+                    "kind": "Simple",
+                    "source_file_start": "nonconsec_rep.sv",
+                    "source_line_start": 2,
+                    "source_column_start": 32,
+                    "expr": {
+                      "kind": "NamedValue",
+                      "symbol": "101 a",
+                      "source_file_start": "nonconsec_rep.sv",
+                      "source_line_start": 2,
+                      "source_column_start": 32
+                    },
+                    "repetition": {
+                      "kind": "Nonconsecutive",
+                      "min": 5,
+                      "max": 5
+                    }
+                  }
+                },
+                "ifTrue": {
+                  "kind": "Empty",
+                  "source_file_start": "nonconsec_rep.sv",
+                  "source_line_start": 2,
+                  "source_column_end": 44
+                }
+              }
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

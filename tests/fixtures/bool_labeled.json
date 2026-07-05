@@ -1,0 +1,127 @@
+{
+  "design": {
+    "members": [
+      {
+        "kind": "Instance",
+        "name": "test_labeled",
+        "source_file_start": "test_labeled.sv",
+        "source_line_start": 1,
+        "source_column_start": 1,
+        "body": {
+          "kind": "InstanceBody",
+          "members": [
+            {
+              "kind": "Port",
+              "name": "clk",
+              "source_file_start": "test_labeled.sv",
+              "source_line_start": 1,
+              "source_column_start": 30
+            },
+            {
+              "kind": "Port",
+              "name": "rst_n",
+              "source_file_start": "test_labeled.sv",
+              "source_line_start": 1,
+              "source_column_start": 35
+            },
+            {
+              "kind": "Port",
+              "name": "a",
+              "source_file_start": "test_labeled.sv",
+              "source_line_start": 1,
+              "source_column_start": 42
+            },
+            {
+              "kind": "Port",
+              "name": "b",
+              "source_file_start": "test_labeled.sv",
+              "source_line_start": 1,
+              "source_column_start": 45
+            },
+            {
+              "kind": "Block",
+              "block": "ADDRESS my_check",
+              "source_file_start": "test_labeled.sv",
+              "source_line_start": 2,
+              "source_column_start": 3,
+              "body": {
+                "kind": "StatementList",
+                "source_file_start": "test_labeled.sv",
+                "source_line_start": 2,
+                "source_column_start": 3,
+                "statements": [
+                  {
+                    "kind": "ConcurrentAssertion",
+                    "assertionKind": "assert",
+                    "source_file_start": "test_labeled.sv",
+                    "source_line_start": 2,
+                    "source_column_start": 14,
+                    "body": {
+                      "kind": "PropertySpec",
+                      "source_file_start": "test_labeled.sv",
+                      "source_line_start": 2,
+                      "source_column_start": 30,
+                      "clocking": {
+                        "kind": "TimingControl",
+                        "source_file_start": "test_labeled.sv",
+                        "source_line_start": 2,
+                        "source_column_start": 30,
+                        "event": {
+                          "kind": "SignalEvent",
+                          "edge": "posedge",
+                          "source_file_start": "test_labeled.sv",
+                          "source_line_start": 2,
+                          "source_column_start": 31,
+                          "expr": {
+                            "kind": "NamedValue",
+                            "symbol": "6338700060480 clk",
+                            "source_file_start": "test_labeled.sv",
+                            "source_line_start": 2,
+                            "source_column_start": 39
+                          }
+                        }
+                      },
+                      "expr": {
+                        "kind": "BinaryPropertyExpr",
+                        "op": "And",
+                        "source_file_start": "test_labeled.sv",
+                        "source_line_start": 2,
+                        "source_column_start": 43,
+                        "left": {
+                          "kind": "SequenceExpr",
+                          "source_file_start": "test_labeled.sv",
+                          "source_line_start": 2,
+                          "source_column_start": 43,
+                          "expr": {
+                            "kind": "NamedValue",
+                            "symbol": "6338700060481 a",
+                            "source_file_start": "test_labeled.sv",
+                            "source_line_start": 2,
+                            "source_column_start": 43
+                          }
+                        },
+                        "right": {
+                          "kind": "SequenceExpr",
+                          "source_file_start": "test_labeled.sv",
+                          "source_line_start": 2,
+                          "source_column_start": 48,
+                          "expr": {
+                            "kind": "NamedValue",
+                            "symbol": "6338700060482 b",
+                            "source_file_start": "test_labeled.sv",
+                            "source_line_start": 2,
+                            "source_column_start": 48
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

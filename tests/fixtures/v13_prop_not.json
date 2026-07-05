@@ -1,0 +1,118 @@
+{
+  "design": {
+    "name": "$root",
+    "kind": "Root",
+    "addr": 4338966240,
+    "members": [
+      {
+        "name": "",
+        "kind": "CompilationUnit",
+        "addr": 6338700186064
+      },
+      {
+        "name": "m",
+        "kind": "Instance",
+        "addr": 6338700186688,
+        "body": {
+          "name": "m",
+          "kind": "InstanceBody",
+          "addr": 6338700186344,
+          "members": [
+            {
+              "name": "clk",
+              "kind": "Port",
+              "addr": 6338700186824,
+              "type": "logic",
+              "direction": "In",
+              "internalSymbol": "6338700186944 clk"
+            },
+            {
+              "name": "clk",
+              "kind": "Net",
+              "addr": 6338700186944,
+              "type": "logic",
+              "netType": {
+                "name": "wire",
+                "kind": "NetType",
+                "addr": 4338964000,
+                "type": "logic"
+              }
+            },
+            {
+              "name": "a",
+              "kind": "Port",
+              "addr": 6338700187104,
+              "type": "logic",
+              "direction": "In",
+              "internalSymbol": "6338700187224 a"
+            },
+            {
+              "name": "a",
+              "kind": "Net",
+              "addr": 6338700187224,
+              "type": "logic",
+              "netType": {
+                "name": "wire",
+                "kind": "NetType",
+                "addr": 4338964000,
+                "type": "logic"
+              }
+            },
+            {
+              "name": "",
+              "kind": "ProceduralBlock",
+              "addr": 6338700186584,
+              "procedureKind": "Always",
+              "body": {
+                "kind": "ConcurrentAssertion",
+                "propertySpec": {
+                  "kind": "Clocking",
+                  "clocking": {
+                    "kind": "SignalEvent",
+                    "expr": {
+                      "kind": "NamedValue",
+                      "type": "logic",
+                      "symbol": "6338700186944 clk"
+                    },
+                    "edge": "PosEdge"
+                  },
+                  "expr": {
+                    "kind": "Unary",
+                    "op": "Not",
+                    "expr": {
+                      "kind": "Simple",
+                      "expr": {
+                        "kind": "NamedValue",
+                        "type": "logic",
+                        "symbol": "6338700187224 a"
+                      }
+                    }
+                  }
+                },
+                "ifTrue": {
+                  "kind": "Empty"
+                },
+                "assertionKind": "Assert"
+              }
+            }
+          ],
+          "definition": "4339948928 m"
+        },
+        "connections": [
+        ]
+      }
+    ]
+  },
+  "definitions": [
+    {
+      "name": "m",
+      "kind": "Definition",
+      "addr": 4339948928,
+      "defaultNetType": "4338964000 wire",
+      "definitionKind": "Module",
+      "defaultLifetime": "Static",
+      "unconnectedDrive": "None",
+      "cellDefine": false
+    }
+  ]
+}

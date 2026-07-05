@@ -1,0 +1,83 @@
+{
+  "design": {
+    "members": [
+      {
+        "kind": "Instance",
+        "name": "rose_example",
+        "source_file_start": "rose.sv",
+        "source_line_start": 1,
+        "source_column_start": 1,
+        "body": {
+          "kind": "InstanceBody",
+          "members": [
+            {
+              "kind": "Port",
+              "name": "clk",
+              "source_file_start": "rose.sv",
+              "source_line_start": 1,
+              "source_column_start": 20
+            },
+            {
+              "kind": "Port",
+              "name": "sig",
+              "source_file_start": "rose.sv",
+              "source_line_start": 1,
+              "source_column_start": 25
+            },
+            {
+              "kind": "ConcurrentAssertion",
+              "assertionKind": "assert",
+              "source_file_start": "rose.sv",
+              "source_line_start": 2,
+              "source_column_start": 3,
+              "body": {
+                "kind": "PropertySpec",
+                "source_file_start": "rose.sv",
+                "source_line_start": 2,
+                "source_column_start": 19,
+                "clocking": {
+                  "kind": "TimingControl",
+                  "source_file_start": "rose.sv",
+                  "source_line_start": 2,
+                  "source_column_start": 19,
+                  "event": {
+                    "kind": "SignalEvent",
+                    "edge": "posedge",
+                    "source_file_start": "rose.sv",
+                    "source_line_start": 2,
+                    "source_column_start": 20,
+                    "expr": {
+                      "kind": "NamedValue",
+                      "symbol": "0 clk",
+                      "source_file_start": "rose.sv",
+                      "source_line_start": 2,
+                      "source_column_start": 28
+                    }
+                  }
+                },
+                "expr": {
+                  "kind": "CallExpression",
+                  "type": "bit",
+                  "subroutineName": "$rose",
+                  "source_file_start": "rose.sv",
+                  "source_line_start": 2,
+                  "source_column_start": 32,
+                  "arguments": [
+                    {
+                      "kind": "NamedValue",
+                      "type": "logic",
+                      "symbol": "2 sig",
+                      "source_file_start": "rose.sv",
+                      "source_line_start": 2,
+                      "source_column_start": 37
+                    }
+                  ]
+                }
+              }
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

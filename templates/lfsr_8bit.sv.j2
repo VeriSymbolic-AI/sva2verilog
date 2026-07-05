@@ -1,0 +1,42 @@
+{% from '_macros.sv.j2' import port_decl with context %}
+// 8-bit Galois LFSR — deterministic pseudo-random source for metastability
+// injection in the 2-DFF synchronizer (v1.4.2 Path Two).
+//
+// Polynomial: x^8 + x^6 + x^5 + x^4 + 1  (Galois).
+// This LFSR is pure synthesizable RTL — no $random / $urandom — and produces
+// IDENTICAL output across iverilog / Verilator for the same seed.  Used inside
+// sync_2dff.sv.j2 when META_ENABLE=1.
+//
+// Reference: semify-eda dynamic_cdc (MIT license).
+module {{ module_name }} #(
+    parameter [7:0] SEED = 8'hA5
+) (
+{{ port_decl(verilog_mode, "input", "clk") }},
+{{ port_decl(verilog_mode, "input", "rst_n") }},
+{{ port_decl(verilog_mode, "output", "lfsr_out") }}
+);
+    {% if verilog_mode %}
+    reg [7:0] state;
+    {% else %}
+    logic [7:0] state;
+    {% endif %}
+
+    always_ff @(posedge clk) begin
+        if (!rst_n)
+            state <= SEED;
+        else
+            state <= _next_galois(state);
+    end
+
+    // Galois feedback: tap bits 6,5,4 XOR into feedback, shift right.
+    function automatic [7:0] _next_galois(input [7:0] s);
+        logic fb;
+        fb = s[0];
+        _next_galois = {fb, s[7:1]};
+        _next_galois[5] = s[6] ^ fb;   // tap at bit 6
+        _next_galois[4] = s[5] ^ fb;   // tap at bit 5
+        _next_galois[3] = s[4] ^ fb;   // tap at bit 4
+    endfunction
+
+    assign lfsr_out = state[0];
+endmodule

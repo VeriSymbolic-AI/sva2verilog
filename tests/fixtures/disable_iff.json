@@ -1,0 +1,126 @@
+{
+  "design": {
+    "members": [
+      {
+        "kind": "Instance",
+        "name": "disable_iff_test",
+        "source_file_start": "disable_iff_test.sv",
+        "source_line_start": 1,
+        "source_column_start": 1,
+        "body": {
+          "kind": "InstanceBody",
+          "members": [
+            {
+              "kind": "Port",
+              "name": "clk",
+              "source_file_start": "disable_iff_test.sv",
+              "source_line_start": 1,
+              "source_column_start": 20
+            },
+            {
+              "kind": "Port",
+              "name": "rst_n",
+              "source_file_start": "disable_iff_test.sv",
+              "source_line_start": 1,
+              "source_column_start": 25
+            },
+            {
+              "kind": "Port",
+              "name": "a",
+              "source_file_start": "disable_iff_test.sv",
+              "source_line_start": 1,
+              "source_column_start": 32
+            },
+            {
+              "kind": "Port",
+              "name": "b",
+              "source_file_start": "disable_iff_test.sv",
+              "source_line_start": 1,
+              "source_column_start": 35
+            },
+            {
+              "kind": "ConcurrentAssertion",
+              "assertionKind": "assert",
+              "source_file_start": "disable_iff_test.sv",
+              "source_line_start": 2,
+              "source_column_start": 3,
+              "body": {
+                "kind": "PropertySpec",
+                "source_file_start": "disable_iff_test.sv",
+                "source_line_start": 2,
+                "source_column_start": 19,
+                "clocking": {
+                  "kind": "TimingControl",
+                  "source_file_start": "disable_iff_test.sv",
+                  "source_line_start": 2,
+                  "source_column_start": 19,
+                  "event": {
+                    "kind": "SignalEvent",
+                    "edge": "posedge",
+                    "source_file_start": "disable_iff_test.sv",
+                    "source_line_start": 2,
+                    "source_column_start": 20,
+                    "expr": {
+                      "kind": "NamedValue",
+                      "symbol": "100 clk",
+                      "source_file_start": "disable_iff_test.sv",
+                      "source_line_start": 2,
+                      "source_column_start": 28
+                    }
+                  }
+                },
+                "disableIff": {
+                  "kind": "UnaryOp",
+                  "op": "LogicalNot",
+                  "source_file_start": "disable_iff_test.sv",
+                  "source_line_start": 2,
+                  "source_column_start": 45,
+                  "operand": {
+                    "kind": "NamedValue",
+                    "symbol": "101 rst_n",
+                    "source_file_start": "disable_iff_test.sv",
+                    "source_line_start": 2,
+                    "source_column_start": 46
+                  }
+                },
+                "expr": {
+                  "kind": "BinaryPropertyExpr",
+                  "op": "OverlappedImplication",
+                  "source_file_start": "disable_iff_test.sv",
+                  "source_line_start": 2,
+                  "source_column_start": 55,
+                  "left": {
+                    "kind": "SequenceExpr",
+                    "source_file_start": "disable_iff_test.sv",
+                    "source_line_start": 2,
+                    "source_column_start": 55,
+                    "expr": {
+                      "kind": "NamedValue",
+                      "symbol": "102 a",
+                      "source_file_start": "disable_iff_test.sv",
+                      "source_line_start": 2,
+                      "source_column_start": 55
+                    }
+                  },
+                  "right": {
+                    "kind": "SequenceExpr",
+                    "source_file_start": "disable_iff_test.sv",
+                    "source_line_start": 2,
+                    "source_column_start": 60,
+                    "expr": {
+                      "kind": "NamedValue",
+                      "symbol": "103 b",
+                      "source_file_start": "disable_iff_test.sv",
+                      "source_line_start": 2,
+                      "source_column_start": 60
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

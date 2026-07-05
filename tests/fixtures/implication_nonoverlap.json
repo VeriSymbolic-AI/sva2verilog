@@ -1,0 +1,117 @@
+{
+  "design": {
+    "members": [
+      {
+        "kind": "Instance",
+        "name": "impl_nonoverlap",
+        "source_file_start": "impl_nonoverlap.sv",
+        "source_line_start": 1,
+        "source_column_start": 1,
+        "body": {
+          "kind": "InstanceBody",
+          "members": [
+            {
+              "kind": "Port",
+              "name": "clk",
+              "source_file_start": "impl_nonoverlap.sv",
+              "source_line_start": 1,
+              "source_column_start": 20
+            },
+            {
+              "kind": "Port",
+              "name": "a",
+              "source_file_start": "impl_nonoverlap.sv",
+              "source_line_start": 1,
+              "source_column_start": 25
+            },
+            {
+              "kind": "Port",
+              "name": "b",
+              "source_file_start": "impl_nonoverlap.sv",
+              "source_line_start": 1,
+              "source_column_start": 28
+            },
+            {
+              "kind": "Block",
+              "block": "ADDRESS nonoverlap_check",
+              "source_file_start": "impl_nonoverlap.sv",
+              "source_line_start": 2,
+              "source_column_start": 3,
+              "body": {
+                "kind": "StatementList",
+                "statements": [
+                  {
+                    "kind": "ConcurrentAssertion",
+                    "assertionKind": "assert",
+                    "source_file_start": "impl_nonoverlap.sv",
+                    "source_line_start": 2,
+                    "source_column_start": 14,
+                    "body": {
+                      "kind": "PropertySpec",
+                      "source_file_start": "impl_nonoverlap.sv",
+                      "source_line_start": 2,
+                      "source_column_start": 30,
+                      "clocking": {
+                        "kind": "TimingControl",
+                        "source_file_start": "impl_nonoverlap.sv",
+                        "source_line_start": 2,
+                        "source_column_start": 30,
+                        "event": {
+                          "kind": "SignalEvent",
+                          "edge": "posedge",
+                          "source_file_start": "impl_nonoverlap.sv",
+                          "source_line_start": 2,
+                          "source_column_start": 31,
+                          "expr": {
+                            "kind": "NamedValue",
+                            "symbol": "200 clk",
+                            "source_file_start": "impl_nonoverlap.sv",
+                            "source_line_start": 2,
+                            "source_column_start": 39
+                          }
+                        }
+                      },
+                      "expr": {
+                        "kind": "BinaryPropertyExpr",
+                        "op": "NonOverlappedImplication",
+                        "source_file_start": "impl_nonoverlap.sv",
+                        "source_line_start": 2,
+                        "source_column_start": 43,
+                        "left": {
+                          "kind": "SequenceExpr",
+                          "source_file_start": "impl_nonoverlap.sv",
+                          "source_line_start": 2,
+                          "source_column_start": 43,
+                          "expr": {
+                            "kind": "NamedValue",
+                            "symbol": "201 a",
+                            "source_file_start": "impl_nonoverlap.sv",
+                            "source_line_start": 2,
+                            "source_column_start": 43
+                          }
+                        },
+                        "right": {
+                          "kind": "SequenceExpr",
+                          "source_file_start": "impl_nonoverlap.sv",
+                          "source_line_start": 2,
+                          "source_column_start": 48,
+                          "expr": {
+                            "kind": "NamedValue",
+                            "symbol": "202 b",
+                            "source_file_start": "impl_nonoverlap.sv",
+                            "source_line_start": 2,
+                            "source_column_start": 48
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

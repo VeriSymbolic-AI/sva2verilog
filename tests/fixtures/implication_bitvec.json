@@ -1,0 +1,146 @@
+{
+  "design": {
+    "members": [
+      {
+        "kind": "Instance",
+        "name": "impl_bitvec",
+        "source_file_start": "impl_bitvec.sv",
+        "source_line_start": 1,
+        "source_column_start": 1,
+        "body": {
+          "kind": "InstanceBody",
+          "members": [
+            {
+              "kind": "Port",
+              "name": "clk",
+              "source_file_start": "impl_bitvec.sv",
+              "source_line_start": 1,
+              "source_column_start": 20
+            },
+            {
+              "kind": "Port",
+              "name": "a",
+              "source_file_start": "impl_bitvec.sv",
+              "source_line_start": 1,
+              "source_column_start": 25
+            },
+            {
+              "kind": "Port",
+              "name": "b",
+              "source_file_start": "impl_bitvec.sv",
+              "source_line_start": 1,
+              "source_column_start": 28
+            },
+            {
+              "kind": "Block",
+              "block": "ADDRESS bitvec_impl",
+              "source_file_start": "impl_bitvec.sv",
+              "source_line_start": 2,
+              "source_column_start": 3,
+              "body": {
+                "kind": "StatementList",
+                "statements": [
+                  {
+                    "kind": "ConcurrentAssertion",
+                    "assertionKind": "assert",
+                    "source_file_start": "impl_bitvec.sv",
+                    "source_line_start": 2,
+                    "source_column_start": 14,
+                    "body": {
+                      "kind": "PropertySpec",
+                      "source_file_start": "impl_bitvec.sv",
+                      "source_line_start": 2,
+                      "source_column_start": 30,
+                      "clocking": {
+                        "kind": "TimingControl",
+                        "source_file_start": "impl_bitvec.sv",
+                        "source_line_start": 2,
+                        "source_column_start": 30,
+                        "event": {
+                          "kind": "SignalEvent",
+                          "edge": "posedge",
+                          "source_file_start": "impl_bitvec.sv",
+                          "source_line_start": 2,
+                          "source_column_start": 31,
+                          "expr": {
+                            "kind": "NamedValue",
+                            "symbol": "300 clk",
+                            "source_file_start": "impl_bitvec.sv",
+                            "source_line_start": 2,
+                            "source_column_start": 39
+                          }
+                        }
+                      },
+                      "expr": {
+                        "kind": "BinaryPropertyExpr",
+                        "op": "OverlappedImplication",
+                        "source_file_start": "impl_bitvec.sv",
+                        "source_line_start": 2,
+                        "source_column_start": 43,
+                        "left": {
+                          "kind": "SequenceExpr",
+                          "source_file_start": "impl_bitvec.sv",
+                          "source_line_start": 2,
+                          "source_column_start": 43,
+                          "expr": {
+                            "kind": "NamedValue",
+                            "symbol": "301 a",
+                            "source_file_start": "impl_bitvec.sv",
+                            "source_line_start": 2,
+                            "source_column_start": 43
+                          }
+                        },
+                        "right": {
+                          "kind": "SequenceConcat",
+                          "source_file_start": "impl_bitvec.sv",
+                          "source_line_start": 2,
+                          "source_column_start": 48,
+                          "elements": [
+                            {
+                              "sequence": {
+                                "kind": "SequenceExpr",
+                                "source_file_start": "impl_bitvec.sv",
+                                "source_line_start": 2,
+                                "source_column_start": 48,
+                                "expr": {
+                                  "kind": "NamedValue",
+                                  "symbol": "302 a",
+                                  "source_file_start": "impl_bitvec.sv",
+                                  "source_line_start": 2,
+                                  "source_column_start": 48
+                                }
+                              },
+                              "min": "2",
+                              "max": "5"
+                            },
+                            {
+                              "sequence": {
+                                "kind": "SequenceExpr",
+                                "source_file_start": "impl_bitvec.sv",
+                                "source_line_start": 2,
+                                "source_column_start": 58,
+                                "expr": {
+                                  "kind": "NamedValue",
+                                  "symbol": "303 b",
+                                  "source_file_start": "impl_bitvec.sv",
+                                  "source_line_start": 2,
+                                  "source_column_start": 58
+                                }
+                              },
+                              "min": "0",
+                              "max": "0"
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    ]
+  }
+}
