@@ -23,17 +23,28 @@ output  logic disabled_o
     // Matches when sig has been true N times (not necessarily consecutively).
     // Once matched, stays in pass state (locked).
     logic [CNT_WIDTH-1:0] count_q;
+    logic running_q;
     logic passed_q;
+
+    logic hit_now;
+    assign hit_now = !passed_q && sig_eval &&
+                     ((start && !running_q && (2'd3 == 2'd1)) ||
+                      (running_q && (count_q >= (2'd3 - 2'd1))));
 
 always_ff @(posedge clk) begin
         if (!rst_n || disable_i) begin
             count_q   <= '0;
+            running_q <= 1'b0;
             passed_q  <= 1'b0;
-        end else if (start && !passed_q) begin
+        end else if (hit_now) begin
+            running_q <= 1'b0;
+            passed_q  <= 1'b1;
+        end else if (start && !running_q && !passed_q) begin
+            running_q <= 1'b1;
+            count_q   <= sig_eval ? 2'd1 : '0;
+        end else if (running_q && !passed_q) begin
             if (sig_eval && count_q < 2'd3)
                 count_q <= count_q + 1'b1;
-            if (sig_eval && count_q == 2'd3 - 1)
-                passed_q <= 1'b1;
         end
     end
 
@@ -51,10 +62,10 @@ always_ff @(posedge clk) begin
     logic pass_internal;
     logic fail_internal;
 
-    assign pass_internal = passed_q;
+    assign pass_internal = passed_q | hit_now;
     assign fail_internal = 1'b0;  // [->N] never fails, only waits
 
-    assign active        = disable_i ? 1'b0 : (start && !passed_q);
+    assign active        = disable_i ? 1'b0 : ((start | running_q) & ~pass_internal);
     assign pass          = disable_i ? 1'b0 : pass_internal;
     assign fail          = disable_i ? 1'b0 : fail_internal;
     assign attempt_fired = attempt_fired_q;

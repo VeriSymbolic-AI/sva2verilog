@@ -1,4 +1,4 @@
-# Supported SVA Constructs — sva2rtl v1.5.1
+# Supported SVA Constructs — sva2rtl v1.5.2 current main
 
 ## Tier 1 Operators (Fully Supported)
 
@@ -31,8 +31,8 @@
 
 | Operator | Category | Description | Example SVA | Generated Template |
 |----------|----------|-------------|-------------|-------------------|
-| `[->N]` | Repetition | Goto repetition (N non-consecutive occurrences) | `a[->3]` | Counter with liveness tracking, locking pass register |
-| `[=N]` | Repetition | Non-consecutive repetition (relaxed tail) | `a[=2]` | Counter with relaxed completion check |
+| `[->N]` | Repetition | Goto repetition (N non-consecutive occurrences); one start pulse arms the full attempt | `a[->3]` | Armed counter with liveness tracking, locking pass register |
+| `[=N]` | Repetition | Non-consecutive repetition (relaxed tail); one start pulse arms the full attempt | `a[=2]` | Armed counter with relaxed completion check |
 | `first_match` | Sequence | Earliest completion wins | `first_match(a ##[1:3] b)` | Wrapper with locked_q to suppress later matches |
 | `and` | Sequence | Both sequences match (same start) | `s1 and s2` | AND of two sub-checker pass signals |
 | `or` | Sequence | Either sequence matches | `s1 or s2` | OR of two sub-checker pass signals |
@@ -153,7 +153,7 @@ Generates an enable gate around the entire monitor. When the disable condition i
 - Active attempts are terminated without generating pass/fail
 - `disabled_o` is asserted
 
-## Known Limitations (v1.3.1)
+## Known Limitations and Historical Fixes
 
 ### Cycle-delay spacing (BUG-DELAY-01, RESOLVED v1.4)
 
@@ -171,8 +171,10 @@ proven non-circularly (FPV) in `tests/test_formal_sva_equiv.py`
 > **Fusion limitation (`##0`).** `a ##0 b` (and any ranged delay whose lower
 > bound is 0) requires sampling two operands in the SAME cycle, which the
 > registered-leaf token-passing pipeline cannot express; `##0` retains a 1-cycle
-> separation. Use `a && b` for true same-cycle conjunction. This is a structural
-> limitation slated for the v1.5 NFA engine.
+> separation. Current main emits a warning for boolean `##0` and suggests
+> `a && b` for true same-cycle conjunction. Automatic rewrite/reject remains a
+> tracked future migration because it changes compile-time behavior for existing
+> zero-delay properties.
 
 ### Semantic boundary: intersect / within / throughout (v1.5 update)
 
@@ -234,17 +236,17 @@ multi-thread slot allocation) now supports:
 SeqNonconsecRep inside intersections, multi-cycle condition expressions
 in throughout.
 
-### RTL simulation: multi-module x-propagation
+### Fixed-count `[->N]` / `[=N]` boundary
 
-The iverilog simulation tests for v1.3 composed operator templates (prop_or,
-prop_and, prop_intersect, prop_within, prop_throughout, prop_not, prop_if_else)
-are skipped in this release due to a known x-propagation issue in multi-module
-iverilog simulations.  Behavioral oracle tests provide full functional coverage.
-A fix is targeted for v1.3.1.
+`[->N]` and `[=N]` are supported only for fixed positive counts. Ranged
+goto/non-consecutive repetition such as `a[->2:4]` or `a[=1:3]` is recognized
+and rejected with `SVA-E002`; v1 does not silently collapse the range to the
+lower bound. Split the property or use an explicit fixed count until ranged
+count semantics are implemented.
 
-### Unsupported Operators (planned for v1.4)
+### Unsupported / Deliberately Rejected Operators
 
-The following temporal operators are not yet supported:
+The following operators remain unsupported or deliberately rejected:
 
 | Operator | Category | Status |
 |----------|----------|--------|
@@ -255,9 +257,10 @@ The following temporal operators are not yet supported:
 | `until` / `until_with` (weak) | Safety | **Supported** (v1.4 Part A) |
 | `s_until` / `s_until_with` (strong) | Liveness | Rejected — requires unbounded eventual obligation |
 | `always` (unbounded) | Temporal | Rejected — not synthesizable on finite state |
+| `[->M:N]` / `[=M:N]` where `M < N` | Repetition | Rejected — v1 supports fixed counts only |
 | `intersect`/`within` with local variables | Sequence | Not supported |
-| Nested multi-path operators | Sequence | Not supported (single-level only) |
-| Multi-clock properties | Clocking | Not supported (planned v1.4.1 Part B) |
+| Nested multi-path operators | Sequence | Supported when operands are NFA-liftable and K ≤ 32 |
+| Multi-clock properties | Clocking | Supported for path-one split-and-synchronize forms |
 
 ### Structural Limitations
 
@@ -303,7 +306,7 @@ See `.planning/DESIGN-multiclock-risk-D.md` for the full design and references.
 | Code | Severity | Description | Resolution |
 |------|----------|-------------|------------|
 | SVA-E001 | Error | Unsupported SVA operator encountered | Use only Tier 1/2/3 operators listed above |
-| SVA-E002 | Error | Unbounded repetition is not synthesizable | Replace `[*]` or `[+]` with bounded `[*M:N]` |
+| SVA-E002 | Error | Repetition form is unbounded or outside the supported finite-state subset | Replace unbounded `[*]`/`[+]` with bounded `[*M:N]`; replace ranged `[->M:N]`/`[=M:N]` with fixed `[->N]`/`[=N]` |
 | SVA-E003 | Error | Multi-clock property detected (cross-clock `##N` N≠1, multi-clock intersect/within/throughout, overlapping `|->` cross-clock) | Use allowed multi-clock forms (`##1`, `|=>`) |
 | SVA-E004 | Error | Failed to parse SVA input (slang error) | Check syntax; ensure slang can parse the input |
 | SVA-E005 | Error | `--property` matched no assertion (label, index, or line not found) | Use a valid label name, 1-based index, or `@N` source-line number |
@@ -315,7 +318,7 @@ sva2rtl: error SVA-E001: unsupported operator 'nexttime' at input.sv:12:5
   |
 12|     nexttime a
   |     ^^^^^^^^
-  = note: 'nexttime' is a Tier 3 operator not supported in v1.3.0
+  = note: 'nexttime' is not synthesizable in the supported finite-state subset
   = help: see SUPPORTED_CONSTRUCTS.md for the list of supported operators
 ```
 
@@ -327,8 +330,9 @@ The following constructs are recognized by the parser but produce clear error me
 |-----------|-----------|---------------------|
 | `[*]` (unbounded) | SVA-E002 | Use `[*1:MAX]` with explicit bound |
 | `[+]` (unbounded) | SVA-E002 | Use `[*1:MAX]` with explicit bound |
+| `[->M:N]` / `[=M:N]` where `M < N` | SVA-E002 | Use fixed `[->N]` / `[=N]`, or split into explicit properties |
 | `##[0:$]` | SVA-E002 | Use `##[0:MAX]` with explicit bound |
-| Multi-clock `@(posedge clk2)` | SVA-E003 | Split into separate single-clock properties |
+| Unsupported multi-clock forms (`##N` where N≠1, cross-clock `intersect`, overlapping cross-clock `|->`) | SVA-E003 | Use allowed path-one forms (`##1`, `|=>`) or split into single-clock properties |
 | `nexttime` / unbounded `always` / unbounded `eventually` / `s_until` | SVA-E001 | Unbounded liveness not synthesizable; use bounded `[m:n]` forms |
 | bounded `eventually`/`s_eventually [m:n]` | — | Supported since v1.4 Part A |
 

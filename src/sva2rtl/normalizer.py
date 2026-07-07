@@ -14,9 +14,14 @@ Rules applied:
 - ``SeqConcat`` flattening: nested ``SeqConcat`` children are spliced into parent
 - ``PropImplication``: children are recursively normalized but the node itself
   is never transformed (D-05: golden file parity)
+- ``##0`` warning: when a zero-delay fusion is detected between two BoolExpr
+  leaves, emit a warning suggesting ``a && b`` for true same-cycle conjunction
+  (the registered-leaf token-passing pipeline retains +1 cycle separation for ##0)
 """
 
 from __future__ import annotations
+
+import logging
 
 from sva2rtl.ir import (
     BoolExpr,
@@ -41,6 +46,8 @@ from sva2rtl.ir import (
     SignalFunc,
     SVANode,
 )
+
+_LOG = logging.getLogger(__name__)
 
 
 def normalize(node: SVANode) -> SVANode:
@@ -234,7 +241,9 @@ def _normalize_node(node: SVANode) -> SVANode:
             return node.expr
 
         case SeqConcat():
-            return _flatten_concat(node)
+            flattened = _flatten_concat(node)
+            _warn_fusion_delay(flattened)
+            return flattened
 
         case PropImplication():
             # D-05: Do NOT desugar PropImplication(overlapping=False) to |-> ##1.
@@ -313,3 +322,30 @@ def _flatten_concat(node: SeqConcat) -> SeqConcat:
         delays=tuple(new_delays),
         source_loc=node.source_loc,
     )
+
+
+def _warn_fusion_delay(node: SeqConcat) -> None:
+    """Emit a warning when ``##0`` (fusion delay) is detected.
+
+    The registered-leaf token-passing pipeline cannot sample two operands in
+    the same cycle — ``##0`` retains a 1-cycle separation. This is a structural
+    limitation. When ``##0`` appears between two BoolExpr leaves, the user can
+    use ``a && b`` for true same-cycle conjunction (more efficient and correct).
+
+    This warning does NOT change behavior; it only advises the user.
+    """
+    for i, (d_min, d_max) in enumerate(node.delays):
+        if d_min == 0 and d_max == 0:
+            left = node.elements[i] if i < len(node.elements) else None
+            right = node.elements[i + 1] if i + 1 < len(node.elements) else None
+            if isinstance(left, BoolExpr) and isinstance(right, BoolExpr):
+                _LOG.warning(
+                    "##0 fusion delay between '%s' and '%s' at %s: "
+                    "the registered-leaf pipeline retains +1 cycle separation. "
+                    "Use '(%s) && (%s)' for true same-cycle conjunction.",
+                    left.text,
+                    right.text,
+                    node.source_loc,
+                    left.text,
+                    right.text,
+                )

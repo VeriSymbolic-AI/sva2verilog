@@ -861,10 +861,11 @@ class TestFirstMatchSvaEquiv:
 def _ref_goto_rep(name: str, n: int) -> str:
     """Independent reference for ``a[->N]`` goto repetition.
 
-    RTL timing (goto_rep.sv.j2): count_q increments when start && !passed_q
-    && sig_eval && count_q < rep_max. passed_q set when sig_eval && count_q
-    == rep_max-1. Both registered. pass = passed_q (combinational read).
-    No reset on start — start gates counting.
+    Semantic reference: a single start pulse arms one attempt, which then counts
+    non-consecutive ``a`` occurrences until the Nth occurrence completes it.
+    The reference deliberately keeps counting after start deasserts so the miter
+    catches regressions where the implementation incorrectly gates counting by
+    start every cycle.
     """
     return f"""
 module {name} (
@@ -872,19 +873,28 @@ module {name} (
     output logic pass
 );
     logic [1:0] cnt_q;
+    logic running_q;
     logic passed_q;
+    wire hit_now = !passed_q && a &&
+                   ((start && !running_q && ({n} == 1)) ||
+                    (running_q && (cnt_q >= {n - 1})));
     always_ff @(posedge clk) begin
         if (!rst_n) begin
-            cnt_q    <= 0;
-            passed_q <= 1'b0;
-        end else if (start && !passed_q) begin
+            cnt_q     <= 0;
+            running_q <= 1'b0;
+            passed_q  <= 1'b0;
+        end else if (hit_now) begin
+            running_q <= 1'b0;
+            passed_q  <= 1'b1;
+        end else if (start && !running_q && !passed_q) begin
+            running_q <= 1'b1;
+            cnt_q     <= a ? 1 : 0;
+        end else if (running_q && !passed_q) begin
             if (a && cnt_q < {n})
                 cnt_q <= cnt_q + 1'b1;
-            if (a && cnt_q == {n - 1})
-                passed_q <= 1'b1;
         end
     end
-    assign pass = passed_q;
+    assign pass = passed_q | hit_now;
 endmodule
 """
 
@@ -909,9 +919,10 @@ class TestGotoRepSvaEquiv:
 def _ref_nonconsec_rep(name: str, n: int) -> str:
     """Independent reference for ``a[=N]`` nonconsecutive repetition.
 
-    RTL timing (nonconsec_rep.sv.j2): count_q increments when start &&
-    sig_eval && count_q < rep_max. pass = count_q >= rep_min (combinational).
-    No done_q latch — pass stays high once count reaches N.
+    Semantic reference: a single start pulse arms one attempt. The attempt
+    counts non-consecutive ``a`` occurrences after start and completes once the
+    Nth occurrence has been observed. Counting is independent of subsequent
+    start values.
     """
     return f"""
 module {name} (
@@ -919,15 +930,28 @@ module {name} (
     output logic pass
 );
     logic [2:0] cnt_q;
+    logic running_q;
+    logic passed_q;
+    wire hit_now = !passed_q && a &&
+                   ((start && !running_q && ({n} == 1)) ||
+                    (running_q && (cnt_q >= {n - 1})));
     always_ff @(posedge clk) begin
         if (!rst_n) begin
-            cnt_q <= 0;
-        end else if (start) begin
+            cnt_q     <= 0;
+            running_q <= 1'b0;
+            passed_q  <= 1'b0;
+        end else if (hit_now) begin
+            running_q <= 1'b0;
+            passed_q  <= 1'b1;
+        end else if (start && !running_q && !passed_q) begin
+            running_q <= 1'b1;
+            cnt_q     <= a ? 1 : 0;
+        end else if (running_q && !passed_q) begin
             if (a && cnt_q < {n})
                 cnt_q <= cnt_q + 1'b1;
         end
     end
-    assign pass = (cnt_q >= {n});
+    assign pass = passed_q | hit_now;
 endmodule
 """
 

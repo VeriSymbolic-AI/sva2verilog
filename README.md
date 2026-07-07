@@ -80,8 +80,8 @@ sva2rtl input.sv --property req_ack_prop -o monitor.sv
 | Operator | Description | Example |
 |----------|-------------|---------|
 | `first_match` | Earliest completion wins | `first_match(a ##[1:3] b)` |
-| `[->N]` | Goto repetition (N non-consecutive) | `a[->3]` |
-| `[=N]` | Non-consecutive repetition | `a[=2]` |
+| `[->N]` | Goto repetition; one start arms counting until Nth occurrence | `a[->3]` |
+| `[=N]` | Non-consecutive repetition; one start arms counting until Nth occurrence | `a[=2]` |
 | `and` | Both sequences match (same start) | `s1 and s2` |
 | `or` | Either sequence matches | `s1 or s2` |
 | `intersect` | Both sequences complete simultaneously (incl. multi-cycle via NFA) | `s1 intersect s2` |

@@ -77,6 +77,7 @@ def _run_both(
     tmp_path: Path,
     oracle_params: dict[str, Any],
     simulator: str = "iverilog",
+    oracle_kind: str = "rep_consecutive",
 ) -> tuple[list[dict], list[dict]]:
     """Run stimulus through both oracle and RTL; return (oracle_out, rtl_out)."""
     modules = emit_all(checker)
@@ -84,7 +85,7 @@ def _run_both(
     clock_signal = checker.params["clock_signal"]
 
     # Oracle — remap "a" → "sig" for the oracle
-    sim = SVABehavioralSim("rep_consecutive", oracle_params)
+    sim = SVABehavioralSim(oracle_kind, oracle_params)
     oracle_out = [sim.tick(s) for s in _oracle_stim(stimulus)]
 
     # RTL
@@ -452,3 +453,91 @@ class TestRepRange:
 
         # t=3: re-enabled but disable clears state → not active
         assert not rtl_out[3]["active"], "t=3: state cleared by disable → inactive"
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# goto_rep: a[->3]  (rep_min=3, rep_max=3)
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+class TestGotoRep:
+    """Tests for a[->3] — 3 non-consecutive occurrences after one start pulse."""
+
+    _PARAMS = {"rep_min": 3, "rep_max": 3}
+
+    def test_single_start_keeps_counting_until_third_occurrence(
+        self, tmp_path: Path, simulator: str
+    ) -> None:
+        """a[->3]: a single start pulse arms the attempt until the 3rd occurrence."""
+        checker = _build_checker("goto_rep")
+        stimulus = [
+            {"start": True, "a": True},    # t=0: occurrence 1, arm attempt
+            {"start": False, "a": False},  # t=1: gap allowed
+            {"start": False, "a": True},   # t=2: occurrence 2
+            {"start": False, "a": True},   # t=3: occurrence 3 -> pass
+            {"start": False, "a": False},  # t=4: pass remains locked
+        ]
+        oracle_out, rtl_out = _run_both(
+            checker,
+            stimulus,
+            tmp_path,
+            self._PARAMS,
+            simulator,
+            oracle_kind="goto_rep",
+        )
+
+        assert len(rtl_out) == len(stimulus)
+        for i, (oracle, rtl) in enumerate(zip(oracle_out, rtl_out)):
+            assert rtl["pass"] == oracle["pass"], f"tick {i}: pass mismatch"
+            assert rtl["fail"] == oracle["fail"], f"tick {i}: fail mismatch"
+            assert rtl["active"] == oracle["active"], f"tick {i}: active mismatch"
+
+        assert not rtl_out[0]["pass"], "t=0: only first occurrence"
+        assert not rtl_out[2]["pass"], "t=2: only second occurrence"
+        assert rtl_out[3]["pass"], "t=3: third occurrence completes [->3]"
+        assert rtl_out[4]["pass"], "t=4: [->3] pass is locked after completion"
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# nonconsec_rep: a[=5]  (rep_min=5, rep_max=5)
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+class TestNonconsecRep:
+    """Tests for a[=5] — 5 non-consecutive occurrences after one start pulse."""
+
+    _PARAMS = {"rep_min": 5, "rep_max": 5}
+
+    def test_single_start_keeps_counting_until_fifth_occurrence(
+        self, tmp_path: Path, simulator: str
+    ) -> None:
+        """a[=5]: counting continues after the initial start pulse deasserts."""
+        checker = _build_checker("nonconsec_rep")
+        stimulus = [
+            {"start": True, "a": True},    # t=0: occurrence 1, arm attempt
+            {"start": False, "a": False},  # t=1: gap allowed
+            {"start": False, "a": True},   # t=2: occurrence 2
+            {"start": False, "a": False},  # t=3: gap allowed
+            {"start": False, "a": True},   # t=4: occurrence 3
+            {"start": False, "a": True},   # t=5: occurrence 4
+            {"start": False, "a": True},   # t=6: occurrence 5 -> pass
+            {"start": False, "a": False},  # t=7: pass remains locked
+        ]
+        oracle_out, rtl_out = _run_both(
+            checker,
+            stimulus,
+            tmp_path,
+            self._PARAMS,
+            simulator,
+            oracle_kind="nonconsec_rep",
+        )
+
+        assert len(rtl_out) == len(stimulus)
+        for i, (oracle, rtl) in enumerate(zip(oracle_out, rtl_out)):
+            assert rtl["pass"] == oracle["pass"], f"tick {i}: pass mismatch"
+            assert rtl["fail"] == oracle["fail"], f"tick {i}: fail mismatch"
+            assert rtl["active"] == oracle["active"], f"tick {i}: active mismatch"
+
+        assert not rtl_out[5]["pass"], "t=5: only four occurrences"
+        assert rtl_out[6]["pass"], "t=6: fifth occurrence completes [=5]"
+        assert rtl_out[7]["pass"], "t=7: [=5] pass is locked after completion"

@@ -407,6 +407,30 @@ def test_import_goto_rep_text() -> None:
     assert "[->3]" in text
 
 
+def test_import_goto_rep_invalid_range_rejected() -> None:
+    """[->M:N] with M>N raises a clear compile error."""
+    ast = _load_fixture("goto_rep.json")
+    rep = ast["design"]["members"][0]["body"]["members"][4]["body"]["propertySpec"]["expr"][
+        "repetition"
+    ]
+    rep["min"] = 3
+    rep["max"] = 1
+    with pytest.raises(SvaCompileError, match="min must be <= max"):
+        import_assertion(ast)
+
+
+def test_import_goto_rep_ranged_count_rejected() -> None:
+    """[->M:N] with M<N is rejected until ranged goto semantics are implemented."""
+    ast = _load_fixture("goto_rep.json")
+    rep = ast["design"]["members"][0]["body"]["members"][4]["body"]["propertySpec"]["expr"][
+        "repetition"
+    ]
+    rep["min"] = 2
+    rep["max"] = 4
+    with pytest.raises(SvaCompileError, match="ranged goto repetition"):
+        import_assertion(ast)
+
+
 def test_compose_goto_rep() -> None:
     """compose() on SeqGotoRep returns CheckerNode with goto_rep template."""
     ast = _load_fixture("goto_rep.json")
@@ -526,6 +550,30 @@ def test_import_nonconsec_rep_text() -> None:
     assert "[=5]" in text
 
 
+def test_import_nonconsec_rep_invalid_range_rejected() -> None:
+    """[=M:N] with M>N raises a clear compile error."""
+    ast = _load_fixture("nonconsec_rep.json")
+    rep = ast["design"]["members"][0]["body"]["members"][4]["body"]["propertySpec"]["expr"][
+        "repetition"
+    ]
+    rep["min"] = 5
+    rep["max"] = 2
+    with pytest.raises(SvaCompileError, match="min must be <= max"):
+        import_assertion(ast)
+
+
+def test_import_nonconsec_rep_ranged_count_rejected() -> None:
+    """[=M:N] with M<N is rejected until ranged nonconsecutive semantics exist."""
+    ast = _load_fixture("nonconsec_rep.json")
+    rep = ast["design"]["members"][0]["body"]["members"][4]["body"]["propertySpec"]["expr"][
+        "repetition"
+    ]
+    rep["min"] = 2
+    rep["max"] = 4
+    with pytest.raises(SvaCompileError, match="ranged non-consecutive repetition"):
+        import_assertion(ast)
+
+
 def test_compose_nonconsec_rep() -> None:
     """compose() on SeqNonconsecRep returns CheckerNode with nonconsec_rep template."""
     ast = _load_fixture("nonconsec_rep.json")
@@ -547,7 +595,8 @@ def test_emit_nonconsec_rep() -> None:
     assert "module " in sv
     assert "endmodule" in sv
     assert "count_q" in sv
-    assert "passed_q" not in sv
+    assert "running_q" in sv
+    assert "passed_q" in sv
 
 
 def test_emit_nonconsec_rep_golden() -> None:
@@ -568,21 +617,16 @@ def test_emit_nonconsec_rep_golden() -> None:
 
 
 def test_oracle_nonconsec_rep_pass_at_5() -> None:
-    """nonconsec_rep [=5]: passes when old_count >= 5.
-
-    OLD-state semantics, start-driven counting.
-    """
+    """nonconsec_rep [=5]: a single start arms counting until the 5th hit."""
     sim = SVABehavioralSim("nonconsec_rep", {"rep_min": 5, "rep_max": 5})
-    # Oracle increments count on (start=True, sig=True).
-    # After 5 such cycles: old_count=5 → pass_val=True
-    sim.tick({"start": True, "sig": True})   # old_count=0 → no pass; count→1
-    sim.tick({"start": True, "sig": True})   # old_count=1 → no pass; count→2
-    sim.tick({"start": True, "sig": True})   # old_count=2 → no pass; count→3
-    sim.tick({"start": True, "sig": True})   # old_count=3 → no pass; count→4
-    out4 = sim.tick({"start": True, "sig": True})  # old_count=4 → no pass; count→5
-    out5 = sim.tick({"start": True, "sig": True})  # old_count=5 → pass
-    assert not out4["pass"], "old_count=4 < 5: no pass"
-    assert out5["pass"], "old_count=5 >= rep_min=5: pass"
+    sim.tick({"start": True, "sig": True})    # occurrence 1
+    sim.tick({"start": False, "sig": False})  # gap
+    sim.tick({"start": False, "sig": True})   # occurrence 2
+    sim.tick({"start": False, "sig": True})   # occurrence 3
+    out4 = sim.tick({"start": False, "sig": True})  # occurrence 4
+    out5 = sim.tick({"start": False, "sig": True})  # occurrence 5 → pass
+    assert not out4["pass"], "4 occurrences < 5: no pass"
+    assert out5["pass"], "5th occurrence: pass"
 
 
 def test_oracle_nonconsec_rep_never_fails() -> None:

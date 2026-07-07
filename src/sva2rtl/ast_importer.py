@@ -901,7 +901,37 @@ def _build_goto_rep(
     """Build a SeqGotoRep IR node for expr[->N] (GoTo repetition)."""
     rep = node.get("repetition", {})
     rep_min = int(rep.get("min", 1))
-    rep_max = int(rep.get("max", 1))
+    max_val = rep.get("max", 1)
+    if max_val == "$":
+        raise SvaCompileError(
+            message=(
+                f"SVA-E002: unbounded goto repetition [->{rep_min}:$] at "
+                f"{source_loc} is not synthesizable; use a finite upper bound."
+            )
+        )
+    rep_max = int(max_val)
+    if rep_min <= 0 or rep_max <= 0:
+        raise SvaCompileError(
+            message=(
+                f"SVA-E002: goto repetition [->{rep_min}:{rep_max}] at "
+                f"{source_loc} requires positive bounds."
+            )
+        )
+    if rep_min > rep_max:
+        raise SvaCompileError(
+            message=(
+                f"SVA-E002: invalid goto repetition range [->{rep_min}:{rep_max}] at "
+                f"{source_loc} — min must be <= max"
+            )
+        )
+    if rep_min != rep_max:
+        raise SvaCompileError(
+            message=(
+                f"SVA-E002: ranged goto repetition [->{rep_min}:{rep_max}] at "
+                f"{source_loc} is not supported in v1; use fixed [->{rep_min}] or "
+                "split the property."
+            )
+        )
     inner_node = node.get("expr", {})
     if not inner_node:
         raise SvaCompileError(
@@ -918,7 +948,37 @@ def _build_nonconsec_rep(
     """Build a SeqNonconsecRep IR node for expr[=N] (Nonconsecutive repetition)."""
     rep = node.get("repetition", {})
     rep_min = int(rep.get("min", 1))
-    rep_max = int(rep.get("max", 1))
+    max_val = rep.get("max", 1)
+    if max_val == "$":
+        raise SvaCompileError(
+            message=(
+                f"SVA-E002: unbounded non-consecutive repetition [={rep_min}:$] at "
+                f"{source_loc} is not synthesizable; use a finite upper bound."
+            )
+        )
+    rep_max = int(max_val)
+    if rep_min <= 0 or rep_max <= 0:
+        raise SvaCompileError(
+            message=(
+                f"SVA-E002: non-consecutive repetition [={rep_min}:{rep_max}] at "
+                f"{source_loc} requires positive bounds."
+            )
+        )
+    if rep_min > rep_max:
+        raise SvaCompileError(
+            message=(
+                f"SVA-E002: invalid non-consecutive repetition range [={rep_min}:{rep_max}] at "
+                f"{source_loc} — min must be <= max"
+            )
+        )
+    if rep_min != rep_max:
+        raise SvaCompileError(
+            message=(
+                f"SVA-E002: ranged non-consecutive repetition [={rep_min}:{rep_max}] at "
+                f"{source_loc} is not supported in v1; use fixed [={rep_min}] or "
+                "split the property."
+            )
+        )
     inner_node = node.get("expr", {})
     if not inner_node:
         raise SvaCompileError(

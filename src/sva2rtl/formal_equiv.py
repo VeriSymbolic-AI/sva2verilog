@@ -260,10 +260,17 @@ def run_sva_miter_check(
     compare: str = "pass",
     depth: int = 20,
     timeout: int = 300,
+    mode: str = "bmc",
 ) -> tuple[bool, str]:
-    """Verify a monitor against an independent reference monitor via BMC miter.
+    """Verify a monitor against an independent reference monitor via miter.
 
     See ``build_miter_harness``. Returns ``(passed, output)``.
+
+    Parameters
+    ----------
+    mode:
+        SymbiYosys mode: ``"bmc"`` (bounded, default) or ``"prove"``
+        (complete proof via k-induction).
     """
     if not sby_is_available():
         return False, "ERROR: sby (SymbiYosys) not found on PATH"
@@ -299,7 +306,7 @@ def run_sva_miter_check(
         files_block = "\n".join(file_lines)
         sby_text = f"""\
 [options]
-mode bmc
+mode {mode}
 depth {depth}
 
 [engines]
@@ -314,19 +321,20 @@ prep -top harness
 """
         (work / "miter.sby").write_text(sby_text)
 
+        effective_timeout = timeout if mode == "bmc" else max(timeout, 600)
         try:
             result = subprocess.run(
                 ["sby", "-f", "miter.sby"],
                 cwd=str(work),
                 capture_output=True,
                 text=True,
-                timeout=timeout,
+                timeout=effective_timeout,
             )
             output = result.stdout + "\n" + result.stderr
             passed = result.returncode == 0 and "PASS" in output
             return passed, output
         except subprocess.TimeoutExpired:
-            return False, f"ERROR: sby miter check timed out after {timeout}s"
+            return False, f"ERROR: sby miter check timed out after {effective_timeout}s"
 
 
 def run_sva_equiv_check(
@@ -337,8 +345,9 @@ def run_sva_equiv_check(
     clock: str = "clk",
     depth: int = 20,
     timeout: int = 300,
+    mode: str = "bmc",
 ) -> tuple[bool, str]:
-    """Verify a generated monitor against an independent SVA reference via BMC.
+    """Verify a generated monitor against an independent SVA reference.
 
     Parameters
     ----------
@@ -352,15 +361,23 @@ def run_sva_equiv_check(
     clock:
         Clock signal name.
     depth:
-        BMC search depth (cycles).
+        BMC search depth (cycles). Also used as k-induction depth when
+        ``mode="prove"``.
     timeout:
         Subprocess timeout in seconds.
+    mode:
+        SymbiYosys verification mode: ``"bmc"`` (bounded model checking,
+        default) or ``"prove"`` (complete proof via BMC + k-induction).
+        ``"prove"`` provides mathematical completeness but may not converge
+        for complex monitors.
 
     Returns
     -------
     tuple[bool, str]
         ``(passed, output_text)`` — *passed* is True iff no counterexample was
-        found within *depth* (i.e. monitor matches the SVA reference).
+        found within *depth* (i.e. monitor matches the SVA reference). For
+        ``mode="prove"``, *passed* is True iff the property is proven for all
+        reachable states (complete proof, not just bounded).
     """
     if not sby_is_available():
         return False, "ERROR: sby (SymbiYosys) not found on PATH"
@@ -403,9 +420,14 @@ def run_sva_equiv_check(
 
         script_reads = "\n".join(read_lines)
         files_block = "\n".join(file_lines)
+
+        # k-induction: SymbiYosys "prove" mode runs BMC (base case) + k-induction
+        # (inductive step). A PASS here is a COMPLETE proof (all reachable states).
+        # The engine is always "smtbmc" — sby internally handles prove mode by
+        # splitting into basecase and induction tasks.
         sby_text = f"""\
 [options]
-mode bmc
+mode {mode}
 depth {depth}
 
 [engines]
@@ -420,17 +442,77 @@ prep -top harness
 """
         (work / "equiv.sby").write_text(sby_text)
 
+        effective_timeout = timeout if mode == "bmc" else max(timeout, 600)
         try:
             result = subprocess.run(
                 ["sby", "-f", "equiv.sby"],
                 cwd=str(work),
                 capture_output=True,
                 text=True,
-                timeout=timeout,
+                timeout=effective_timeout,
             )
             output = result.stdout + "\n" + result.stderr
             # sby returns 0 on PASS, non-zero on FAIL/ERROR.
             passed = result.returncode == 0 and "PASS" in output
             return passed, output
         except subprocess.TimeoutExpired:
-            return False, f"ERROR: sby equivalence check timed out after {timeout}s"
+            return False, f"ERROR: sby equivalence check timed out after {effective_timeout}s"
+
+
+def run_sva_equiv_prove(
+    monitor_root: CheckerNode,
+    reference_expr: str,
+    *,
+    helper_regs: str = "",
+    clock: str = "clk",
+    depth: int = 20,
+    timeout: int = 600,
+) -> tuple[bool, str]:
+    """Verify a monitor via k-induction (complete proof, not just bounded).
+
+    This is a convenience wrapper around ``run_sva_equiv_check`` with
+    ``mode="prove"``. A PASS result means the monitor is proven equivalent to
+    the SVA reference for ALL reachable states — a mathematical proof, not just
+    a bounded check.
+
+    k-induction works by:
+    1. Base case: prove the property holds for the first k cycles (BMC).
+    2. Inductive step: assume the property holds for k consecutive cycles and
+       prove it holds for the (k+1)th cycle.
+
+    If both steps succeed, the property is proven for all time.
+
+    Not all monitors will converge with k-induction. Complex sequential logic
+    may require high k values or may not converge at all. In such cases, fall
+    back to ``run_sva_equiv_check`` (BMC) for bounded evidence.
+
+    Parameters
+    ----------
+    monitor_root:
+        The composed CheckerNode tree for the property.
+    reference_expr:
+        SystemVerilog boolean expression for when the SVA is violated.
+    helper_regs:
+        Optional helper register declarations.
+    clock:
+        Clock signal name.
+    depth:
+        k-induction depth (also BMC base-case depth).
+    timeout:
+        Subprocess timeout in seconds (default 600, induction can be slow).
+
+    Returns
+    -------
+    tuple[bool, str]
+        ``(passed, output_text)`` — *passed* is True iff the property is
+        PROVEN for all reachable states.
+    """
+    return run_sva_equiv_check(
+        monitor_root,
+        reference_expr,
+        helper_regs=helper_regs,
+        clock=clock,
+        depth=depth,
+        timeout=timeout,
+        mode="prove",
+    )

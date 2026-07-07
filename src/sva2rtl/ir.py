@@ -305,20 +305,24 @@ class SeqThroughout(SVANode):
     body: SVANode
 
 
-# ── Phase 3b: NFA composition primitive (v1.5.1) ──────────────────────────
+# ── Reserved NFA composition primitive (v1.5.1 design artifact) ───────────
 
 
 @dataclass(frozen=True)
 class NfaCompose(SVANode):
-    """Explicit NFA (non-deterministic finite automaton) composition primitive.
+    """Reserved explicit NFA composition primitive.
 
     A ``NfaCompose`` IR node represents a set of NFA states with transitions
     labelled by boolean guard expressions, plus an accept-set and a
-    fail-semantic selector (``nfa_kind``).  It is produced by the composer
-    (``_compose_intersect_nfa`` / ``_compose_within_nfa`` /
-    ``_compose_throughout_nfa`` / multi-cycle implication consequents) via
-    Boulé & Zilic MBAC-style product construction (see
-    ``.gsd/milestones/v1.5/spike-notes.md`` §G0.4 for the algorithm).
+    fail-semantic selector (``nfa_kind``).
+
+    This dataclass is kept as the IR-level design shape for explicit NFAs, but
+    current main does **not** construct it in the compile pipeline. The composer
+    performs Boulé & Zilic MBAC-style product construction internally and emits
+    ``CheckerNode(template_name="nfa_generic")`` directly. Keeping the reserved
+    shape documented avoids implying a data-flow edge that does not exist while
+    preserving the planned IR boundary if the NFA builder is later moved out of
+    ``composer.py``.
 
     Encoding
     --------

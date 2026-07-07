@@ -1,12 +1,20 @@
 """Nyquist Gap Remediation Tests (Phase 2).
 
-Dedicated tests for each of the 6 remaining Nyquist BLOCKING gaps:
-- NYQ-01: Vacuous satisfaction (needs slang RTL compilation)
+Dedicated tests for each of the Nyquist BLOCKING gaps:
+- NYQ-01: Vacuous satisfaction (antecedent never true)
 - NYQ-02: strong() produces clear compile error
 - NYQ-10: ##[M:N] with M>N produces clear compile error
-- NYQ-11: Concurrent attempt stress test (needs slang RTL compilation)
+- NYQ-11: Concurrent attempt stress test (BV_WIDTH sufficiency)
+- NYQ-21: [*M:N] with M>N produces clear compile error
 - NYQ-22: $past(sig, n) with n > 100 emits warning
 - NYQ-30: Programmatic token-count invariant check
+
+Closed by HARDEN-XX (verified via existing test suites):
+- NYQ-20: attempt_fired / disable_i (HARDEN-01)
+- NYQ-50: --dump-tree multi-property (HARDEN-05)
+- NYQ-51: --property unlabeled assertion (HARDEN-06)
+- NYQ-52: --output file vs directory (HARDEN-07)
+- NYQ-53: --verilog with --dump-* interaction (HARDEN-08)
 """
 
 from __future__ import annotations
@@ -367,6 +375,116 @@ def test_nyq22_past_shallow_depth_no_warning(caplog: pytest.LogCaptureFixture) -
     # No warnings should be emitted
     warnings = [r.message for r in caplog.records if r.levelno >= logging.WARNING]
     assert len(warnings) == 0, f"Expected no warnings, got: {warnings}"
+
+
+# ── NYQ-21: [*M:N] with M>N produces clear compile error ─────────────────
+
+
+def test_nyq21_range_repetition_min_gt_max_raises() -> None:
+    """a[*3:1] with M=3, N=1 raises SvaCompileError with SVA-E002."""
+    ast = {
+        "design": {
+            "members": [
+                {
+                    "kind": "Instance",
+                    "name": "test_mod",
+                    "body": {
+                        "kind": "InstanceBody",
+                        "members": [
+                            {
+                                "kind": "ConcurrentAssertion",
+                                "assertionKind": "assert",
+                                "body": {
+                                    "kind": "PropertySpec",
+                                    "clocking": {
+                                        "kind": "TimingControl",
+                                        "event": {
+                                            "kind": "SignalEvent",
+                                            "edge": "posedge",
+                                            "expr": {
+                                                "kind": "NamedValue",
+                                                "symbol": "1 clk",
+                                            },
+                                        },
+                                    },
+                                    "expr": {
+                                        "kind": "SimpleAssertionExpr",
+                                        "expr": {
+                                            "kind": "NamedValue",
+                                            "symbol": "2 a",
+                                        },
+                                        "repetition": {
+                                            "kind": "Consecutive",
+                                            "min": "3",
+                                            "max": "1",
+                                        },
+                                    },
+                                },
+                            }
+                        ],
+                    },
+                }
+            ],
+        }
+    }
+    with pytest.raises(SvaCompileError) as exc_info:
+        import_assertion(ast)
+    err_msg = str(exc_info.value)
+    assert "SVA-E002" in err_msg
+    assert "min must be <= max" in err_msg.lower() or "minimum" in err_msg.lower()
+    assert "[*3:1]" in err_msg
+
+
+def test_nyq21_range_repetition_valid_passes() -> None:
+    """a[*1:4] with M=1, N=4 (M<=N) is valid and should not raise."""
+    ast = {
+        "design": {
+            "members": [
+                {
+                    "kind": "Instance",
+                    "name": "test_mod",
+                    "body": {
+                        "kind": "InstanceBody",
+                        "members": [
+                            {
+                                "kind": "ConcurrentAssertion",
+                                "assertionKind": "assert",
+                                "body": {
+                                    "kind": "PropertySpec",
+                                    "clocking": {
+                                        "kind": "TimingControl",
+                                        "event": {
+                                            "kind": "SignalEvent",
+                                            "edge": "posedge",
+                                            "expr": {
+                                                "kind": "NamedValue",
+                                                "symbol": "1 clk",
+                                            },
+                                        },
+                                    },
+                                    "expr": {
+                                        "kind": "SimpleAssertionExpr",
+                                        "expr": {
+                                            "kind": "NamedValue",
+                                            "symbol": "2 a",
+                                        },
+                                        "repetition": {
+                                            "kind": "Consecutive",
+                                            "min": "1",
+                                            "max": "4",
+                                        },
+                                    },
+                                },
+                            }
+                        ],
+                    },
+                }
+            ],
+        }
+    }
+    # Should not raise
+    node, _, _, _ = import_assertion(ast)
+    assert node is not None
 
 
 # ── NYQ-30: Programmatic token-count invariant check ──────────────────────

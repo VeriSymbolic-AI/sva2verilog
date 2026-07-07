@@ -66,6 +66,7 @@ class SVABehavioralSim:
         # ── Repetition state ──────────────────────────────────────────────
         self._rep_count: int = 0
         self._rep_running: bool = False
+        self._rep_passed: bool = False
 
         # ── Signal function state ─────────────────────────────────────────
         self._sig_prev: bool = False
@@ -88,6 +89,7 @@ class SVABehavioralSim:
         self._running = False
         self._rep_count = 0
         self._rep_running = False
+        self._rep_passed = False
         self._sig_prev = False
         self._past_shift = [False] * len(self._past_shift)
         self._bv = 0
@@ -278,8 +280,18 @@ class SVABehavioralSim:
 
         old_count = self._rep_count
         old_running = self._rep_running
+        old_passed = self._rep_passed
 
-        if start and not old_running:
+        hit_from_start = start and not old_running and not old_passed and sig and rep_min <= 1
+        hit_from_running = old_running and not old_passed and sig and old_count >= rep_min - 1
+        pass_val = old_passed or hit_from_start or hit_from_running
+        if start:
+            self._attempt_fired = True
+
+        if pass_val:
+            self._rep_passed = True
+            self._rep_running = False
+        elif start and not old_running:
             self._rep_running = True
             self._rep_count = 1 if sig else 0
             self._attempt_fired = True
@@ -287,8 +299,7 @@ class SVABehavioralSim:
             if old_count < rep_max:
                 self._rep_count = old_count + 1
 
-        pass_val = old_running and sig and old_count >= rep_min - 1
-        active_val = old_running
+        active_val = (start or old_running) and not pass_val
 
         return {
             "active": active_val,
@@ -311,14 +322,28 @@ class SVABehavioralSim:
         rep_max: int = int(self._params.get("rep_max", 1))
 
         old_count = self._rep_count
+        old_running = self._rep_running
+        old_passed = self._rep_passed
 
+        hit_from_start = start and not old_running and not old_passed and sig and rep_min <= 1
+        hit_from_running = old_running and not old_passed and sig and old_count >= rep_min - 1
+        pass_val = old_passed or hit_from_start or hit_from_running
         if start:
             self._attempt_fired = True
+
+        if pass_val:
+            self._rep_passed = True
+            self._rep_running = False
+        elif start and not old_running:
+            self._attempt_fired = True
+            self._rep_running = True
             if sig and old_count < rep_max:
+                self._rep_count = 1
+        elif old_running and sig:
+            if old_count < rep_max:
                 self._rep_count = old_count + 1
 
-        pass_val = old_count >= rep_min
-        active_val = start
+        active_val = (start or old_running) and not pass_val
 
         return {
             "active": active_val,
