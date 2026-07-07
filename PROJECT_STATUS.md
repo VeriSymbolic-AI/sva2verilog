@@ -12,6 +12,7 @@ sva2verilog 是一个开源的 SystemVerilog Assertion (SVA) 到可综合 RTL �
 - 代码质量：mypy --strict 0 errors, ruff 0 errors
 - 形式化验证：62 个非循环 BMC 等价证明（覆盖所有已支持算子）+ 5 个 Tier-A k-induction 完备证明
 - 覆盖度：约 95%+ 的实际断言场景
+- 工业级验证缺口：已记录在 `INDUSTRIAL_VALIDATION_GAPS.md`，包含当前进展、P0/P1/P2 严重度、修复计划和 fully-supported 定义标准
 
 ## 当前 main 新增修复（2026-07-07）
 
@@ -46,6 +47,26 @@ disable_iff oracle 泄漏：`simulate_checker_hierarchy` 不传播 disable 信�
 ### CI 强化
 
 CI workflow 已重新纳入版本控制，恢复 lint、8 轴仿真矩阵（`{ubuntu,macos} × {3.12,3.13} × {iverilog,verilator}`）和 formal job。formal job 覆盖全部形式化测试 + sby 安装。lint job mypy --strict 通过。
+
+## Remote CI Baseline Ledger
+
+**Target commit:** `21a13ebc9c1b1a5bccbb57699f79392f3b807c7f`
+
+**State:** pending remote CI confirmation
+
+| Axis | Required evidence | Current result |
+|------|-------------------|----------------|
+| lint | GitHub Actions `lint` job with ruff and mypy | pending remote CI confirmation |
+| Icarus | GitHub Actions test matrix jobs with `simulator=iverilog` | pending remote CI confirmation |
+| Verilator | GitHub Actions test matrix jobs with `simulator=verilator`, not skipped | pending remote CI confirmation |
+| formal | GitHub Actions `formal` job with Yosys, sby, and slang installed | pending remote CI confirmation |
+
+**Run URL / ID:** pending remote CI confirmation
+
+Local skips for Verilator, Yosys, or `sby` are developer-environment skips; a
+local skip is not evidence pass. BASE-02/BASE-03 remain blocked until the target
+commit has a remote CI run, or an equivalent full-toolchain machine result, with
+lint, Icarus, Verilator, and formal axes recorded above.
 
 ### k-induction 完备证明
 
