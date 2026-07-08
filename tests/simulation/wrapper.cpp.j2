@@ -37,8 +37,9 @@ int main(int argc, char** argv) {
 {%- endfor %}
     top->disable_i = {{ 1 if stim.get('disable_i', False) else 0 }};
     top->eval();
-    // Posedge: toggle clock, evaluate, capture
-    contextp->timeInc(1); top->{{ clock_signal }} = 1; top->eval();
+    // Match the SV testbench's @(posedge clk); $display(...) observation.
+    // $display runs before nonblocking assignments commit, so capture the
+    // currently settled outputs before toggling the clock high.
 {%- if has_overflow_flag %}
     printf("%c %c %c %c\n",
         top->active ? '1' : '0',
@@ -51,6 +52,8 @@ int main(int argc, char** argv) {
         top->pass   ? '1' : '0',
         top->fail   ? '1' : '0');
 {%- endif %}
+    // Posedge: toggle clock and evaluate registered state for next cycle.
+    contextp->timeInc(1); top->{{ clock_signal }} = 1; top->eval();
     // Negedge: toggle clock back
     contextp->timeInc(1); top->{{ clock_signal }} = 0; top->eval();
 {%- endfor %}

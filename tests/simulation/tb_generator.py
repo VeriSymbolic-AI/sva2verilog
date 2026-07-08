@@ -7,9 +7,11 @@ This module provides utilities to:
 3. Parse the simulation output into per-cycle output dicts.
 
 The generated testbench drives inputs at negedge (to satisfy setup time) and
-captures outputs at posedge using ``$fdisplay`` (iverilog) or ``printf``
-(Verilator C++ wrapper).  This matches the cycle-exact semantics of the
-behavioral oracle in ``sva2rtl.behavioral_oracle``.
+captures outputs at posedge using ``$fdisplay``.  The Verilator C++ wrapper
+captures the settled pre-edge outputs before toggling the clock high, which
+matches the active-region observation made by the SystemVerilog testbench.
+This matches the cycle-exact semantics of the behavioral oracle in
+``sva2rtl.behavioral_oracle``.
 
 Typical flow::
 
