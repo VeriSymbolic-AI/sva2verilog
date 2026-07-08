@@ -43,10 +43,11 @@ def _build_checker(name: str) -> CheckerNode:
 def _run(checker: CheckerNode, stimulus: list[dict[str, Any]], tmp_path: Path,
          simulator: str = "iverilog") -> list[dict]:
     modules = emit_all(checker)
+    extra_inputs = extra_inputs_from_checker(checker)
     tb = generate_testbench(
         module_name=checker.module_name,
         clock_signal=checker.params["clock_signal"],
-        extra_inputs=extra_inputs_from_checker(checker),
+        extra_inputs=extra_inputs,
         stimulus=stimulus,
         has_overflow_flag=False,
     )
@@ -57,6 +58,9 @@ def _run(checker: CheckerNode, stimulus: list[dict[str, Any]], tmp_path: Path,
         tb_code=tb,
         work_dir=tmp_path,
         has_overflow_flag=False,
+        stimulus=stimulus,
+        extra_inputs=extra_inputs,
+        clock_signal=checker.params["clock_signal"],
     )
 
 

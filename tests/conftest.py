@@ -41,6 +41,10 @@ def pytest_configure(config: pytest.Config) -> None:
         "markers",
         "simulation: marks tests requiring a simulator (deselect with '-m not simulation')",
     )
+    os.environ.setdefault(
+        "SVA2RTL_SIMULATOR",
+        str(config.getoption("--simulator", default="iverilog")),
+    )
 
 
 # ── Simulator fixture ──────────────────────────────────────────────────────

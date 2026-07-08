@@ -142,12 +142,12 @@ def run_equiv_check(
         ``(passed, output_text)`` where *passed* is ``True`` iff yosys
         reports all equivalence classes as proven.
     """
-    if not _yosys_is_available():
-        return False, "ERROR: yosys not found on PATH"
-
     top_modules = _extract_top_module_names(unoptimized_sv)
     if not top_modules:
         return False, "ERROR: could not find any module in unoptimized RTL"
+
+    if not _yosys_is_available():
+        return False, "ERROR: yosys not found on PATH"
 
     top = top_modules[0]
     gold_top = f"{top}_gold"
@@ -221,9 +221,6 @@ def run_equiv_check_multi(
     tuple[bool, str]
         ``(passed, output_text)``.
     """
-    if not _yosys_is_available():
-        return False, "ERROR: yosys not found on PATH"
-
     if not unoptimized_modules:
         return False, "ERROR: no modules to verify — empty module dict"
 
@@ -233,6 +230,9 @@ def run_equiv_check_multi(
         if not tops:
             return False, "ERROR: could not find any module in unoptimized RTL"
         top_module = tops[-1]
+
+    if not _yosys_is_available():
+        return False, "ERROR: yosys not found on PATH"
 
     top_gold = f"{top_module}_gold"
     top_gate = f"{top_module}_gate"

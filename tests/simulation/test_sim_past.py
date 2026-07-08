@@ -67,6 +67,9 @@ def _run_both(
         tb_code=tb,
         work_dir=tmp_path,
         has_overflow_flag=False,
+        stimulus=stimulus,
+        extra_inputs=extra_inputs,
+        clock_signal=clock_signal,
     )
     return oracle_out, rtl_out
 
@@ -186,6 +189,9 @@ def test_rtl_past_disable_clears_shift(tmp_path: Path, simulator: str) -> None:
         tb_code=tb,
         work_dir=tmp_path,
         has_overflow_flag=False,
+        stimulus=stimulus,
+        extra_inputs=extra_inputs,
+        clock_signal=clock_signal,
     )
 
     # tick 3: disable_i=1 → all outputs 0

@@ -907,7 +907,11 @@ def _make_generic_stimulus(
 
 @pytest.mark.simulation
 @pytest.mark.parametrize("fixture_name", _SIM_PARITY_FIXTURES)
-def test_optimization_parity(fixture_name: str, tmp_path: Path) -> None:
+def test_optimization_parity(
+    fixture_name: str,
+    tmp_path: Path,
+    simulator: str,
+) -> None:
     """Optimized and unoptimized checkers produce identical simulation output.
 
     For each fixture in ``_SIM_PARITY_FIXTURES``:
@@ -930,7 +934,7 @@ def test_optimization_parity(fixture_name: str, tmp_path: Path) -> None:
         run_simulation,
     )
 
-    if shutil.which("iverilog") is None:
+    if simulator == "iverilog" and shutil.which("iverilog") is None:
         pytest.skip(
             "iverilog not found — install Icarus Verilog to run simulation tests"
         )
@@ -948,10 +952,12 @@ def test_optimization_parity(fixture_name: str, tmp_path: Path) -> None:
     ) -> list[dict[str, bool]]:
         modules = emit_all(checker)
         has_overflow = checker.template_name in TEMPLATES_WITH_OVERFLOW
+        checker_inputs = extra_inputs_from_checker(checker)
+        clock_signal = checker.params["clock_signal"]
         tb = generate_testbench(
             module_name=checker.module_name,
-            clock_signal=checker.params["clock_signal"],
-            extra_inputs=extra_inputs_from_checker(checker),
+            clock_signal=clock_signal,
+            extra_inputs=checker_inputs,
             stimulus=stimulus,
             has_overflow_flag=has_overflow,
         )
@@ -962,12 +968,15 @@ def test_optimization_parity(fixture_name: str, tmp_path: Path) -> None:
             tb_code=tb,
             work_dir=tmp_path / work_subdir,
             has_overflow_flag=has_overflow,
+            stimulus=stimulus,
+            extra_inputs=checker_inputs,
+            clock_signal=clock_signal,
         )
 
     (tmp_path / "unopt").mkdir()
     (tmp_path / "opt").mkdir()
-    unopt_results = _simulate(unopt, "unopt")
-    opt_results = _simulate(opt, "opt")
+    unopt_results = _simulate(unopt, "unopt", simulator)
+    opt_results = _simulate(opt, "opt", simulator)
 
     # Verify both produce the same number of output cycles
     assert len(unopt_results) == len(opt_results), (

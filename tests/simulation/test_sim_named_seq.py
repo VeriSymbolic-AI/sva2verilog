@@ -84,6 +84,9 @@ def _run_stimulus(
         tb_code=tb,
         work_dir=tmp_path,
         has_overflow_flag=False,
+        stimulus=stimulus,
+        extra_inputs=extra_inputs,
+        clock_signal=clock_signal,
     )
 
 

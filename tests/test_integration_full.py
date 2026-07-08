@@ -161,9 +161,12 @@ def test_out05_verilog_no_sv_keywords(fixture: str) -> None:
 
 
 @pytest.mark.simulation
-def test_out05_verilog_compiles_iverilog(tmp_path: Path) -> None:
+def test_out05_verilog_compiles_iverilog(tmp_path: Path, simulator: str) -> None:
     """Validates OUT-05: Verilog-2001 output compiles clean with iverilog -g2001."""
     import subprocess
+
+    if simulator != "iverilog":
+        pytest.skip("Icarus-specific Verilog-2001 compile check")
 
     ast = _load("bool_simple.json")
     node, clock, text, label = import_assertion(ast)

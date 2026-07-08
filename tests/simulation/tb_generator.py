@@ -39,6 +39,7 @@ Typical flow::
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -263,6 +264,10 @@ def run_simulation(
     ValueError
         When ``simulator`` is unknown or required parameters are missing.
     """
+    env_simulator = os.environ.get("SVA2RTL_SIMULATOR")
+    if simulator == "iverilog" and env_simulator in {"iverilog", "verilator"}:
+        simulator = env_simulator
+
     if simulator == "iverilog":
         return _run_simulation_iverilog(
             module_name, sv_sources, tb_code, work_dir=work_dir,
@@ -410,7 +415,7 @@ def _run_simulation_verilator(
     compile_result = subprocess.run(
         [
             verilator,
-            "--exe", "--build", "--timing",
+            "--cc", "--exe", "--build", "--timing",
             "-Wall",
             "--top-module", module_name,
             "-o", str(sim_path),

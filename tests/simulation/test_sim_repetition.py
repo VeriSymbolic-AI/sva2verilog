@@ -103,6 +103,9 @@ def _run_both(
         tb_code=tb,
         work_dir=tmp_path,
         has_overflow_flag=False,
+        stimulus=stimulus,
+        extra_inputs=extra_inputs,
+        clock_signal=clock_signal,
     )
 
     return oracle_out, rtl_out
@@ -270,13 +273,15 @@ class TestRepFixed:
             has_overflow_flag=False,
         )
         rtl_out = run_simulation(
-        simulator=simulator,
-                
+            simulator=simulator,
             module_name=checker.module_name,
             sv_sources=list(modules.values()),
             tb_code=tb,
             work_dir=tmp_path,
             has_overflow_flag=False,
+            stimulus=stimulus,
+            extra_inputs=extra_inputs,
+            clock_signal=clock_signal,
         )
 
         # t=1: disabled → all 0
@@ -444,6 +449,9 @@ class TestRepRange:
             tb_code=tb,
             work_dir=tmp_path,
             has_overflow_flag=False,
+            stimulus=stimulus,
+            extra_inputs=extra_inputs,
+            clock_signal=clock_signal,
         )
 
         # t=2: disabled → all 0

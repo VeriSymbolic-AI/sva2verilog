@@ -82,6 +82,9 @@ def _run_stimulus(
         tb_code=tb,
         work_dir=tmp_path,
         has_overflow_flag=False,
+        stimulus=stimulus,
+        extra_inputs=extra_inputs,
+        clock_signal=clock_signal,
     )
 
 
@@ -226,18 +229,45 @@ def test_condition_disable_gates_body(tmp_path: Path, simulator: str) -> None:
     checker = _build_checker()
     modules = emit_all(checker)
     sv_sources = list(modules.values())
+    stimulus = [
+        {"start": True, "a": True, "b": False, "rst_n": True},
+        {"start": False, "a": False, "b": False, "rst_n": False},
+        {"start": False, "a": False, "b": False, "rst_n": True},
+    ]
 
-    # Build a custom testbench that drives rst_n from inside the stimulus loop
-    tb = _custom_tb_with_rst_control(checker.module_name)
+    if simulator == "verilator":
+        extra_inputs = extra_inputs_from_checker(checker)
+        clock_signal = checker.params["clock_signal"]
+        tb = generate_testbench(
+            module_name=checker.module_name,
+            clock_signal=clock_signal,
+            extra_inputs=extra_inputs,
+            stimulus=stimulus,
+            has_overflow_flag=False,
+        )
+        rtl_out = run_simulation(
+            simulator=simulator,
+            module_name=checker.module_name,
+            sv_sources=sv_sources,
+            tb_code=tb,
+            work_dir=tmp_path,
+            has_overflow_flag=False,
+            stimulus=stimulus,
+            extra_inputs=extra_inputs,
+            clock_signal=clock_signal,
+        )
+    else:
+        # Build a custom testbench that drives rst_n from inside the stimulus loop
+        tb = _custom_tb_with_rst_control(checker.module_name)
 
-    rtl_out = run_simulation(
-        simulator=simulator,
-        module_name=checker.module_name,
-        sv_sources=sv_sources,
-        tb_code=tb,
-        work_dir=tmp_path,
-        has_overflow_flag=False,
-    )
+        rtl_out = run_simulation(
+            simulator=simulator,
+            module_name=checker.module_name,
+            sv_sources=sv_sources,
+            tb_code=tb,
+            work_dir=tmp_path,
+            has_overflow_flag=False,
+        )
 
     # Expect 3 output rows from the custom TB
     assert len(rtl_out) == 3, f"Expected 3 rows, got {len(rtl_out)}"
@@ -374,6 +404,9 @@ class TestDisableIffOracleCrosscheck:
             tb_code=tb,
             work_dir=tmp_path,
             has_overflow_flag=False,
+            stimulus=stimulus,
+            extra_inputs=extra_inputs,
+            clock_signal=clock_signal,
         )
         oracle_out = simulate_checker_hierarchy(checker, stimulus)
 
@@ -409,6 +442,9 @@ class TestDisableIffOracleCrosscheck:
             tb_code=tb,
             work_dir=tmp_path,
             has_overflow_flag=False,
+            stimulus=stimulus,
+            extra_inputs=extra_inputs,
+            clock_signal=clock_signal,
         )
         oracle_out = simulate_checker_hierarchy(checker, stimulus)
 
