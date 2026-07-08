@@ -47,38 +47,36 @@ disable_iff oracle 泄漏：`simulate_checker_hierarchy` 不传播 disable 信�
 
 ### CI 强化
 
-CI workflow 已重新纳入版本控制，恢复 lint、8 轴仿真矩阵（`{ubuntu,macos} × {3.12,3.13} × {iverilog,verilator}`）和 formal job。formal job 覆盖全部形式化测试 + sby 安装。lint job mypy --strict 通过。
+CI workflow 已重新纳入版本控制，恢复 lint、8 轴仿真矩阵（`{ubuntu,macos} × {3.12,3.13} × {iverilog,verilator}`）和 push/PR `formal smoke` job。完整形式化证明 sweep 已移入 manual/scheduled `Full Formal` workflow，避免 push/PR CI 超时。lint job mypy --strict 通过。
 
 ## Remote CI Baseline Ledger
 
-**Previous target commit:** `d31aa7f7dea9b05a8764ddcb6e575779d22bb802`
+**Target commit:** `674cea1adf15dade7b664b76912b015c8da04614`
 
-**Next target:** the next remote run that includes the simplified CI workflow
+**Run URL:** [GitHub Actions run 28931676000](https://github.com/VeriSymbolic-AI/sva2verilog/actions/runs/28931676000)
 
-**State:** previous full formal CI attempt timed out; simplified CI is pending
-the next remote run
+**Run ID:** `28931676000`
 
-**Run ID:** `28918868412` (latest observed run for the target commit; final
-status was not confirmed before the session hit the Codex usage limit; the web
-UI later showed a timeout)
+**Completed:** `2026-07-08T09:31:34Z`
+
+**State:** confirmed green for the restored push/PR CI baseline workflow
 
 | Axis | Required evidence | Current result |
 |------|-------------------|----------------|
-| lint | GitHub Actions `lint` job with ruff and mypy | last observed success in run `28918868412` |
-| Icarus | GitHub Actions test matrix jobs with `simulator=iverilog` | last observed success across all four `{ubuntu,macos} x {3.12,3.13}` axes in run `28918868412` |
-| Verilator | GitHub Actions test matrix jobs with `simulator=verilator`, not skipped | partial last observation: `ubuntu-latest / 3.13 / verilator` success; remaining Verilator axes were still in progress at the last confirmed query |
-| formal | GitHub Actions `formal` job with Yosys, sby, and slang installed | previous full-suite CI attempt timed out; push/PR CI now uses a representative formal smoke gate, with the complete proof sweep moved to the manual/scheduled `Full Formal` workflow |
+| lint | GitHub Actions `lint` job with ruff and mypy | success in run `28931676000` |
+| Icarus | GitHub Actions test matrix jobs with `simulator=iverilog` | success across all four `{ubuntu,macos} x {3.12,3.13}` axes in run `28931676000` |
+| Verilator | GitHub Actions test matrix jobs with `simulator=verilator`, not skipped | success across all four `{ubuntu,macos} x {3.12,3.13}` axes in run `28931676000` |
+| formal | GitHub Actions `formal smoke` job with Yosys, sby, and slang installed | success in run `28931676000`; representative smoke only |
 
-The last remote status query did not reach a final run conclusion. The next
-baseline run should use the simplified push/PR `formal smoke` job. Record the
-new run ID after that workflow reaches a final conclusion. Do not mark the
-complete formal proof sweep as remotely published until the manual or scheduled
-`Full Formal` workflow records green shards.
+This closes the Phase 8 remote reproducibility gate for the restored push/PR CI
+workflow. The complete SymbiYosys proof sweep is still intentionally outside the
+push/PR baseline and belongs to the manual/scheduled `Full Formal` workflow; do
+not describe run `28931676000` as a full formal proof publication.
 
 Local skips for Verilator, Yosys, or `sby` are developer-environment skips; a
-local skip is not evidence pass. BASE-02/BASE-03 remain blocked until the target
-commit has a remote CI run, or an equivalent full-toolchain machine result, with
-lint, Icarus, Verilator, and formal axes recorded above.
+local skip is not evidence pass. BASE-02/BASE-03 are satisfied by the remote run
+above for the push/PR baseline, while broader full-formal and synthesis evidence
+remain tracked in `SUPPORT_MATRIX.md` and later v1.6 phases.
 
 ### k-induction 完备证明
 
@@ -93,7 +91,7 @@ lint, Icarus, Verilator, and formal axes recorded above.
 1. first_match posedge bug：存在多版本未发现，因为该算子缺仿真和形式化测试。教训：每个算子必须有 RTL 编译验证 + 形式化等价。
 2. mypy 49 errors：CI lint job 一直失败但未处理。教训：CI 红就必须立即修。
 3. 形式化参考时序对齐：写 BMC miter 参考监控器时，寄存延迟必须与 RTL 模板精确对齐。5/6 新参考需要时序迭代。教训：时序对齐是形式化等价验证中最耗时的部分。
-4. GitHub workflow scope：此前 OAuth token 缺 workflow scope，CI 文件无法推送。本轮 workflow 已进入本地提交，远端推送后需确认 Actions 的 Verilator 轴和 formal 轴实际绿灯。
+4. GitHub workflow scope 与 CI 时长：此前 OAuth token 缺 workflow scope，CI 文件无法推送；后续全量 formal 放在 push/PR CI 中又导致超时。本轮已切分为快速 push/PR baseline 与 manual/scheduled `Full Formal`，并确认 run `28931676000` 绿灯。
 
 ## 验证体系
 
@@ -118,7 +116,7 @@ RISK-01 纪律：预言机和参考监控器必须与 RTL 实现结构独立。�
 
 ### 短期（1-2 周）
 
-1. 推送并确认远端 CI workflow，重点检查 Verilator 轴和 formal 轴
+1. 继续维护远端 CI baseline ledger，必要时单独运行 manual/scheduled `Full Formal`
 2. 代码覆盖率提升到 95%+（ast_importer 81.4%、composer 87.7%、behavioral_oracle 86.6%）
 3. 嵌套 NFA BMC 深度从 15 增加到 25-30
 
