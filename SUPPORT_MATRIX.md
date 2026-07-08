@@ -9,7 +9,11 @@ governs exact support status, subset boundaries, and verification evidence.
 Detailed remote CI evidence is recorded in `PROJECT_STATUS.md` under
 `Remote CI Baseline Ledger`.
 
-Current baseline state: pending remote CI confirmation. Local skips for
+Current baseline state: run `28918868412` for commit
+`d31aa7f7dea9b05a8764ddcb6e575779d22bb802` did not produce a final published
+baseline because the remote full formal attempt timed out. The next baseline run
+should use the simplified push/PR formal smoke gate, while the complete proof
+sweep lives in the manual and scheduled `Full Formal` workflow. Local skips for
 Verilator, Yosys, or `sby` are not evidence pass.
 
 ## Support Status Legend

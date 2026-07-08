@@ -82,8 +82,9 @@ jobs:
           SLANG_PATH: /usr/local/bin/slang
 
   formal:
+    name: formal smoke
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v4
@@ -112,8 +113,17 @@ jobs:
           sudo mv slang /usr/local/bin/slang
           slang --version
 
-      - name: Run formal equivalence tests
-        run: uv run pytest tests/test_formal_passes.py tests/test_formal_templates.py tests/test_formal_sva_equiv.py tests/test_v151_nfa_bmc.py tests/test_v151_p2_bmc.py tests/test_formal_kinduction.py -v --timeout=600
+      - name: Run formal smoke tests
+        run: >
+          uv run pytest
+          tests/test_formal_passes.py::TestConstantFoldEquiv::test_constant_true_is_equivalent
+          tests/test_formal_templates.py::TestBoolExprTemplate::test_simple_boolean
+          tests/test_formal_sva_equiv.py::TestBoolExprSvaEquiv::test_bool_simple_equiv
+          tests/test_formal_sva_equiv.py::TestDelaySvaEquiv::test_delay_gap_equiv
+          tests/test_v151_nfa_bmc.py::TestNfaIntersectMiter::test_bool_rep1_miter
+          tests/test_v151_p2_bmc.py::TestOverlapImplNfaMiter::test_b2c_miter
+          tests/test_formal_kinduction.py::TestKinductionBoolExpr::test_bool_kinduction_prove
+          -v --timeout=240
         env:
           SLANG_PATH: /usr/local/bin/slang
-          SVA2RTL_FORMAL_PROVE_TIMEOUT: "90"
+          SVA2RTL_FORMAL_PROVE_TIMEOUT: "45"

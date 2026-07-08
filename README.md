@@ -57,6 +57,10 @@ sva2rtl input.sv --property req_ack_prop -o monitor.sv
 
 ## Supported SVA Constructs
 
+This section is a quick overview. For authoritative support status, subset
+boundaries, and verification evidence, see
+[SUPPORT_MATRIX.md](SUPPORT_MATRIX.md).
+
 ### Tier 1 — Core Sequential Operators
 
 | Operator | Description | Example |
@@ -115,7 +119,9 @@ synthesizable on finite state. Nested multi-path composition (intersect /
 within / throughout) is supported up to a total of K ≤ 32 NFA states
 (compile-time enforced). See [SUPPORTED_CONSTRUCTS.md](SUPPORTED_CONSTRUCTS.md).
 
-For the full construct reference with generated templates, see [SUPPORTED_CONSTRUCTS.md](SUPPORTED_CONSTRUCTS.md).
+For construct explanations and generated templates, see
+[SUPPORTED_CONSTRUCTS.md](SUPPORTED_CONSTRUCTS.md). For exact evidence status,
+use [SUPPORT_MATRIX.md](SUPPORT_MATRIX.md).
 
 ## CLI Reference
 

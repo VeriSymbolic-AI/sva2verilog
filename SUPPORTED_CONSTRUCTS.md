@@ -1,6 +1,11 @@
 # Supported SVA Constructs — sva2rtl v1.5.2 current main
 
-## Tier 1 Operators (Fully Supported)
+This file explains supported syntax, semantics, and generated template shapes.
+Exact support status, subset boundaries, and verification evidence are governed
+by [SUPPORT_MATRIX.md](SUPPORT_MATRIX.md). Treat the tiers below as implemented
+syntax groups, not as full-evidence claims.
+
+## Tier 1 Operators (Implemented Core Subset)
 
 | Operator | Category | Description | Example SVA | Generated Template |
 |----------|----------|-------------|-------------|-------------------|
@@ -27,7 +32,7 @@
 | `disable iff` | Control | Asynchronous disable condition | `disable iff (rst) prop` | Gating logic on monitor enable |
 | Named sequences | Structure | Reusable sequence definitions | `sequence s; a ##1 b; endsequence` | Submodule instantiation |
 
-## Tier 2 Operators (v1.3 — Fully Supported)
+## Tier 2 Operators (v1.3 + v1.5.1 — Implemented Complex Subset)
 
 | Operator | Category | Description | Example SVA | Generated Template |
 |----------|----------|-------------|-------------|-------------------|
@@ -69,7 +74,8 @@ Notes for v1.4 Part A:
   require an eventual or unbounded obligation) raise `UnsupportedConstruct` with a
   source location and a remediation hint.
 - Weak `until` / `until_with` are safety properties (no liveness obligation) and
-  are fully supported; the strong `s_until` / `s_until_with` forms are rejected.
+  are implemented in the current finite-state subset; the strong `s_until` /
+  `s_until_with` forms are rejected.
 
 ## Composition Model
 
@@ -266,7 +272,7 @@ The following operators remain unsupported or deliberately rejected:
 
 | Limitation | Description |
 |------------|-------------|
-| Multi-clock properties | Only single-clock-domain properties are supported |
+| Multi-clock path-one only | `##1` clock-change sequences and non-overlap cross-clock implication are supported through trusted 2-DFF synchronization; full CDC/metastability proof and multi-path cross-clock composition are excluded |
 | Unbounded repetition `[*]` | Requires infinite state; not synthesizable |
 | Unbounded delay `##[0:$]` | Requires infinite state; not synthesizable |
 | Local variables | SVA local variables in sequences are not supported |

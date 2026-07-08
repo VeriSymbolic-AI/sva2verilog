@@ -1,6 +1,6 @@
 # sva2verilog 项目进展报告
 
-> 更新日期：2026-07-07
+> 更新日期：2026-07-08
 > 仓库：public GitHub repository
 > 当前版本：v1.5.2 + current main hardening
 
@@ -12,6 +12,7 @@ sva2verilog 是一个开源的 SystemVerilog Assertion (SVA) 到可综合 RTL �
 - 代码质量：mypy --strict 0 errors, ruff 0 errors
 - 形式化验证：62 个非循环 BMC 等价证明（覆盖所有已支持算子）+ 5 个 Tier-A k-induction 完备证明
 - 覆盖度：约 95%+ 的实际断言场景
+- 支持状态权威：`SUPPORT_MATRIX.md` 记录逐构造支持边界、证据完整度和降级原因；README / SUPPORTED_CONSTRUCTS 只作概览和解释
 - 工业级验证缺口：已记录在 `INDUSTRIAL_VALIDATION_GAPS.md`，包含当前进展、P0/P1/P2 严重度、修复计划和 fully-supported 定义标准
 
 ## 当前 main 新增修复（2026-07-07）
@@ -50,18 +51,29 @@ CI workflow 已重新纳入版本控制，恢复 lint、8 轴仿真矩阵（`{ub
 
 ## Remote CI Baseline Ledger
 
-**Target commit:** `21a13ebc9c1b1a5bccbb57699f79392f3b807c7f`
+**Previous target commit:** `d31aa7f7dea9b05a8764ddcb6e575779d22bb802`
 
-**State:** pending remote CI confirmation
+**Next target:** the next remote run that includes the simplified CI workflow
+
+**State:** previous full formal CI attempt timed out; simplified CI is pending
+the next remote run
+
+**Run ID:** `28918868412` (latest observed run for the target commit; final
+status was not confirmed before the session hit the Codex usage limit; the web
+UI later showed a timeout)
 
 | Axis | Required evidence | Current result |
 |------|-------------------|----------------|
-| lint | GitHub Actions `lint` job with ruff and mypy | pending remote CI confirmation |
-| Icarus | GitHub Actions test matrix jobs with `simulator=iverilog` | pending remote CI confirmation |
-| Verilator | GitHub Actions test matrix jobs with `simulator=verilator`, not skipped | pending remote CI confirmation |
-| formal | GitHub Actions `formal` job with Yosys, sby, and slang installed | pending remote CI confirmation |
+| lint | GitHub Actions `lint` job with ruff and mypy | last observed success in run `28918868412` |
+| Icarus | GitHub Actions test matrix jobs with `simulator=iverilog` | last observed success across all four `{ubuntu,macos} x {3.12,3.13}` axes in run `28918868412` |
+| Verilator | GitHub Actions test matrix jobs with `simulator=verilator`, not skipped | partial last observation: `ubuntu-latest / 3.13 / verilator` success; remaining Verilator axes were still in progress at the last confirmed query |
+| formal | GitHub Actions `formal` job with Yosys, sby, and slang installed | previous full-suite CI attempt timed out; push/PR CI now uses a representative formal smoke gate, with the complete proof sweep moved to the manual/scheduled `Full Formal` workflow |
 
-**Run URL / ID:** pending remote CI confirmation
+The last remote status query did not reach a final run conclusion. The next
+baseline run should use the simplified push/PR `formal smoke` job. Record the
+new run ID after that workflow reaches a final conclusion. Do not mark the
+complete formal proof sweep as remotely published until the manual or scheduled
+`Full Formal` workflow records green shards.
 
 Local skips for Verilator, Yosys, or `sby` are developer-environment skips; a
 local skip is not evidence pass. BASE-02/BASE-03 remain blocked until the target

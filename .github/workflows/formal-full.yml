@@ -1,0 +1,59 @@
+name: Full Formal
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Weekly full proof sweep. Push/PR CI keeps a shorter formal smoke gate.
+    - cron: "17 8 * * 1"
+
+jobs:
+  formal:
+    name: formal full (${{ matrix.suite }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - suite: optimizer-and-templates
+            files: tests/test_formal_passes.py tests/test_formal_templates.py
+          - suite: sva-core
+            files: tests/test_formal_sva_equiv.py
+          - suite: nfa
+            files: tests/test_v151_nfa_bmc.py tests/test_v151_p2_bmc.py
+          - suite: kinduction
+            files: tests/test_formal_kinduction.py
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+
+      - name: Install Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --dev
+
+      - name: Install yosys
+        run: sudo apt-get update && sudo apt-get install -y yosys z3
+
+      - name: Install SymbiYosys (sby)
+        run: |
+          git clone --depth 1 https://github.com/YosysHQ/sby.git /tmp/sby
+          sudo make -C /tmp/sby install PREFIX=/usr/local
+          sby --version
+          z3 --version
+
+      - name: Install slang
+        run: |
+          SLANG_VERSION="v11.0"
+          wget -q "https://github.com/MikePopoloski/slang/releases/download/${SLANG_VERSION}/slang-linux-x86_64.tar.gz"
+          tar xzf slang-linux-x86_64.tar.gz
+          sudo mv slang /usr/local/bin/slang
+          slang --version
+
+      - name: Run full formal suite shard
+        run: uv run pytest ${{ matrix.files }} -v --timeout=600
+        env:
+          SLANG_PATH: /usr/local/bin/slang
+          SVA2RTL_FORMAL_PROVE_TIMEOUT: "90"
