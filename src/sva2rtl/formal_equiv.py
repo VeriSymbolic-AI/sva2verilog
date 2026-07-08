@@ -310,7 +310,7 @@ mode {mode}
 depth {depth}
 
 [engines]
-smtbmc
+smtbmc z3
 
 [script]
 {script_reads}
@@ -423,7 +423,7 @@ def run_sva_equiv_check(
 
         # k-induction: SymbiYosys "prove" mode runs BMC (base case) + k-induction
         # (inductive step). A PASS here is a COMPLETE proof (all reachable states).
-        # The engine is always "smtbmc" — sby internally handles prove mode by
+        # The engine is always smtbmc with z3 — sby internally handles prove mode by
         # splitting into basecase and induction tasks.
         sby_text = f"""\
 [options]
@@ -431,7 +431,7 @@ mode {mode}
 depth {depth}
 
 [engines]
-smtbmc
+smtbmc z3
 
 [script]
 {script_reads}

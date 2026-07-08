@@ -55,8 +55,8 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           SLANG_VERSION="v11.0"
-          wget -q "https://github.com/MikePopoloski/slang/releases/download/${SLANG_VERSION}/slang-linux.tar.gz"
-          tar xzf slang-linux.tar.gz
+          wget -q "https://github.com/MikePopoloski/slang/releases/download/${SLANG_VERSION}/slang-linux-x86_64.tar.gz"
+          tar xzf slang-linux-x86_64.tar.gz
           sudo mv slang /usr/local/bin/slang
           slang --version
 
@@ -64,8 +64,8 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           SLANG_VERSION="v11.0"
-          wget -q "https://github.com/MikePopoloski/slang/releases/download/${SLANG_VERSION}/slang-macos.tar.gz"
-          tar xzf slang-macos.tar.gz
+          wget -q "https://github.com/MikePopoloski/slang/releases/download/${SLANG_VERSION}/slang-macos-arm64.tar.gz"
+          tar xzf slang-macos-arm64.tar.gz
           sudo mv slang /usr/local/bin/slang
           slang --version
 
@@ -94,19 +94,20 @@ jobs:
         run: uv sync --dev
 
       - name: Install yosys
-        run: sudo apt-get update && sudo apt-get install -y yosys
+        run: sudo apt-get update && sudo apt-get install -y yosys z3
 
       - name: Install SymbiYosys (sby)
         run: |
-          sudo apt-get update && sudo apt-get install -y python3-pip libffi-dev
-          pip3 install --user --break-system-packages sby
-          echo "$HOME/.local/bin" >> $GITHUB_PATH
+          git clone --depth 1 https://github.com/YosysHQ/sby.git /tmp/sby
+          sudo make -C /tmp/sby install PREFIX=/usr/local
+          sby --version
+          z3 --version
 
       - name: Install slang
         run: |
           SLANG_VERSION="v11.0"
-          wget -q "https://github.com/MikePopoloski/slang/releases/download/${SLANG_VERSION}/slang-linux.tar.gz"
-          tar xzf slang-linux.tar.gz
+          wget -q "https://github.com/MikePopoloski/slang/releases/download/${SLANG_VERSION}/slang-linux-x86_64.tar.gz"
+          tar xzf slang-linux-x86_64.tar.gz
           sudo mv slang /usr/local/bin/slang
           slang --version
 
