@@ -44,6 +44,8 @@ subprocess-boundary design. When ``sby`` is unavailable, callers should skip.
 from __future__ import annotations
 
 import logging
+import os
+import signal
 import subprocess
 import tempfile
 from pathlib import Path
@@ -66,6 +68,34 @@ def sby_is_available() -> bool:
         return True
     except (FileNotFoundError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
         return False
+
+
+def _run_sby_with_timeout(
+    cmd: list[str],
+    *,
+    cwd: str,
+    timeout: int,
+) -> tuple[int, str, bool]:
+    """Run SymbiYosys and kill its whole process group on timeout."""
+    proc: subprocess.Popen[str] = subprocess.Popen(
+        cmd,
+        cwd=cwd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        start_new_session=True,
+    )
+    try:
+        stdout, stderr = proc.communicate(timeout=timeout)
+        returncode = proc.returncode if proc.returncode is not None else -1
+        return returncode, (stdout or "") + "\n" + (stderr or ""), False
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            proc.kill()
+        stdout, stderr = proc.communicate()
+        return -1, (stdout or "") + "\n" + (stderr or ""), True
 
 
 def build_harness(
@@ -321,19 +351,15 @@ prep -top harness
 """
         (work / "miter.sby").write_text(sby_text)
 
-        try:
-            result = subprocess.run(
-                ["sby", "-f", "miter.sby"],
-                cwd=str(work),
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-            )
-            output = result.stdout + "\n" + result.stderr
-            passed = result.returncode == 0 and "PASS" in output
-            return passed, output
-        except subprocess.TimeoutExpired:
-            return False, f"ERROR: sby miter check timed out after {timeout}s"
+        returncode, output, timed_out = _run_sby_with_timeout(
+            ["sby", "-f", "miter.sby"],
+            cwd=str(work),
+            timeout=timeout,
+        )
+        if timed_out:
+            return False, f"ERROR: sby miter check timed out after {timeout}s\n{output}"
+        passed = returncode == 0 and "PASS" in output
+        return passed, output
 
 
 def run_sva_equiv_check(
@@ -441,20 +467,16 @@ prep -top harness
 """
         (work / "equiv.sby").write_text(sby_text)
 
-        try:
-            result = subprocess.run(
-                ["sby", "-f", "equiv.sby"],
-                cwd=str(work),
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-            )
-            output = result.stdout + "\n" + result.stderr
-            # sby returns 0 on PASS, non-zero on FAIL/ERROR.
-            passed = result.returncode == 0 and "PASS" in output
-            return passed, output
-        except subprocess.TimeoutExpired:
-            return False, f"ERROR: sby equivalence check timed out after {timeout}s"
+        returncode, output, timed_out = _run_sby_with_timeout(
+            ["sby", "-f", "equiv.sby"],
+            cwd=str(work),
+            timeout=timeout,
+        )
+        if timed_out:
+            return False, f"ERROR: sby equivalence check timed out after {timeout}s\n{output}"
+        # sby returns 0 on PASS, non-zero on FAIL/ERROR.
+        passed = returncode == 0 and "PASS" in output
+        return passed, output
 
 
 def run_sva_equiv_prove(
