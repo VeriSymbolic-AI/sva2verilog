@@ -169,7 +169,7 @@ read_verilog -sv {gate_path}
 proc
 flatten
 equiv_make {gold_top} {gate_top} equiv
-equiv_induct -ignore-unknown-cells equiv
+equiv_induct equiv
 equiv_simple -seq 10 equiv
 equiv_status -assert equiv
 """
@@ -274,7 +274,7 @@ read_verilog -sv {gate_files}
 proc
 flatten
 equiv_make {top_gold} {top_gate} equiv
-equiv_induct -ignore-unknown-cells equiv
+equiv_induct equiv
 equiv_simple -seq 10 equiv
 equiv_status -assert equiv
 """
