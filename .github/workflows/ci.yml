@@ -83,6 +83,7 @@ jobs:
 
   formal:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v4
@@ -115,3 +116,4 @@ jobs:
         run: uv run pytest tests/test_formal_passes.py tests/test_formal_templates.py tests/test_formal_sva_equiv.py tests/test_v151_nfa_bmc.py tests/test_v151_p2_bmc.py tests/test_formal_kinduction.py -v --timeout=600
         env:
           SLANG_PATH: /usr/local/bin/slang
+          SVA2RTL_FORMAL_PROVE_TIMEOUT: "90"

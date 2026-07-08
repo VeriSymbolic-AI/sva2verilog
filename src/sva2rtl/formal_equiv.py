@@ -321,20 +321,19 @@ prep -top harness
 """
         (work / "miter.sby").write_text(sby_text)
 
-        effective_timeout = timeout if mode == "bmc" else max(timeout, 600)
         try:
             result = subprocess.run(
                 ["sby", "-f", "miter.sby"],
                 cwd=str(work),
                 capture_output=True,
                 text=True,
-                timeout=effective_timeout,
+                timeout=timeout,
             )
             output = result.stdout + "\n" + result.stderr
             passed = result.returncode == 0 and "PASS" in output
             return passed, output
         except subprocess.TimeoutExpired:
-            return False, f"ERROR: sby miter check timed out after {effective_timeout}s"
+            return False, f"ERROR: sby miter check timed out after {timeout}s"
 
 
 def run_sva_equiv_check(
@@ -442,21 +441,20 @@ prep -top harness
 """
         (work / "equiv.sby").write_text(sby_text)
 
-        effective_timeout = timeout if mode == "bmc" else max(timeout, 600)
         try:
             result = subprocess.run(
                 ["sby", "-f", "equiv.sby"],
                 cwd=str(work),
                 capture_output=True,
                 text=True,
-                timeout=effective_timeout,
+                timeout=timeout,
             )
             output = result.stdout + "\n" + result.stderr
             # sby returns 0 on PASS, non-zero on FAIL/ERROR.
             passed = result.returncode == 0 and "PASS" in output
             return passed, output
         except subprocess.TimeoutExpired:
-            return False, f"ERROR: sby equivalence check timed out after {effective_timeout}s"
+            return False, f"ERROR: sby equivalence check timed out after {timeout}s"
 
 
 def run_sva_equiv_prove(

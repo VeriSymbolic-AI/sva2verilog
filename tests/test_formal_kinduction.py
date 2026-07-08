@@ -26,6 +26,7 @@ xfail (honest boundary recording, per project's honesty-first discipline).
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -46,6 +47,18 @@ pytestmark = pytest.mark.skipif(
 )
 
 _FIXTURES = Path(__file__).parent / "fixtures"
+_DEFAULT_PROVE_TIMEOUT_SECONDS = 600
+
+
+def _prove_timeout() -> int:
+    """Return k-induction subprocess timeout for this environment."""
+    raw = os.environ.get("SVA2RTL_FORMAL_PROVE_TIMEOUT")
+    if raw is None:
+        return _DEFAULT_PROVE_TIMEOUT_SECONDS
+    try:
+        return max(1, int(raw))
+    except ValueError:
+        return _DEFAULT_PROVE_TIMEOUT_SECONDS
 
 
 def _build(name: str) -> CheckerNode:
@@ -126,7 +139,7 @@ class TestKinductionBoolExpr:
             helper_regs=helper,
             depth=15,
             mode="prove",
-            timeout=600,
+            timeout=_prove_timeout(),
         )
         _assert_kinduction_passed(passed, output, "bool_expr")
 
@@ -155,7 +168,7 @@ class TestKinductionRose:
             helper_regs=helper,
             depth=15,
             mode="prove",
-            timeout=600,
+            timeout=_prove_timeout(),
         )
         _assert_kinduction_passed(passed, output, "$rose")
 
@@ -184,7 +197,7 @@ class TestKinductionFell:
             helper_regs=helper,
             depth=15,
             mode="prove",
-            timeout=600,
+            timeout=_prove_timeout(),
         )
         _assert_kinduction_passed(passed, output, "$fell")
 
@@ -213,7 +226,7 @@ class TestKinductionStable:
             helper_regs=helper,
             depth=15,
             mode="prove",
-            timeout=600,
+            timeout=_prove_timeout(),
         )
         _assert_kinduction_passed(passed, output, "$stable")
 
@@ -242,6 +255,6 @@ class TestKinductionChanged:
             helper_regs=helper,
             depth=15,
             mode="prove",
-            timeout=600,
+            timeout=_prove_timeout(),
         )
         _assert_kinduction_passed(passed, output, "$changed")
