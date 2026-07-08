@@ -416,6 +416,7 @@ def _run_simulation_verilator(
         [
             verilator,
             "--cc", "--exe", "--build", "--timing",
+            "-Wno-fatal",
             "-Wall",
             "--top-module", module_name,
             "-o", str(sim_path),

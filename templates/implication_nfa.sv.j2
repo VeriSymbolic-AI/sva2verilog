@@ -43,7 +43,7 @@ module {{ module_name }} (
 {% endif %}
 
     // ── Consequent NFA (property-kind, multi-thread) ──────────────────
-    {{ wire_type(verilog_mode) }} con_pass_w, con_fail_w, con_afired_w, con_disabled_w;
+    {{ wire_type(verilog_mode) }} con_active, con_pass_w, con_fail_w, con_afired_w, con_disabled_w;
     {{ children[0].module_name }} u_con (
         .{{ clock_signal }}({{ clock_signal }}),
         .rst_n    (rst_n),
@@ -64,7 +64,6 @@ module {{ module_name }} (
     // (state_q = 0) and pass/fail are 0. The NFA itself already registers
     // its outputs (pass_q, fail_q inside nfa_generic), so we wire them
     // directly without adding a second register.
-    {{ wire_type(verilog_mode) }} con_active;
     assign active        = disable_i ? 1'b0 : con_active;
     assign pass          = disable_i ? 1'b0 : con_pass_w;
     assign fail          = disable_i ? 1'b0 : con_fail_w;
