@@ -11,9 +11,10 @@ sva2rtl has a strong validation base, but it should not yet be described as full
 industrial-grade. The project has 1099 collected tests, a recent full-suite result
 of 1094 passed, 4 skipped, 1 xfailed, 0 failed, a historical 62 non-circular BMC
 equivalence baseline, and Phase 10 local formal-depth targets with 56 BMC or
-contract tests plus 8 k-induction proof targets. The compiler also fixed several
-real semantic defects that were found only after non-circular formal references
-were introduced.
+contract tests plus 8 k-induction proof targets. Phase 11 now adds local Yosys
+generated-RTL smoke evidence and CI wiring for generated-module Verilator lint.
+The compiler also fixed several real semantic defects that were found only after
+non-circular formal references were introduced.
 
 The remaining risk is not raw test count. The remaining risk is evidence-chain
 closure. For each supported construct, an external reviewer should be able to see
@@ -38,6 +39,9 @@ Current project state:
 - Test collection: 1099 pytest tests collected.
 - Recent full local result: 1094 passed, 4 skipped, 1 xfailed, 0 failed.
 - Local Verilator result: Verilator tests skip locally when Verilator is not installed.
+- Generated RTL gates: local Yosys smoke tests pass for representative emitted
+  monitor families; Verilator lint-only tests are implemented and routed in CI,
+  but skip locally because Verilator is absent.
 - Simulation coverage: Icarus simulation is green locally; Verilator is configured
   in CI but still needs remote confirmation.
 - Formal coverage: historical 62 non-circular BMC equivalence checks; Phase 10
@@ -66,6 +70,9 @@ Recent hardening already completed:
 - Added Phase 10 formal harness modes and evidence classification for
   representative arbitrary-start, arbitrary-disable, reset-recovery,
   full-contract, cover-probe, and k-induction slices.
+- Added Phase 11 generated RTL gates: a representative case catalog,
+  synthesis-oriented Yosys smoke tests, Verilator lint-only tests, and a focused
+  generated-RTL CI job.
 
 ## Trust Model
 
@@ -215,11 +222,12 @@ Done when:
 - The support matrix has one real source E2E test per supported construct.
 - Any construct without real source E2E is downgraded from fully supported.
 
-#### Synthesis-oriented gate is missing
+#### Synthesis-oriented gate is partially closed
 
-The project generates synthesizable RTL, but the current gate does not
-systematically run generated modules through Yosys synthesis-oriented commands.
-Simulation acceptance is not the same thing as synthesis acceptance.
+Status: partially closed by Phase 11. The project now has a representative
+generated-RTL case catalog and a Yosys smoke gate that runs generated modules
+through synthesis-oriented commands. Simulation acceptance is still not the same
+thing as synthesis acceptance, and local Verilator absence remains non-evidence.
 
 Fix:
 
@@ -232,6 +240,20 @@ Done when:
 
 - Every supported template has at least one generated monitor accepted by Yosys.
 - CI fails on Yosys syntax, process, hierarchy, or check errors.
+
+Phase 11 closure evidence:
+
+- `tests/generated_rtl_cases.py` maps representative generated monitor cases to
+  template families and support-matrix rows.
+- `tests/test_synthesis_gates.py` writes `emit_all()` output to temporary `.sv`
+  files and runs Yosys with `read_verilog -sv`, `hierarchy -check -top`, `proc`,
+  `opt`, `check`, `synth -run coarse`, and final `check`.
+- Local generated gate command recorded `81 passed, 26 skipped`; Yosys cases
+  passed, and skips were Verilator lint cases on a host without Verilator.
+- `.github/workflows/ci.yml` now has a focused `generated-rtl` job that installs
+  Yosys and Verilator and runs the generated synthesis/lint gates.
+- Remaining boundary: local Verilator lint skips are not pass evidence; remote
+  CI or another Verilator-equipped host must provide lint pass evidence.
 
 #### k-induction coverage is still narrow
 
@@ -413,6 +435,10 @@ Exit criteria:
 
 ### Phase 4: Add synthesis and lint gates
 
+Status: partially closed by Phase 11; local Yosys generated-RTL smoke evidence
+exists and Verilator lint-only gates are implemented and routed in CI. Remote
+generated-RTL CI pass evidence remains to be recorded.
+
 Goal: prove generated RTL is accepted by synthesis-oriented tooling.
 
 Actions:
@@ -478,7 +504,8 @@ The immediate next work should be:
 2. Add missing real source E2E fixtures called out by `SUPPORT_MATRIX.md`.
 3. Fix boolean expression semantic modelling.
 4. Add arbitrary-start and arbitrary-disable formal harnesses.
-5. Add Yosys synthesis gates.
+5. Record a remote generated-RTL CI run with Verilator lint executing rather
+   than locally skipping.
 
 Do not expand the supported SVA surface before these items are complete. The
 project's credibility depends more on proof quality for the claimed subset than

@@ -59,4 +59,6 @@ testpaths = ["tests"]
 markers = [
     "simulation: marks tests requiring iverilog (deselect with '-m not simulation')",
     "integration: marks end-to-end integration tests",
+    "synthesis: marks generated RTL synthesis smoke tests",
+    "generated_lint: marks generated RTL lint-only tests",
 ]

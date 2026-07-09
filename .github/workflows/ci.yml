@@ -81,6 +81,26 @@ jobs:
         env:
           SLANG_PATH: /usr/local/bin/slang
 
+  generated-rtl:
+    name: generated RTL gates
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+
+      - name: Install Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --dev
+
+      - name: Install generated RTL tools
+        run: sudo apt-get update && sudo apt-get install -y yosys verilator
+
+      - name: Run generated RTL synthesis and lint gates
+        run: uv run pytest tests/test_synthesis_gates.py tests/test_generated_lint.py -v --timeout=180
+
   formal:
     name: formal smoke
     runs-on: ubuntu-latest

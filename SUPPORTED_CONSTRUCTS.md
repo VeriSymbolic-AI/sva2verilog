@@ -12,8 +12,11 @@ representative `arbitrary_start`, `arbitrary_disable`, `reset_recovery`,
 full-contract, cover-probe, and k-induction slices are recorded in
 `SUPPORT_MATRIX.md`. These are evidence-strength upgrades for named constructs
 and modes, not a blanket claim that every supported operator has full-contract
-or arbitrary-start proof coverage. Synthesis gates, random differential testing,
-and complex NFA/liveness proof expansion remain separate validation work.
+or arbitrary-start proof coverage. Phase 11 adds local Yosys generated-RTL smoke
+coverage and CI routing for generated-module Verilator lint; local Verilator
+lint skipped because Verilator was not installed, so remote lint evidence remains
+pending. Random differential testing and complex NFA/liveness proof expansion
+remain separate validation work.
 
 ## Tier 1 Operators (Implemented Core Subset)
 
@@ -364,3 +367,8 @@ All generated monitors are validated against behavioral simulation:
 4. **Boundary conditions**: Edge cases (zero-delay, max-range, immediate match/fail)
 
 Test suite uses Icarus Verilog and Verilator for simulation-based validation.
+Phase 11 also adds generated-RTL tool gates: representative emitted monitors run
+through a Yosys synthesis-oriented smoke flow, and a separate Verilator
+`--lint-only -Wall` gate is configured for CI. These gates prove tool
+acceptance of generated RTL; they do not replace simulation, formal, or CDC
+evidence.

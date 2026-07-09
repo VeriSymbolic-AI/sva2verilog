@@ -11,6 +11,7 @@ sva2verilog 是一个开源的 SystemVerilog Assertion (SVA) 到可综合 RTL �
 - 测试套件：1094 passed, 4 skipped, 1 xfailed, 0 failed
 - 代码质量：mypy --strict 0 errors, ruff 0 errors
 - 形式化验证：历史基线为 62 个非循环 BMC 等价证明（覆盖所有已支持算子）+ 5 个 Tier-A k-induction 完备证明；Phase 10 本地目标文件当前为 56 个 BMC/契约测试 + 8 个 k-induction 证明目标
+- 生成 RTL 综合/静态检查：Phase 11 本地 Yosys generated-RTL smoke gate 通过；Verilator lint-only gate 已实现并加入 CI，但本机因未安装 Verilator 跳过，不能算作通过证据
 - 覆盖度：约 95%+ 的实际断言场景
 - 支持状态权威：`SUPPORT_MATRIX.md` 记录逐构造支持边界、证据完整度和降级原因；README / SUPPORTED_CONSTRUCTS 只作概览和解释
 - 工业级验证缺口：已记录在 `INDUSTRIAL_VALIDATION_GAPS.md`，包含当前进展、P0/P1/P2 严重度、修复计划和 fully-supported 定义标准
@@ -76,7 +77,7 @@ not describe run `28931676000` as a full formal proof publication.
 Local skips for Verilator, Yosys, or `sby` are developer-environment skips; a
 local skip is not evidence pass. BASE-02/BASE-03 are satisfied by the remote run
 above for the push/PR baseline, while broader full-formal and synthesis evidence
-remain tracked in `SUPPORT_MATRIX.md` and later v1.6 phases.
+remain tracked in `SUPPORT_MATRIX.md`.
 
 ### k-induction 完备证明
 
@@ -91,6 +92,17 @@ Phase 10 扩展的是形式化 harness 深度，而不是新增 SVA 语言范围
 - `tests/test_formal_kinduction.py`：8 个 k-induction proof 目标，除了原 5 个 Tier-A leaf/sampled-value 目标，新增 `##1` fixed delay、simple `|->` overlap implication、`[*3]` fixed consecutive repetition。
 - full-contract 证据是代表性子集：bool、`$rose`、simple overlap implication、fixed consecutive repetition；`disable iff` 当前提升为 variable-disable pass/fail BMC，不单独宣称 full-contract bundle 已闭环。
 - 仍不把 Phase 10 本地目标验证等同于 remote full formal sweep、Yosys synthesis gate 或随机差分测试。
+
+### Phase 11 生成 RTL 综合/ lint 更新
+
+Phase 11 增加的是生成 RTL 工具接受度证据，而不是新增 SVA 语言范围或语义证明。本地目标验证记录：
+
+- `tests/generated_rtl_cases.py`：集中维护代表性 generated monitor catalog，覆盖 boolean、sampled value、fixed/ranged/zero delay、overlap/non-overlap implication、consecutive/goto/nonconsecutive repetition、first_match、disable iff、named sequence、property composition、bounded liveness、NFA generic composition 和 multi-clock trusted-boundary。
+- `tests/test_synthesis_gates.py`：写出 `emit_all()` 生成的 `.sv` 模块并通过 Yosys 执行 `read_verilog -sv`、`hierarchy -check -top`、`proc`、`opt`、`check`、`synth -run coarse`、`check`。
+- `tests/test_generated_lint.py`：实现 `verilator --lint-only -Wall --top-module <top>` generated-module gate；本机未安装 Verilator，因此 lint cases 跳过，不能记为 pass evidence。
+- `.github/workflows/ci.yml`：新增 `generated-rtl` job，在 Ubuntu 上显式安装 Yosys 和 Verilator，并运行 bounded generated RTL synthesis/lint gate。
+- 本地命令 `UV_CACHE_DIR=.uv-cache uv run --no-sync pytest tests/test_synthesis_gates.py tests/test_generated_lint.py -q --timeout=180` 记录为 `81 passed, 26 skipped`；skip 来自本机 Verilator 缺失。Yosys 本地 smoke cases 全部通过。
+- 多时钟 synchronizer 仍是 trusted boundary：Yosys 接受生成结构不等于 CDC/metastability proof。
 
 ### GitHub 发布
 
@@ -111,6 +123,7 @@ Phase 10 扩展的是形式化 harness 深度，而不是新增 SVA 语言范围
 2. iverilog/Verilator 仿真交叉验证（129 测试）：逐周期 pass/fail 比对
 3. SymbiYosys BMC 形式化等价（历史全算子基线 62 证明；Phase 10 目标文件当前 56 个 BMC/契约测试）：独立 IEEE 1800 参考监控器 + sby BMC miter
 4. SymbiYosys k-induction 完备证明（Phase 10 当前 8 个证明目标）：Tier-A 核心监控器加 `##1`、simple `|->`、`[*3]` 代表性小状态模板
+5. Generated RTL 工具接受度（Phase 11）：Yosys synthesis-oriented smoke gate 本地通过；Verilator lint-only gate 已配置在 CI，本机 skip 不算 pass evidence
 
 RISK-01 纪律：预言机和参考监控器必须与 RTL 实现结构独立。曾两次发现被循环证明掩盖的真实缺陷（BUG-DELAY-01、BUG-IMPL-01）。
 

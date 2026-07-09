@@ -550,6 +550,7 @@ def test_no_duplicate_module_names(fixture_name: str) -> None:
 _HAS_VERILATOR = shutil.which("verilator") is not None
 
 
+@pytest.mark.generated_lint
 @pytest.mark.skipif(not _HAS_VERILATOR, reason="verilator not installed")
 @pytest.mark.parametrize("fixture_name", _PHASE2_FIXTURES)
 def test_verilator_lint_clean(fixture_name: str) -> None:
