@@ -15,8 +15,10 @@ and modes, not a blanket claim that every supported operator has full-contract
 or arbitrary-start proof coverage. Phase 11 adds local Yosys generated-RTL smoke
 coverage and CI routing for generated-module Verilator lint; local Verilator
 lint skipped because Verilator was not installed, so remote lint evidence remains
-pending. Random differential testing and complex NFA/liveness proof expansion
-remain separate validation work.
+pending. Phase 12 adds bounded source-level differential testing against the
+independent Python oracle and Icarus, with Verilator routed where available and
+slow randomized breadth kept opt-in. Complex NFA/liveness proof expansion and
+mutation/coverage release metrics remain separate validation work.
 
 ## Tier 1 Operators (Implemented Core Subset)
 
@@ -372,3 +374,10 @@ through a Yosys synthesis-oriented smoke flow, and a separate Verilator
 `--lint-only -Wall` gate is configured for CI. These gates prove tool
 acceptance of generated RTL; they do not replace simulation, formal, or CDC
 evidence.
+
+Phase 12 adds bounded source-level differential tests: Hypothesis-backed
+generated SVA source cases are compiled through the normal pipeline, driven with
+bounded stimulus, and compared against the independent Python oracle and Icarus
+RTL simulation. Verilator differential runs where Verilator is installed; a
+local Verilator skip is non-evidence. Broader randomized sweeps are behind the
+`differential_slow` marker.

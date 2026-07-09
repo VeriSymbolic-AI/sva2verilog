@@ -60,6 +60,22 @@ def _semantic_bool_checker(expr: BoolNode, name: str = "sva_bool") -> CheckerNod
     )
 
 
+def _semantic_implication_checker(overlapping: bool = True) -> CheckerNode:
+    """Build a single-cycle implication checker with semantic boolean leaves."""
+    loc = SourceLoc("semantic_impl.sv", 1, 1)
+    return CheckerNode(
+        template_name="overlap_bitvec" if overlapping else "nonoverlap",
+        module_name="sva_impl",
+        params={"bv_width": "1"},
+        observed_signals=(("a", "a"), ("b", "b")),
+        source_loc=loc,
+        children=(
+            _semantic_bool_checker(BoolIdent(name="a", source_loc=loc), "sva_impl_ant"),
+            _semantic_bool_checker(BoolIdent(name="b", source_loc=loc), "sva_impl_con"),
+        ),
+    )
+
+
 # ── Delay oracle tests ────────────────────────────────────────────────────────
 
 
@@ -97,6 +113,39 @@ def test_oracle_delay_range_2_5() -> None:
         assert out["pass"] == exp, (
             f"tick {i}: expected pass={exp}, got {out['pass']}"
         )
+
+
+def test_hierarchical_overlap_implication_honors_false_antecedent() -> None:
+    """False antecedent is vacuous: a |-> b must not fail when a is false."""
+    checker = _semantic_implication_checker(overlapping=True)
+    stimulus = [
+        {"start": False, "a": False, "b": False},
+        {"start": True, "a": False, "b": False},
+        {"start": False, "a": False, "b": False},
+    ]
+
+    outputs = simulate_checker_hierarchy(checker, stimulus)
+
+    assert outputs[1]["fail"] is False
+    assert outputs[2]["fail"] is False
+    assert outputs[2]["pass"] is False
+
+
+def test_hierarchical_nonoverlap_implication_honors_false_antecedent() -> None:
+    """False antecedent is vacuous: a |=> b must not start the consequent."""
+    checker = _semantic_implication_checker(overlapping=False)
+    stimulus = [
+        {"start": False, "a": False, "b": False},
+        {"start": True, "a": False, "b": False},
+        {"start": False, "a": False, "b": False},
+        {"start": False, "a": False, "b": False},
+    ]
+
+    outputs = simulate_checker_hierarchy(checker, stimulus)
+
+    assert outputs[2]["fail"] is False
+    assert outputs[3]["fail"] is False
+    assert outputs[3]["pass"] is False
 
 
 def test_oracle_delay_zero() -> None:

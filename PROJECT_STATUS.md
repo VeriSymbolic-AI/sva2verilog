@@ -12,6 +12,7 @@ sva2verilog 是一个开源的 SystemVerilog Assertion (SVA) 到可综合 RTL �
 - 代码质量：mypy --strict 0 errors, ruff 0 errors
 - 形式化验证：历史基线为 62 个非循环 BMC 等价证明（覆盖所有已支持算子）+ 5 个 Tier-A k-induction 完备证明；Phase 10 本地目标文件当前为 56 个 BMC/契约测试 + 8 个 k-induction 证明目标
 - 生成 RTL 综合/静态检查：Phase 11 本地 Yosys generated-RTL smoke gate 通过；Verilator lint-only gate 已实现并加入 CI，但本机因未安装 Verilator 跳过，不能算作通过证据
+- 随机差分验证：Phase 12 已加入 bounded source-level Hypothesis/differential harness；本机 Icarus fast differential 通过，Verilator 因本机未安装跳过，不算通过证据
 - 覆盖度：约 95%+ 的实际断言场景
 - 支持状态权威：`SUPPORT_MATRIX.md` 记录逐构造支持边界、证据完整度和降级原因；README / SUPPORTED_CONSTRUCTS 只作概览和解释
 - 工业级验证缺口：已记录在 `INDUSTRIAL_VALIDATION_GAPS.md`，包含当前进展、P0/P1/P2 严重度、修复计划和 fully-supported 定义标准
@@ -104,6 +105,19 @@ Phase 11 增加的是生成 RTL 工具接受度证据，而不是新增 SVA 语�
 - 本地命令 `UV_CACHE_DIR=.uv-cache uv run --no-sync pytest tests/test_synthesis_gates.py tests/test_generated_lint.py -q --timeout=180` 记录为 `81 passed, 26 skipped`；skip 来自本机 Verilator 缺失。Yosys 本地 smoke cases 全部通过。
 - 多时钟 synchronizer 仍是 trusted boundary：Yosys 接受生成结构不等于 CDC/metastability proof。
 
+### Phase 12 随机差分测试更新
+
+Phase 12 增加的是证据深度，而不是新增 SVA 语法范围。本地目标验证记录：
+
+- `tests/differential_cases.py`：生成 bounded SVA source module，并通过 slang、importer、normalizer、composer、optimizer 的正常路径编译；生成器限定在已支持 finite-state 子集。
+- `tests/test_differential_cases.py` / `tests/test_differential_oracle.py`：验证 source generator、stimulus generator、Python oracle trace normalization 和 mismatch 诊断。
+- `tests/test_differential.py`：对 bounded generated source cases 运行 oracle vs simulator differential；本机 Icarus fast path 通过。
+- `tests/test_differential_regressions.py` 和 `tests/differential/regressions/`：提供 sanitized failure artifact schema 与 promoted fixture replay 入口；当前没有真实 promoted failure fixture，因此 replay 入口 skip，不算通过证据。
+- 本地命令 `uv run pytest tests/test_differential_cases.py tests/test_differential_oracle.py tests/test_differential_regressions.py -q` 记录为 `28 passed, 1 skipped`。
+- 本地命令 `uv run pytest tests/test_differential.py -q --simulator=iverilog` 记录为 `2 passed, 1 skipped`；skip 是 opt-in slow sweep。
+- 本地命令 `uv run pytest tests/test_differential.py -q --simulator=verilator` 记录为 `3 skipped`，因为本机未安装 Verilator；这不是 pass evidence。
+- 首次 differential run 发现并修复 single-cycle implication false antecedent 的 Python oracle routing bug；已在 `tests/test_behavioral_oracle.py` 增加回归。
+
 ### GitHub 发布
 
 推送到公开 GitHub 仓库，干净历史（orphan branch），无私人身份或内部资料。
@@ -124,6 +138,7 @@ Phase 11 增加的是生成 RTL 工具接受度证据，而不是新增 SVA 语�
 3. SymbiYosys BMC 形式化等价（历史全算子基线 62 证明；Phase 10 目标文件当前 56 个 BMC/契约测试）：独立 IEEE 1800 参考监控器 + sby BMC miter
 4. SymbiYosys k-induction 完备证明（Phase 10 当前 8 个证明目标）：Tier-A 核心监控器加 `##1`、simple `|->`、`[*3]` 代表性小状态模板
 5. Generated RTL 工具接受度（Phase 11）：Yosys synthesis-oriented smoke gate 本地通过；Verilator lint-only gate 已配置在 CI，本机 skip 不算 pass evidence
+6. Source-level differential testing（Phase 12）：bounded SVA source + generated stimulus，对 Python oracle 与 Icarus RTL simulation 做逐周期比较；Verilator differential 本机 skip，slow sweep opt-in
 
 RISK-01 纪律：预言机和参考监控器必须与 RTL 实现结构独立。曾两次发现被循环证明掩盖的真实缺陷（BUG-DELAY-01、BUG-IMPL-01）。
 

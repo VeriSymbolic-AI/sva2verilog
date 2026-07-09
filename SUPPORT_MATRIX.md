@@ -30,10 +30,12 @@ Current v1.6 evidence still assigns no construct row to `Fully supported`; the
 remote push/PR CI baseline is published, Phase 9 adds structured boolean
 semantic evidence, Phase 10 adds focused formal harness depth, and Phase 11
 adds local Yosys generated-RTL smoke evidence plus CI wiring for generated RTL
-lint. However, local Verilator lint was skipped because Verilator is absent,
-several real-source fixtures remain missing, post-Phase09 Verilator reruns are
-still pending for some rows, and broad all-construct full-contract proof depth
-remains bounded.
+lint. Phase 12 adds bounded source-level differential testing against the
+independent Python oracle and Icarus. However, local Verilator lint and
+Verilator differential checks were skipped because Verilator is absent, several
+real-source fixtures remain missing, post-Phase09 Verilator reruns are still
+pending for some rows, and broad all-construct full-contract proof depth remains
+bounded.
 
 ## Evidence Cell Legend
 
@@ -84,6 +86,34 @@ families. Local evidence was collected on 2026-07-09 with:
 Representative cases live in `tests/generated_rtl_cases.py`; Yosys tests live
 in `tests/test_synthesis_gates.py`; Verilator lint tests live in
 `tests/test_generated_lint.py`.
+
+## Phase 12 Differential Evidence Ledger
+
+Phase 12 adds bounded source-level differential testing for the supported
+finite-state subset. Local evidence was collected on 2026-07-09 with:
+
+- `uv run pytest tests/test_differential_cases.py tests/test_differential_oracle.py tests/test_differential_regressions.py -q`
+- Result: 28 passed, 1 skipped. The skip is the committed-fixture replay entry
+  point because no minimized differential failure fixtures have been promoted yet.
+- `uv run pytest tests/test_differential.py -q --simulator=iverilog`
+- Result: 2 passed, 1 skipped. The skip is the opt-in
+  `differential_slow` sweep, which is intentionally excluded from fast local
+  loops unless selected explicitly.
+- `uv run pytest tests/test_differential.py -q --simulator=verilator`
+- Result: 3 skipped because Verilator is not installed locally. This is
+  non-evidence, not a pass.
+
+The Phase 12 differential harness lives in `tests/differential_cases.py`,
+`tests/test_differential_cases.py`, `tests/test_differential_oracle.py`,
+`tests/test_differential.py`, and `tests/test_differential_regressions.py`.
+It generates bounded SVA source modules, compiles them through slang and the
+normal importer/normalizer/composer path, generates bounded stimulus, compares
+`active/pass/fail/overflow` where available, and writes sanitized mismatch
+artifacts for later promotion to `tests/differential/regressions/`.
+
+The first local differential run exposed and fixed a Python oracle routing bug
+for single-cycle implication with a false antecedent; regression coverage was
+added in `tests/test_behavioral_oracle.py`.
 
 ## Main Matrix
 
@@ -150,6 +180,9 @@ evidence, but they are not real-source evidence for `Fully supported` status.
 - Rows with local Yosys smoke evidence remain bounded until the rest of each
   row's evidence chain is complete; local Verilator lint skips are not pass
   evidence.
+- Rows with Phase 12 differential evidence remain bounded until Verilator
+  differential evidence is recorded on a Verilator-equipped host or CI, and
+  until broader slow/nightly sweeps are run.
 - Multi-clock support is a `Trusted boundary`, not full CDC/metastability proof.
 - Rejected rows are positive evidence only for rejection behavior, not support
   evidence for the corresponding accepted subset.

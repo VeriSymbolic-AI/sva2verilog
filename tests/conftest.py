@@ -41,6 +41,14 @@ def pytest_configure(config: pytest.Config) -> None:
         "markers",
         "simulation: marks tests requiring a simulator (deselect with '-m not simulation')",
     )
+    config.addinivalue_line(
+        "markers",
+        "differential: marks bounded source-level oracle/simulator differential tests",
+    )
+    config.addinivalue_line(
+        "markers",
+        "differential_slow: marks opt-in broader randomized differential sweeps",
+    )
     os.environ.setdefault(
         "SVA2RTL_SIMULATOR",
         str(config.getoption("--simulator", default="iverilog")),

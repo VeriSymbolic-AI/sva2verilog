@@ -654,6 +654,8 @@ class _HierarchicalSim:
         tname = node.template_name
         if tname == "bool_expr" and "bool_semantic" in node.params:
             return self._tick_bool_expr_semantic(node, signals)
+        if tname in ("overlap_bitvec", "nonoverlap") and node.children:
+            return self._tick_implication(node, signals, tname)
         if tname in _LEAF_TEMPLATES:
             oracle = self._leaf_oracles[node.module_name]
             return oracle.tick(_map_stimulus(tname, signals, node))
@@ -663,8 +665,6 @@ class _HierarchicalSim:
             return self._tick_disable_iff(node, signals)
         if tname == "first_match_top":
             return self._tick_first_match(node, signals)
-        if tname in ("overlap_bitvec", "nonoverlap"):
-            return self._tick_implication(node, signals, tname)
         if tname == "implication_nfa":
             return self._tick_implication_nfa(node, signals)
         if tname == "prop_or":
@@ -1279,7 +1279,19 @@ class _HierarchicalSim:
         if len(node.children) < 2:
             return {"pass": False, "fail": False, "active": False, "overflow": False}
         ant_out = self._tick_node(node.children[0], signals)
-        cons_out = self._tick_node(node.children[1], signals)
+        cons_signals = dict(signals)
+        if tname == "nonoverlap":
+            cons_signals["start"] = ant_out["pass"]
+        else:
+            cons_signals["start"] = signals.get("start", False)
+        cons_out = self._tick_node(node.children[1], cons_signals)
+        if tname == "nonoverlap":
+            return {
+                "pass": cons_out["pass"],
+                "fail": cons_out["fail"],
+                "active": ant_out["active"] or cons_out["active"],
+                "overflow": False,
+            }
         return {
             "pass": ant_out["pass"] and cons_out["pass"],
             "fail": ant_out["pass"] and cons_out["fail"],

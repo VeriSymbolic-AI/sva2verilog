@@ -61,4 +61,6 @@ markers = [
     "integration: marks end-to-end integration tests",
     "synthesis: marks generated RTL synthesis smoke tests",
     "generated_lint: marks generated RTL lint-only tests",
+    "differential: marks bounded source-level oracle/simulator differential tests",
+    "differential_slow: marks opt-in broader randomized differential sweeps",
 ]

@@ -69,15 +69,15 @@ jobs:
           sudo mv slang /usr/local/bin/slang
           slang --version
 
-      - name: Run tests (iverilog — full suite)
+      - name: Run tests (iverilog — full suite, bounded differential included)
         if: matrix.simulator == 'iverilog'
         run: uv run pytest tests/ -v --timeout=120
         env:
           SLANG_PATH: /usr/local/bin/slang
 
-      - name: Run tests (Verilator — simulation only)
+      - name: Run tests (Verilator — simulation + bounded differential)
         if: matrix.simulator == 'verilator'
-        run: uv run pytest tests/ -m simulation --simulator=verilator -v --timeout=120
+        run: uv run pytest tests/ -m "simulation and not differential_slow" --simulator=verilator -v --timeout=120
         env:
           SLANG_PATH: /usr/local/bin/slang
 

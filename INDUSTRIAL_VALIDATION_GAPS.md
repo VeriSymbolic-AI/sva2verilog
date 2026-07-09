@@ -312,9 +312,14 @@ Done when:
 
 #### No property-based differential test suite
 
-The project depends on Hypothesis, but there is no generator-based suite for the
-supported SVA subset. Handwritten tests cover known bugs well; generators find
-unknown combinations.
+Status: partially closed by Phase 12. The project now has a bounded
+source-level differential harness for the supported finite-state subset, plus a
+failure-artifact path. The remaining gap is broader slow/nightly execution and
+Verilator differential evidence from a Verilator-equipped host or CI run.
+
+The project depends on Hypothesis, and Phase 12 now uses it for bounded source
+and stimulus generation. Handwritten tests cover known bugs well; generators
+find unknown combinations.
 
 Fix:
 
@@ -325,9 +330,24 @@ Fix:
   Verilator.
 - Save failing seeds as regression fixtures.
 
+Current Phase 12 evidence:
+
+- `tests/differential_cases.py` generates bounded SVA source modules and
+  compiles them through the normal slang/import/compose pipeline.
+- `tests/test_differential.py` compares Python oracle and Icarus simulation in
+  the fast local path.
+- Verilator differential checks currently skip locally because Verilator is not
+  installed; this skip is non-evidence.
+- `tests/test_differential_regressions.py` writes sanitized failure artifacts
+  and provides a fixed-fixture replay entry point.
+- The first run found and fixed a Python oracle routing bug for implication
+  false-antecedent behavior.
+
 Done when:
 
 - At least one nightly or slow test job runs randomized differential testing.
+- Verilator differential evidence is recorded from CI or another
+  Verilator-equipped host.
 - Any discovered counterexample is minimized and committed as a regression.
 
 #### Mutation and coverage gates are missing
@@ -460,6 +480,11 @@ Actions:
 - Use Hypothesis to generate supported finite-state properties.
 - Generate random stimulus and compare oracle, Icarus, and Verilator.
 - Save minimized failing examples as fixed regression tests.
+
+Status: partially closed by Phase 12. Bounded source/stimulus generation,
+Icarus differential comparison, sanitized artifacts, and fixed-fixture replay
+entry points exist. Remaining work is Verilator evidence and slow/nightly
+randomized breadth.
 
 Exit criteria:
 
