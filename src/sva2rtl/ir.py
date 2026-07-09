@@ -10,6 +10,7 @@ P5.1 (source location not threaded) and is enforced from Phase 1.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Literal
 
 
 @dataclass(frozen=True)
@@ -44,6 +45,70 @@ class SVANode:
 
 
 @dataclass(frozen=True)
+class BoolNode(SVANode):
+    """Base class for structured boolean expression nodes.
+
+    These nodes model the supported scalar/vector boolean subset explicitly so
+    compiler passes do not have to infer semantics from rendered text.
+    """
+
+
+@dataclass(frozen=True)
+class BoolIdent(BoolNode):
+    """Boolean identifier reference."""
+
+    name: str
+
+
+@dataclass(frozen=True)
+class BoolConst(BoolNode):
+    """Integer boolean/vector constant.
+
+    ``raw`` preserves source spelling when available, for example ``1'b1``.
+    ``width`` is intentionally shallow in v1.6; full type inference is out of
+    scope for the structured boolean subset.
+    """
+
+    value: int
+    width: int | None = None
+    raw: str = ""
+
+
+@dataclass(frozen=True)
+class BoolUnary(BoolNode):
+    """Unary boolean operation."""
+
+    op: Literal["not"]
+    operand: BoolNode
+
+
+@dataclass(frozen=True)
+class BoolBinary(BoolNode):
+    """Binary logical boolean operation."""
+
+    op: Literal["and", "or"]
+    left: BoolNode
+    right: BoolNode
+
+
+@dataclass(frozen=True)
+class BoolCompare(BoolNode):
+    """Equality or inequality comparison."""
+
+    op: Literal["eq", "ne"]
+    left: BoolNode
+    right: BoolNode
+
+
+@dataclass(frozen=True)
+class BoolBitSelect(BoolNode):
+    """Single-bit select from an identifier."""
+
+    value: BoolIdent
+    index: int
+
+
+@dataclass(frozen=True)
 class BoolExpr(SVANode):
     """Leaf node: a purely boolean SVA property (no temporal operators).
 
@@ -51,12 +116,17 @@ class BoolExpr(SVANode):
     The AST importer reconstructs this text by recursive descent over the
     slang JSON AST.
 
+    ``expr`` is the structured semantic payload for supported boolean leaves.
+    Existing direct-IR helpers may remain text-only, but compiler-produced
+    supported boolean leaves should set ``expr`` and treat it as authoritative.
+
     Example::
 
         BoolExpr(text="(a && b)", source_loc=SourceLoc("foo.sv", 3, 5))
     """
 
     text: str  # reconstructed SV boolean expression, ready for RTL embedding
+    expr: BoolNode | None = None
 
 
 @dataclass(frozen=True)

@@ -18,7 +18,10 @@ Supported operators:
 from __future__ import annotations
 
 import re as _re_oracle
+from collections.abc import Mapping
 from typing import Any
+
+from sva2rtl.bool_semantics import deserialize_bool_expr, eval_bool_expr
 
 
 class SVABehavioralSim:
@@ -631,6 +634,7 @@ class _HierarchicalSim:
     def __init__(self, root: CheckerNode) -> None:
         self._root = root
         self._leaf_oracles: dict[str, SVABehavioralSim] = {}
+        self._bool_leaf_state: dict[str, dict[str, bool]] = {}
         self._build_oracles(root)
 
     def _build_oracles(self, node: CheckerNode) -> None:
@@ -648,6 +652,8 @@ class _HierarchicalSim:
 
     def _tick_node(self, node: CheckerNode, signals: dict[str, bool]) -> dict[str, bool]:
         tname = node.template_name
+        if tname == "bool_expr" and "bool_semantic" in node.params:
+            return self._tick_bool_expr_semantic(node, signals)
         if tname in _LEAF_TEMPLATES:
             oracle = self._leaf_oracles[node.module_name]
             return oracle.tick(_map_stimulus(tname, signals, node))
@@ -686,6 +692,38 @@ class _HierarchicalSim:
         if node.children:
             return self._tick_node(node.children[0], signals)
         return {"pass": False, "fail": False, "active": False, "overflow": False}
+
+    def _tick_bool_expr_semantic(
+        self,
+        node: CheckerNode,
+        signals: dict[str, bool],
+    ) -> dict[str, bool]:
+        """Tick a structured bool_expr leaf with registered pass/fail outputs."""
+        state = self._bool_leaf_state.setdefault(
+            node.module_name,
+            {"active": False, "pass": False, "fail": False},
+        )
+        out = {
+            "active": state["active"],
+            "pass": state["pass"],
+            "fail": state["fail"],
+            "overflow": False,
+        }
+
+        if bool(signals.get("disable", False)):
+            state["active"] = False
+            state["pass"] = False
+            state["fail"] = False
+            return {"active": False, "pass": False, "fail": False, "overflow": False}
+
+        start = bool(signals.get("start", False))
+        truth = _eval_bool_semantic_param(node, signals)
+        if truth is None:
+            truth = True
+        state["active"] = start
+        state["pass"] = start and truth
+        state["fail"] = start and not truth
+        return out
 
     def _tick_seq_concat(self, node: CheckerNode, signals: dict[str, bool]) -> dict[str, bool]:
         children = node.children
@@ -748,6 +786,7 @@ class _HierarchicalSim:
             oracle = self._leaf_oracles.get(node.module_name)
             if oracle is not None:
                 oracle.reset()
+            self._bool_leaf_state.pop(node.module_name, None)
         for child in node.children:
             self._reset_subtree(child)
 
@@ -1226,6 +1265,9 @@ class _HierarchicalSim:
         conservative convention as the other condition evaluators (RISK-02), with
         true correctness established by the formal-equivalence proof.
         """
+        semantic = _eval_bool_semantic_param(node, signals)
+        if semantic is not None:
+            return semantic
         sigs = [port for port, _ in node.observed_signals]
         if not sigs:
             return bool(signals.get("sig", False))
@@ -1335,7 +1377,7 @@ def _extract_obs_sig(node: CheckerNode, idx: int) -> str:
     return "sig"
 
 
-def _eval_cond_expr(cond_node: CheckerNode, signals: dict[str, bool]) -> bool:
+def _eval_cond_expr(cond_node: CheckerNode, signals: Mapping[str, bool | int]) -> bool:
     """Evaluate a boolean-expression checker's condition against signal values.
 
     The behavioral oracle models ``bool_expr`` as ``delay_fixed(0,0)`` which
@@ -1346,6 +1388,9 @@ def _eval_cond_expr(cond_node: CheckerNode, signals: dict[str, bool]) -> bool:
     """
     if cond_node.template_name != "bool_expr":
         return True  # non-boolexpr: assume passes (conservative)
+    semantic = _eval_bool_semantic_param(cond_node, signals)
+    if semantic is not None:
+        return semantic
     obs = cond_node.observed_signals
     if obs:
         # For simple throughot like ``en throughout body``, check if en is high
@@ -1459,7 +1504,7 @@ def _nfa_tokenize(expr: str) -> list[str]:
     return out
 
 
-def _eval_bool_leaf(cond_node: CheckerNode, signals: dict[str, bool]) -> bool:
+def _eval_bool_leaf(cond_node: CheckerNode, signals: Mapping[str, bool | int]) -> bool:
     """Independent (RISK-01) boolean-leaf value evaluator for RISK-02 fix.
 
     Used by ``_tick_prop_intersect`` / ``_tick_prop_within`` to close the
@@ -1486,11 +1531,25 @@ def _eval_bool_leaf(cond_node: CheckerNode, signals: dict[str, bool]) -> bool:
     """
     if cond_node.template_name != "bool_expr":
         return True
+    semantic = _eval_bool_semantic_param(cond_node, signals)
+    if semantic is not None:
+        return semantic
     obs = cond_node.observed_signals
     if not obs:
         return True
     # AND across all observed signals — sequence-atom semantics.
     return all(bool(signals.get(port_name, False)) for port_name, _ in obs)
+
+
+def _eval_bool_semantic_param(
+    node: CheckerNode,
+    signals: Mapping[str, bool | int],
+) -> bool | None:
+    """Evaluate serialized bool_semantic params when a checker carries them."""
+    payload = node.params.get("bool_semantic")
+    if payload is None:
+        return None
+    return bool(eval_bool_expr(deserialize_bool_expr(payload), signals))
 
 
 from sva2rtl.ir import CheckerNode  # noqa: E402

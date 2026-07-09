@@ -220,11 +220,6 @@ class TestNamedSeqOracleCrosscheck:
         assert rtl_events["pass"] > 0
         assert oracle_events["pass"] > 0
 
-    @pytest.mark.xfail(
-        reason="simulate_checker_hierarchy bool_expr oracle is passthrough — "
-        "does not produce fail events for expression evaluation",
-        strict=True,
-    )
     def test_named_seq_oracle_fail_event(self, tmp_path: Path, simulator: str) -> None:
         """Named seq: both RTL and oracle produce fail events when b=0."""
         checker = _build_checker()

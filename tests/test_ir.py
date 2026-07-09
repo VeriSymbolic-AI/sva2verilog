@@ -7,7 +7,14 @@ from dataclasses import FrozenInstanceError
 import pytest
 
 from sva2rtl.ir import (
+    BoolBinary,
+    BoolBitSelect,
+    BoolCompare,
+    BoolConst,
     BoolExpr,
+    BoolIdent,
+    BoolNode,
+    BoolUnary,
     CheckerNode,
     ClockSpec,
     PropImplication,
@@ -68,6 +75,66 @@ def test_bool_expr_different_hash() -> None:
     assert e1 != e2
     # Hash collisions are theoretically possible but extremely unlikely:
     assert hash(e1) != hash(e2)
+
+
+def test_bool_nodes_frozen_hashable_and_source_located() -> None:
+    """Every structured BoolNode carries source_loc and keeps dataclass invariants."""
+    loc = SourceLoc("f.sv", 1, 1)
+    a = BoolIdent(name="a", source_loc=loc)
+    b = BoolIdent(name="b", source_loc=loc)
+    nodes: tuple[BoolNode, ...] = (
+        a,
+        BoolConst(value=1, width=1, raw="1'b1", source_loc=loc),
+        BoolUnary(op="not", operand=a, source_loc=loc),
+        BoolBinary(op="and", left=a, right=b, source_loc=loc),
+        BoolCompare(op="eq", left=a, right=b, source_loc=loc),
+        BoolBitSelect(value=BoolIdent(name="data", source_loc=loc), index=0, source_loc=loc),
+    )
+    clones: tuple[BoolNode, ...] = (
+        BoolIdent(name="a", source_loc=loc),
+        BoolConst(value=1, width=1, raw="1'b1", source_loc=loc),
+        BoolUnary(op="not", operand=BoolIdent(name="a", source_loc=loc), source_loc=loc),
+        BoolBinary(
+            op="and",
+            left=BoolIdent(name="a", source_loc=loc),
+            right=BoolIdent(name="b", source_loc=loc),
+            source_loc=loc,
+        ),
+        BoolCompare(
+            op="eq",
+            left=BoolIdent(name="a", source_loc=loc),
+            right=BoolIdent(name="b", source_loc=loc),
+            source_loc=loc,
+        ),
+        BoolBitSelect(value=BoolIdent(name="data", source_loc=loc), index=0, source_loc=loc),
+    )
+
+    for node, clone in zip(nodes, clones, strict=True):
+        assert isinstance(node, BoolNode)
+        assert isinstance(node, SVANode)
+        assert node.source_loc == loc
+        assert node == clone
+        assert hash(node) == hash(clone)
+        with pytest.raises(FrozenInstanceError):
+            setattr(node, "source_loc", SourceLoc("changed.sv", 2, 3))
+
+
+def test_bool_expr_supports_optional_structural_payload() -> None:
+    """BoolExpr remains text-compatible and can carry structured semantics."""
+    loc = SourceLoc("f.sv", 1, 1)
+    semantic = BoolBinary(
+        op="or",
+        left=BoolIdent(name="a", source_loc=loc),
+        right=BoolIdent(name="b", source_loc=loc),
+        source_loc=loc,
+    )
+
+    legacy = BoolExpr(text="(a || b)", source_loc=loc)
+    structured = BoolExpr(text="(a || b)", expr=semantic, source_loc=loc)
+
+    assert legacy.expr is None
+    assert structured.text == "(a || b)"
+    assert structured.expr == semantic
 
 
 # ── SVANode inheritance ────────────────────────────────────────────────────

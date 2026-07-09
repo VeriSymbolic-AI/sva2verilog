@@ -6,6 +6,7 @@ import re
 
 import pytest
 
+from sva2rtl.bool_semantics import deserialize_bool_expr
 from sva2rtl.composer import (
     compose,
     compute_hash_map,
@@ -15,7 +16,13 @@ from sva2rtl.composer import (
 )
 from sva2rtl.errors import UnsupportedConstruct
 from sva2rtl.ir import (
+    BoolBinary,
+    BoolBitSelect,
+    BoolCompare,
+    BoolConst,
     BoolExpr,
+    BoolIdent,
+    BoolUnary,
     CheckerNode,
     ClockSpec,
     PropImplication,
@@ -34,6 +41,14 @@ def _make_loc(file: str = "test.sv", line: int = 3, col: int = 5) -> SourceLoc:
 
 def _make_clock(edge: str = "posedge", signal: str = "clk") -> ClockSpec:
     return ClockSpec(edge=edge, signal=signal, source_loc=_make_loc())
+
+
+def _id(name: str) -> BoolIdent:
+    return BoolIdent(name=name, source_loc=_make_loc())
+
+
+def _structured_bool(text: str, expr: BoolBinary | BoolUnary | BoolCompare) -> BoolExpr:
+    return BoolExpr(text=text, expr=expr, source_loc=_make_loc())
 
 
 # ── module_name_from_label ────────────────────────────────────────────────
@@ -217,6 +232,40 @@ def test_compose_observed_signals_contain_a_and_b() -> None:
     assert "b" in names
 
 
+def test_compose_structured_bool_expr_uses_semantic_rendering_and_params() -> None:
+    """Structured BoolExpr drives rendered text, semantic params, and observed signals."""
+    clock = _make_clock(signal="sys_clk")
+    semantic = BoolBinary(op="or", left=_id("a"), right=_id("b"), source_loc=_make_loc())
+    node = BoolExpr(text="stale_text", expr=semantic, source_loc=_make_loc())
+
+    checker = compose(node, clock, "semantic_check", "original property")
+
+    assert checker.params["bool_expr"] == "(a || b)"
+    assert checker.params["clock_signal"] == "sys_clk"
+    assert checker.params["clock_edge"] == "posedge"
+    assert checker.params["original_text"] == "original property"
+    assert checker.module_name == "sva_semantic_check"
+    assert checker.observed_signals == (("a", "a"), ("b", "b"))
+    assert deserialize_bool_expr(checker.params["bool_semantic"]) == semantic
+
+
+def test_compose_structured_bool_expr_collects_bit_select_signal_once() -> None:
+    """Tree-derived observed signals avoid regex artifacts from bit-select rendering."""
+    semantic = BoolCompare(
+        op="eq",
+        left=BoolBitSelect(value=_id("data"), index=0, source_loc=_make_loc()),
+        right=BoolConst(value=1, raw="1", source_loc=_make_loc()),
+        source_loc=_make_loc(),
+    )
+    node = BoolExpr(text="legacy_data_text", expr=semantic, source_loc=_make_loc())
+
+    checker = compose(node, _make_clock(), "bit_select_check", "data[0] == 1")
+
+    assert checker.params["bool_expr"] == "(data[0] == 1)"
+    assert checker.observed_signals == (("data", "data"),)
+    assert "bool_semantic" in checker.params
+
+
 def test_compose_source_loc_preserved() -> None:
     """CheckerNode.source_loc matches the input node's source_loc."""
     loc = _make_loc(file="prop.sv", line=10, col=2)
@@ -233,6 +282,48 @@ def test_compose_no_children_for_bool_expr() -> None:
     node = BoolExpr(text="x", source_loc=loc)
     checker = compose(node, clock, None, "x")
     assert checker.children == ()
+
+
+def test_compose_implication_nfa_renders_structured_bool_guards() -> None:
+    """NFA guard generation uses BoolNode render/collect helpers where present."""
+    loc = _make_loc()
+    ant = _structured_bool(
+        "stale_ant",
+        BoolBinary(op="or", left=_id("a"), right=_id("b"), source_loc=loc),
+    )
+    not_c = _structured_bool(
+        "stale_not",
+        BoolUnary(op="not", operand=_id("c"), source_loc=loc),
+    )
+    data_eq_one = _structured_bool(
+        "stale_cmp",
+        BoolCompare(
+            op="eq",
+            left=BoolBitSelect(value=_id("data"), index=0, source_loc=loc),
+            right=BoolConst(value=1, raw="1", source_loc=loc),
+            source_loc=loc,
+        ),
+    )
+    consequent = SeqConcat(
+        elements=(not_c, data_eq_one),
+        delays=((1, 1),),
+        source_loc=loc,
+    )
+    node = PropImplication(
+        antecedent=ant,
+        consequent=consequent,
+        overlapping=True,
+        source_loc=loc,
+    )
+
+    checker = compose(node, _make_clock(), "nfa_semantic", "a_or_b_then_not_c_data")
+
+    assert checker.template_name == "implication_nfa"
+    assert checker.params["ant_guard"] == "(a || b)"
+    assert checker.observed_signals == (("a", "a"), ("b", "b"), ("c", "c"), ("data", "data"))
+    nfa_transitions = checker.children[0].params["nfa_transitions"]
+    assert "(!c)" in nfa_transitions
+    assert "(data[0] == 1)" in nfa_transitions
 
 
 def test_compose_seq_concat_returns_checker_node() -> None:

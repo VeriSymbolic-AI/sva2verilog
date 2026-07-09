@@ -19,8 +19,9 @@ from typing import cast
 
 import pytest
 
+from sva2rtl.bool_semantics import serialize_bool_expr
 from sva2rtl.composer import compose, structural_hash
-from sva2rtl.ir import CheckerNode, SourceLoc
+from sva2rtl.ir import BoolConst, BoolIdent, CheckerNode, SourceLoc
 from sva2rtl.normalizer import normalize
 from sva2rtl.optimizer import (
     concat_merge,
@@ -54,6 +55,19 @@ def _make_bool_checker(text: str, name: str) -> CheckerNode:
         },
         observed_signals=(),
         source_loc=_make_loc(),
+    )
+
+
+def _make_semantic_bool_checker(
+    text: str,
+    name: str,
+    semantic: BoolConst | BoolIdent,
+) -> CheckerNode:
+    """Build a bool_expr CheckerNode carrying serialized structured semantics."""
+    node = _make_bool_checker(text, name)
+    return dataclasses.replace(
+        node,
+        params={**node.params, "bool_semantic": serialize_bool_expr(semantic)},
     )
 
 
@@ -185,6 +199,51 @@ def test_constant_fold_false_literal_0() -> None:
     node = _make_bool_checker("0", "sva_false")
     result = constant_fold(node)
     assert result.params.get("_const_false") == "1"
+
+
+def test_constant_fold_true_from_bool_semantic() -> None:
+    """bool_semantic BoolConst(value=1) is tagged _const_true=1."""
+    loc = _make_loc()
+    node = _make_semantic_bool_checker(
+        "stale_text",
+        "sva_true_semantic",
+        BoolConst(value=1, raw="1'b1", source_loc=loc),
+    )
+
+    result = constant_fold(node)
+
+    assert result.params.get("_const_true") == "1"
+    assert "_const_false" not in result.params
+
+
+def test_constant_fold_false_from_bool_semantic() -> None:
+    """bool_semantic BoolConst(value=0) is tagged _const_false=1."""
+    loc = _make_loc()
+    node = _make_semantic_bool_checker(
+        "stale_text",
+        "sva_false_semantic",
+        BoolConst(value=0, raw="1'b0", source_loc=loc),
+    )
+
+    result = constant_fold(node)
+
+    assert result.params.get("_const_false") == "1"
+    assert "_const_true" not in result.params
+
+
+def test_constant_fold_semantic_param_takes_precedence_over_legacy_text() -> None:
+    """Legacy bool_expr constants are ignored when bool_semantic is non-constant."""
+    loc = _make_loc()
+    node = _make_semantic_bool_checker(
+        "1",
+        "sva_nonconst_semantic",
+        BoolIdent(name="sig", source_loc=loc),
+    )
+
+    result = constant_fold(node)
+
+    assert "_const_true" not in result.params
+    assert "_const_false" not in result.params
 
 
 # ── Concat merge rule tests ───────────────────────────────────────────────

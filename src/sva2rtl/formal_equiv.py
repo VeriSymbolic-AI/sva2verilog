@@ -48,12 +48,99 @@ import os
 import signal
 import subprocess
 import tempfile
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Literal
 
 from sva2rtl.emitter import emit_all
 from sva2rtl.ir import CheckerNode
 
 _LOG = logging.getLogger(__name__)
+
+FormalStartMode = Literal["continuous", "single_shot", "arbitrary_start"]
+FormalDisableMode = Literal["held_low", "arbitrary_disable"]
+FormalResetMode = Literal["first_cycle", "reset_recovery"]
+FormalOutputName = Literal[
+    "pass",
+    "fail",
+    "active",
+    "attempt_fired",
+    "disabled_o",
+    "overflow_flag",
+]
+FormalCoverName = Literal["pass", "fail", "disable", "overflow", "overlap"]
+FormalOverlapPolicy = Literal["unconstrained", "bounded", "excluded"]
+
+
+@dataclass(frozen=True)
+class FormalOutputContract:
+    """Structured monitor-output comparison contract for formal miters."""
+
+    outputs: tuple[FormalOutputName, ...] = ("fail",)
+    excluded: tuple[FormalOutputName, ...] = ()
+
+    @classmethod
+    def single(cls, output: Literal["pass", "fail"]) -> FormalOutputContract:
+        """Return the legacy one-output miter contract."""
+        return cls(outputs=(output,))
+
+    @classmethod
+    def full_monitor(
+        cls,
+        *,
+        include_overflow: bool = True,
+    ) -> FormalOutputContract:
+        """Return the standard monitor contract bundle used by Phase 10."""
+        outputs: tuple[FormalOutputName, ...] = (
+            "pass",
+            "fail",
+            "active",
+            "attempt_fired",
+            "disabled_o",
+        )
+        if include_overflow:
+            outputs = (*outputs, "overflow_flag")
+        return cls(outputs=outputs)
+
+
+@dataclass(frozen=True)
+class FormalHarnessConfig:
+    """Explicit contract for formal harness start/disable/reset behavior."""
+
+    start_mode: FormalStartMode = "continuous"
+    disable_mode: FormalDisableMode = "held_low"
+    reset_mode: FormalResetMode = "first_cycle"
+    output_contract: FormalOutputContract = field(
+        default_factory=FormalOutputContract
+    )
+    covers: tuple[FormalCoverName, ...] = ()
+    assumptions: tuple[str, ...] = ()
+    overlap: FormalOverlapPolicy = "unconstrained"
+    reference_disable_port: bool = False
+
+    @classmethod
+    def equivalence_default(cls) -> FormalHarnessConfig:
+        """Compatibility default for expression equivalence checks."""
+        return cls(
+            start_mode="continuous",
+            disable_mode="held_low",
+            reset_mode="first_cycle",
+            output_contract=FormalOutputContract.single("fail"),
+        )
+
+    @classmethod
+    def miter_default(
+        cls,
+        *,
+        compare: Literal["pass", "fail"] = "pass",
+    ) -> FormalHarnessConfig:
+        """Compatibility default for reference-monitor miters."""
+        return cls(
+            start_mode="single_shot",
+            disable_mode="held_low",
+            reset_mode="first_cycle",
+            output_contract=FormalOutputContract.single(compare),
+        )
 
 
 def sby_is_available() -> bool:
@@ -68,6 +155,208 @@ def sby_is_available() -> bool:
         return True
     except (FileNotFoundError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
         return False
+
+
+def _extra_input_ports(config: FormalHarnessConfig) -> tuple[str, ...]:
+    ports: list[str] = []
+    if config.start_mode == "arbitrary_start":
+        ports.append("formal_start")
+    if config.disable_mode == "arbitrary_disable":
+        ports.append("formal_disable")
+    if config.reset_mode == "reset_recovery":
+        ports.append("formal_reset")
+    return tuple(ports)
+
+
+def _render_extra_input_decls(config: FormalHarnessConfig) -> str:
+    ports = _extra_input_ports(config)
+    if not ports:
+        return ""
+    return "\n".join(f"    input logic {port}," for port in ports) + "\n"
+
+
+def _render_timing_controls(
+    config: FormalHarnessConfig,
+    *,
+    clock: str,
+) -> str:
+    if config.reset_mode == "reset_recovery":
+        reset_expr = "(_t == 0) || formal_reset"
+        reset_note = (
+            "    // Formal assumption: reset_mode=reset_recovery permits reset "
+            "after activity.\n"
+        )
+    else:
+        reset_expr = "(_t == 0)"
+        reset_note = (
+            "    // Formal assumption: reset_mode=first_cycle uses the legacy "
+            "one-cycle reset pulse.\n"
+        )
+
+    if config.start_mode == "continuous":
+        start_note = (
+            "    // Formal assumption: start_mode=continuous ties start high "
+            "every non-reset cycle.\n"
+        )
+    elif config.start_mode == "single_shot":
+        start_note = (
+            "    wire start_pulse = (_t == 1);\n"
+            "    // Formal assumption: start_mode=single_shot pulses start "
+            "exactly once after reset.\n"
+        )
+    else:
+        start_note = (
+            "    // Formal assumption: start_mode=arbitrary_start leaves start "
+            "as a free input.\n"
+            f"    // Formal overlap policy: {config.overlap}.\n"
+        )
+
+    if config.disable_mode == "arbitrary_disable":
+        disable_note = (
+            "    // Formal assumption: disable_mode=arbitrary_disable leaves "
+            "disable_i variable.\n"
+            "    // Disable assumptions document reset, active/pass/fail, "
+            "disabled_o, and sticky attempt_fired behavior.\n"
+        )
+    else:
+        disable_note = (
+            "    // Formal assumption: disable_mode=held_low ties disable_i "
+            "low for compatibility.\n"
+        )
+
+    custom_assumptions = "".join(
+        f"    // Formal assumption: {assumption}\n"
+        for assumption in config.assumptions
+    )
+
+    assumption_lines: list[str] = []
+    if config.start_mode == "arbitrary_start":
+        assumption_lines.append("            assume (!formal_start);")
+    if config.disable_mode == "arbitrary_disable":
+        assumption_lines.append("            assume (!formal_disable);")
+
+    reset_assume = ""
+    if assumption_lines:
+        reset_assume = (
+            "    always @(posedge {clock}) begin\n"
+            "        if (!rst_n) begin\n"
+            "{assumptions}\n"
+            "        end\n"
+            "    end\n"
+        ).format(
+            clock=clock,
+            assumptions="\n".join(assumption_lines),
+        )
+
+    return f"""\
+    integer _t = 0;
+    always @(posedge {clock}) _t <= _t + 1;
+    wire _in_reset = {reset_expr};
+    assign rst_n = ~_in_reset;
+{reset_note}{start_note}{disable_note}{custom_assumptions}{reset_assume}"""
+
+
+def _start_expr(config: FormalHarnessConfig) -> str:
+    if config.start_mode == "continuous":
+        return "1'b1"
+    if config.start_mode == "single_shot":
+        return "start_pulse"
+    return "formal_start"
+
+
+def _disable_expr(config: FormalHarnessConfig) -> str:
+    if config.disable_mode == "held_low":
+        return "1'b0"
+    return "formal_disable"
+
+
+_MONITOR_OUTPUT_VARS: dict[FormalOutputName, str] = {
+    "pass": "m_pass",
+    "fail": "m_fail",
+    "active": "m_active",
+    "attempt_fired": "m_afired",
+    "disabled_o": "m_disabled",
+    "overflow_flag": "m_ovf",
+}
+
+_REFERENCE_OUTPUT_VARS: dict[FormalOutputName, str] = {
+    "pass": "r_pass",
+    "fail": "r_fail",
+    "active": "r_active",
+    "attempt_fired": "r_afired",
+    "disabled_o": "r_disabled",
+    "overflow_flag": "r_ovf",
+}
+
+
+def _contract_outputs(
+    config: FormalHarnessConfig,
+    *,
+    has_overflow_flag: bool,
+) -> tuple[tuple[FormalOutputName, ...], tuple[FormalOutputName, ...]]:
+    included: list[FormalOutputName] = []
+    excluded: list[FormalOutputName] = list(config.output_contract.excluded)
+    for output in config.output_contract.outputs:
+        if output == "overflow_flag" and not has_overflow_flag:
+            if output not in excluded:
+                excluded.append(output)
+            continue
+        if output not in included:
+            included.append(output)
+    return tuple(included), tuple(excluded)
+
+
+def _render_excluded_contract_comment(excluded: tuple[FormalOutputName, ...]) -> str:
+    if not excluded:
+        return ""
+    joined = ", ".join(excluded)
+    return f"    // Excluded contract signals: {joined}\n"
+
+
+def _render_contract_assertions(outputs: tuple[FormalOutputName, ...]) -> str:
+    lines = []
+    for output in outputs:
+        lines.append(
+            f"            equiv_{output}: assert "
+            f"({_MONITOR_OUTPUT_VARS[output]} == {_REFERENCE_OUTPUT_VARS[output]});"
+        )
+    return "\n".join(lines)
+
+
+def _render_ref_signal_decls(outputs: tuple[FormalOutputName, ...]) -> str:
+    lines = [f"    logic {_REFERENCE_OUTPUT_VARS[output]};" for output in outputs]
+    return "\n".join(lines)
+
+
+def _render_ref_output_conns(outputs: tuple[FormalOutputName, ...]) -> str:
+    return "".join(
+        f",\n        .{output}({_REFERENCE_OUTPUT_VARS[output]})"
+        for output in outputs
+    )
+
+
+def _render_cover_probes(
+    config: FormalHarnessConfig,
+    *,
+    has_overflow_flag: bool,
+) -> str:
+    if not config.covers:
+        return ""
+
+    expressions: dict[FormalCoverName, str] = {
+        "pass": "m_pass",
+        "fail": "m_fail",
+        "disable": "m_disabled",
+        "overflow": "m_ovf" if has_overflow_flag else "1'b0",
+        "overlap": f"{_start_expr(config)} && m_active",
+    }
+    lines = ["", "            // Cover probes check setup reachability, not equivalence."]
+    for cover in config.covers:
+        if cover == "overflow" and not has_overflow_flag:
+            lines.append("            // cover_probe_overflow excluded: overflow_flag absent")
+            continue
+        lines.append(f"            cover_probe_{cover}: cover ({expressions[cover]});")
+    return "\n".join(lines)
 
 
 def _run_sby_with_timeout(
@@ -105,6 +394,7 @@ def build_harness(
     *,
     clock: str = "clk",
     has_overflow_flag: bool = True,
+    config: FormalHarnessConfig | None = None,
 ) -> str:
     """Build a SymbiYosys harness asserting ``M.fail == reference_expr``.
 
@@ -127,44 +417,51 @@ def build_harness(
     str
         SystemVerilog harness module text.
     """
+    harness_config = config or FormalHarnessConfig.equivalence_default()
     input_decls = "\n".join(
         f"    input logic {port}," for port, _ in observed_signals
     )
+    extra_input_decls = _render_extra_input_decls(harness_config)
     port_conns = " ".join(f".{port}({port})," for port, _ in observed_signals)
     # Leaf templates (bool_expr, sampled-value funcs) have no overflow_flag port;
     # composed templates (implication, seq_concat) do. Connect it only if present.
     ovf_decl = "    logic m_ovf;\n" if has_overflow_flag else ""
     ovf_conn = ".overflow_flag(m_ovf), " if has_overflow_flag else ""
+    timing_controls = _render_timing_controls(harness_config, clock=clock)
+    start_expr = _start_expr(harness_config)
+    disable_expr = _disable_expr(harness_config)
+    cover_probes = _render_cover_probes(
+        harness_config,
+        has_overflow_flag=has_overflow_flag,
+    )
+    _, excluded = _contract_outputs(
+        harness_config,
+        has_overflow_flag=has_overflow_flag,
+    )
+    excluded_comment = _render_excluded_contract_comment(excluded)
 
     return f"""\
 // Auto-generated SVA-to-Verilog equivalence harness (formal_equiv).
 module harness (
     input logic {clock},
 {input_decls}
+{extra_input_decls}\
     input logic _unused_pad
 );
     // rst_n is driven internally by a deterministic reset pulse (see below) so
     // BMC starts from a well-defined reset state rather than an arbitrary one.
     logic rst_n;
+{timing_controls}
     logic m_active, m_pass, m_fail, m_afired, m_disabled;
 {ovf_decl}    {monitor_top} dut (
         .{clock}({clock}), .rst_n(rst_n),
-        .start(1'b1),
+        .start({start_expr}),
         {port_conns}
-        .disable_i(1'b0),
+        .disable_i({disable_expr}),
         .active(m_active), .pass(m_pass), .fail(m_fail),
         .attempt_fired(m_afired), {ovf_conn}.disabled_o(m_disabled)
     );
-
-    // Reset discipline for BMC: hold reset asserted on the first cycle, then
-    // release. Without this, BMC would start from an arbitrary state where the
-    // monitor's registers and the reference helpers are not aligned. A simple
-    // timestep counter drives a deterministic reset pulse and only checks the
-    // equivalence once both the monitor and the reference have seen reset.
-    integer _t = 0;
-    always @(posedge {clock}) _t <= _t + 1;
-    wire _in_reset = (_t == 0);
-    assign rst_n = ~_in_reset;
+{excluded_comment}
 
     // Reference violation indicator — encodes the original SVA semantics,
     // authored independently of the monitor implementation.
@@ -177,6 +474,7 @@ module harness (
     always @(posedge {clock}) begin
         if (rst_n) begin
             equiv_fail: assert (m_fail == ref_violation);
+{cover_probes}
         end
     end
 endmodule
@@ -202,6 +500,7 @@ def build_miter_harness(
     clock: str = "clk",
     has_overflow_flag: bool = True,
     compare: str = "pass",
+    config: FormalHarnessConfig | None = None,
 ) -> str:
     """Build a miter harness comparing the monitor against a REFERENCE MONITOR.
 
@@ -230,12 +529,46 @@ def build_miter_harness(
     compare:
         Which output to compare: ``"pass"`` or ``"fail"``.
     """
+    if compare not in ("pass", "fail"):
+        msg = f"compare must be 'pass' or 'fail', got {compare!r}"
+        raise ValueError(msg)
+
+    harness_config = config or FormalHarnessConfig.miter_default(
+        compare=compare,  # type: ignore[arg-type]
+    )
+    outputs, excluded = _contract_outputs(
+        harness_config,
+        has_overflow_flag=has_overflow_flag,
+    )
     input_decls = "\n".join(
         f"    input logic {port}," for port, _ in observed_signals
     )
+    extra_input_decls = _render_extra_input_decls(harness_config)
     port_conns = " ".join(f".{port}({port})," for port, _ in observed_signals)
     ovf_decl = "    logic m_ovf;\n" if has_overflow_flag else ""
     ovf_conn = ".overflow_flag(m_ovf), " if has_overflow_flag else ""
+    timing_controls = _render_timing_controls(harness_config, clock=clock)
+    start_expr = _start_expr(harness_config)
+    disable_expr = _disable_expr(harness_config)
+    ref_signal_decls = _render_ref_signal_decls(outputs)
+    ref_conn_items = [
+        f".{clock}({clock})",
+        ".rst_n(rst_n)",
+        f".start({start_expr})",
+        *(f".{port}({port})" for port, _ in observed_signals),
+    ]
+    if harness_config.reference_disable_port:
+        ref_conn_items.append(f".disable_i({disable_expr})")
+    ref_conn_items.extend(
+        f".{output}({_REFERENCE_OUTPUT_VARS[output]})" for output in outputs
+    )
+    ref_conn_block = ",\n        ".join(ref_conn_items)
+    contract_assertions = _render_contract_assertions(outputs)
+    cover_probes = _render_cover_probes(
+        harness_config,
+        has_overflow_flag=has_overflow_flag,
+    )
+    excluded_comment = _render_excluded_contract_comment(excluded)
 
     return f"""\
 {reference_module}
@@ -244,37 +577,32 @@ def build_miter_harness(
 module harness (
     input logic {clock},
 {input_decls}
+{extra_input_decls}\
     input logic _unused_pad
 );
     logic rst_n;
-    // Single-attempt start: pulse start exactly once (cycle 1, after reset).
-    integer _t = 0;
-    always @(posedge {clock}) _t <= _t + 1;
-    wire _in_reset = (_t == 0);
-    assign rst_n = ~_in_reset;
-    wire start_pulse = (_t == 1);
+{timing_controls}
 
     logic m_active, m_pass, m_fail, m_afired, m_disabled;
 {ovf_decl}    {monitor_top} dut (
         .{clock}({clock}), .rst_n(rst_n),
-        .start(start_pulse),
+        .start({start_expr}),
         {port_conns}
-        .disable_i(1'b0),
+        .disable_i({disable_expr}),
         .active(m_active), .pass(m_pass), .fail(m_fail),
         .attempt_fired(m_afired), {ovf_conn}.disabled_o(m_disabled)
     );
+{excluded_comment}
 
-    logic r_{compare};
+{ref_signal_decls}
     {reference_top} ref_dut (
-        .{clock}({clock}), .rst_n(rst_n),
-        .start(start_pulse),
-        {port_conns}
-        .{compare}(r_{compare})
+        {ref_conn_block}
     );
 
     always @(posedge {clock}) begin
         if (rst_n) begin
-            equiv_cmp: assert (m_{compare} == r_{compare});
+{contract_assertions}
+{cover_probes}
         end
     end
 endmodule
@@ -291,6 +619,7 @@ def run_sva_miter_check(
     depth: int = 20,
     timeout: int = 300,
     mode: str = "bmc",
+    config: FormalHarnessConfig | None = None,
 ) -> tuple[bool, str]:
     """Verify a monitor against an independent reference monitor via miter.
 
@@ -318,6 +647,7 @@ def run_sva_miter_check(
         clock=clock,
         has_overflow_flag=has_ovf,
         compare=compare,
+        config=config,
     )
 
     with tempfile.TemporaryDirectory(prefix="sva2rtl_miter_") as tmpdir:
@@ -371,6 +701,7 @@ def run_sva_equiv_check(
     depth: int = 20,
     timeout: int = 300,
     mode: str = "bmc",
+    config: FormalHarnessConfig | None = None,
 ) -> tuple[bool, str]:
     """Verify a generated monitor against an independent SVA reference.
 
@@ -422,6 +753,7 @@ def run_sva_equiv_check(
         reference_expr,
         clock=clock,
         has_overflow_flag=has_ovf,
+        config=config,
     )
     if helper_regs:
         # Insert helper regs just after the dut instantiation closing line.
@@ -487,6 +819,7 @@ def run_sva_equiv_prove(
     clock: str = "clk",
     depth: int = 20,
     timeout: int = 600,
+    config: FormalHarnessConfig | None = None,
 ) -> tuple[bool, str]:
     """Verify a monitor via k-induction (complete proof, not just bounded).
 
@@ -535,4 +868,5 @@ def run_sva_equiv_prove(
         depth=depth,
         timeout=timeout,
         mode="prove",
+        config=config,
     )

@@ -14,8 +14,24 @@ from __future__ import annotations
 
 import pytest
 
-from sva2rtl.behavioral_oracle import SVABehavioralSim, simulate_checker_hierarchy
-from sva2rtl.ir import CheckerNode, SourceLoc
+from sva2rtl.behavioral_oracle import (
+    SVABehavioralSim,
+    _eval_bool_leaf,
+    _eval_cond_expr,
+    simulate_checker_hierarchy,
+)
+from sva2rtl.bool_semantics import collect_bool_signals, render_bool_expr, serialize_bool_expr
+from sva2rtl.ir import (
+    BoolBinary,
+    BoolBitSelect,
+    BoolCompare,
+    BoolConst,
+    BoolIdent,
+    BoolNode,
+    BoolUnary,
+    CheckerNode,
+    SourceLoc,
+)
 
 # ── Helper ────────────────────────────────────────────────────────────────────
 
@@ -26,6 +42,22 @@ def _run(sim: SVABehavioralSim, stimuli: list[dict[str, bool]]) -> list[dict[str
     Returns a list of output dicts (one per cycle) in the same order as stimuli.
     """
     return [sim.tick(s) for s in stimuli]
+
+
+def _semantic_bool_checker(expr: BoolNode, name: str = "sva_bool") -> CheckerNode:
+    """Build a bool_expr checker carrying structured semantic params."""
+    loc = SourceLoc("semantic.sv", 1, 1)
+    return CheckerNode(
+        template_name="bool_expr",
+        module_name=name,
+        params={
+            "bool_expr": render_bool_expr(expr),
+            "bool_semantic": serialize_bool_expr(expr),
+        },
+        observed_signals=collect_bool_signals(expr),
+        source_loc=loc,
+        children=(),
+    )
 
 
 # ── Delay oracle tests ────────────────────────────────────────────────────────
@@ -434,6 +466,110 @@ def test_oracle_invalid_kind_raises() -> None:
     """Constructor raises ValueError for unknown operator kind."""
     with pytest.raises(ValueError, match="Unknown kind"):
         SVABehavioralSim("bogus_op", {})
+
+
+# ── Structured boolean semantic evaluation ───────────────────────────────
+
+
+def test_oracle_bool_semantic_or_leaf_passes_when_second_operand_true() -> None:
+    """Structured OR truth is not reduced to all observed signals being true."""
+    loc = SourceLoc("semantic.sv", 1, 1)
+    expr = BoolBinary(
+        op="or",
+        left=BoolIdent(name="a", source_loc=loc),
+        right=BoolIdent(name="b", source_loc=loc),
+        source_loc=loc,
+    )
+    checker = _semantic_bool_checker(expr)
+
+    assert _eval_bool_leaf(checker, {"a": False, "b": True}) is True
+    assert _eval_cond_expr(checker, {"a": False, "b": True}) is True
+
+
+def test_oracle_bool_semantic_not_leaf_passes_when_operand_false() -> None:
+    """Structured NOT truth is independent from observed-signal shortcuts."""
+    loc = SourceLoc("semantic.sv", 1, 1)
+    expr = BoolUnary(
+        op="not",
+        operand=BoolIdent(name="a", source_loc=loc),
+        source_loc=loc,
+    )
+    checker = _semantic_bool_checker(expr)
+
+    assert _eval_bool_leaf(checker, {"a": False}) is True
+    assert _eval_bool_leaf(checker, {"a": True}) is False
+
+
+def test_oracle_bool_semantic_comparisons_and_bit_selects() -> None:
+    """Structured comparisons and bit-selects read bool/int stimulus values."""
+    loc = SourceLoc("semantic.sv", 1, 1)
+    bit_eq = BoolCompare(
+        op="eq",
+        left=BoolBitSelect(
+            value=BoolIdent(name="data", source_loc=loc),
+            index=1,
+            source_loc=loc,
+        ),
+        right=BoolConst(value=1, raw="1", source_loc=loc),
+        source_loc=loc,
+    )
+    vec_ne = BoolCompare(
+        op="ne",
+        left=BoolIdent(name="vec", source_loc=loc),
+        right=BoolConst(value=3, raw="2'd3", source_loc=loc),
+        source_loc=loc,
+    )
+
+    assert _eval_bool_leaf(_semantic_bool_checker(bit_eq), {"data": 0b10}) is True
+    assert _eval_bool_leaf(_semantic_bool_checker(bit_eq), {"data": 0b00}) is False
+    assert _eval_bool_leaf(_semantic_bool_checker(vec_ne), {"vec": 2}) is True
+    assert _eval_bool_leaf(_semantic_bool_checker(vec_ne), {"vec": 3}) is False
+
+
+def test_oracle_bool_semantic_missing_values_are_deterministic() -> None:
+    """Absent identifiers default false and absent bit-select vectors default zero."""
+    loc = SourceLoc("semantic.sv", 1, 1)
+    missing_ident = BoolIdent(name="missing", source_loc=loc)
+    missing_bit = BoolBitSelect(
+        value=BoolIdent(name="data", source_loc=loc),
+        index=0,
+        source_loc=loc,
+    )
+
+    assert _eval_bool_leaf(_semantic_bool_checker(missing_ident), {}) is False
+    assert _eval_bool_leaf(_semantic_bool_checker(missing_bit), {}) is False
+
+
+def test_oracle_eval_operand_uses_bool_semantic_for_liveness_nodes() -> None:
+    """s_eventually uses semantic OR truth instead of all-observed-signal truth."""
+    loc = SourceLoc("semantic.sv", 1, 1)
+    expr = BoolBinary(
+        op="or",
+        left=BoolIdent(name="a", source_loc=loc),
+        right=BoolIdent(name="b", source_loc=loc),
+        source_loc=loc,
+    )
+    checker = CheckerNode(
+        template_name="s_eventually",
+        module_name="sva_eventually_semantic",
+        params={
+            "lo": "0",
+            "hi": "0",
+            "bool_expr": render_bool_expr(expr),
+            "bool_semantic": serialize_bool_expr(expr),
+        },
+        observed_signals=collect_bool_signals(expr),
+        source_loc=loc,
+        children=(),
+    )
+
+    out = simulate_checker_hierarchy(
+        checker,
+        [{"start": True, "a": False, "b": True}, {"start": False, "a": False, "b": False}],
+    )
+
+    assert out[1]["pass"] is True
+    assert out[1]["fail"] is False
 
 
 # ── Hierarchical oracle tests (ORACLE-01) ────────────────────────────────

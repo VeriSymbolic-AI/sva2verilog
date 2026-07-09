@@ -174,6 +174,39 @@ def test_e2e_bool_assert_stdout() -> None:
     assert "endmodule" in result.output
 
 
+@requires_slang
+def test_e2e_bool_semantics_fixture_renders_supported_forms(tmp_path: Path) -> None:
+    """Real source fixture preserves structured boolean semantics through RTL emission."""
+    runner = CliRunner()
+    output_dir = tmp_path / "bool_semantics_out"
+    result = runner.invoke(
+        main,
+        [str(_FIXTURES / "bool_semantics.sv"), "--output", str(output_dir)],
+    )
+
+    assert result.exit_code == 0, (
+        f"Expected exit code 0 for bool_semantics.sv, got {result.exit_code}.\n"
+        f"Output: {result.output}"
+    )
+    assert output_dir.is_dir(), "Expected directory output for multi-assertion fixture"
+
+    generated = "\n".join(
+        path.read_text(encoding="utf-8") for path in sorted(output_dir.glob("sva_*.sv"))
+    )
+    assert "module sva_bool_or" in generated
+    assert "module sva_bool_not" in generated
+    assert "module sva_bool_nested" in generated
+    assert "module sva_bool_eq" in generated
+    assert "module sva_bool_ne" in generated
+    assert "module sva_bool_bit" in generated
+    assert "(a || b)" in generated
+    assert "(!a)" in generated
+    assert "((a && b) || (!c))" in generated
+    assert "(data == 4'b11)" in generated
+    assert "(data != 4'b0)" in generated
+    assert "(data[0])" in generated
+
+
 # ── Test 7: --dump-tree on bool_assert.sv ────────────────────────────────────
 
 

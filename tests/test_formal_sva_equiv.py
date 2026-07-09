@@ -27,8 +27,11 @@ from pathlib import Path
 import pytest
 
 from sva2rtl.ast_importer import import_assertion
+from sva2rtl.bool_semantics import deserialize_bool_expr, render_bool_expr
 from sva2rtl.composer import compose
 from sva2rtl.formal_equiv import (
+    FormalHarnessConfig,
+    FormalOutputContract,
     run_sva_equiv_check,
     run_sva_miter_check,
     sby_is_available,
@@ -53,6 +56,117 @@ def _build(name: str) -> CheckerNode:
     return checker
 
 
+def _semantic_bool_reference_expr(checker: CheckerNode) -> str:
+    """Render the formal reference expression from bool_semantic params."""
+    payload = checker.params.get("bool_semantic")
+    assert payload is not None, "bool_expr checker must carry bool_semantic"
+    return render_bool_expr(deserialize_bool_expr(payload))
+
+
+def _arbitrary_start_config(
+    *,
+    overlap: str = "unconstrained",
+) -> FormalHarnessConfig:
+    """Config for explicit Phase 10 arbitrary-start BMC claims."""
+    return FormalHarnessConfig(
+        start_mode="arbitrary_start",
+        assumptions=("start is low while reset is asserted",),
+        overlap=overlap,  # type: ignore[arg-type]
+    )
+
+
+def _reset_recovery_config() -> FormalHarnessConfig:
+    """Config for explicit Phase 10 reset-recovery BMC claims."""
+    return FormalHarnessConfig(
+        reset_mode="reset_recovery",
+        assumptions=("assertions are disabled while reset recovery is active",),
+    )
+
+
+def _bool_contract_ref_module(name: str) -> str:
+    """Independent bool contract reference with variable disable support.
+
+    This reference models the public monitor contract for ``assert property
+    (a && b)``. In particular, ``attempt_fired`` is sticky across disable_i and
+    is cleared only by reset, so a generated monitor that incorrectly clears it
+    on disable would fail this miter.
+    """
+    return f"""
+module {name} (
+    input  logic clk,
+    input  logic rst_n,
+    input  logic start,
+    input  logic a,
+    input  logic b,
+    input  logic disable_i,
+    output logic pass,
+    output logic fail,
+    output logic active,
+    output logic attempt_fired,
+    output logic disabled_o
+);
+    wire bool_result = a && b;
+    logic active_q, pass_q, fail_q, attempt_fired_q;
+
+    always_ff @(posedge clk) begin
+        if (!rst_n || disable_i) begin
+            active_q <= 1'b0;
+            pass_q   <= 1'b0;
+            fail_q   <= 1'b0;
+        end else begin
+            active_q <= start;
+            pass_q   <= start &  bool_result;
+            fail_q   <= start & ~bool_result;
+        end
+    end
+
+    always_ff @(posedge clk) begin
+        if (!rst_n) attempt_fired_q <= 1'b0;
+        else if (start) attempt_fired_q <= 1'b1;
+    end
+
+    assign active        = disable_i ? 1'b0 : active_q;
+    assign pass          = disable_i ? 1'b0 : pass_q;
+    assign fail          = disable_i ? 1'b0 : fail_q;
+    assign attempt_fired = attempt_fired_q;
+    assign disabled_o    = disable_i;
+endmodule
+"""
+
+
+def _rose_contract_ref_module(name: str) -> str:
+    """Independent full-contract reference for ``$rose(sig)``."""
+    return f"""
+module {name} (
+    input  logic clk,
+    input  logic rst_n,
+    input  logic start,
+    input  logic sig,
+    output logic pass,
+    output logic fail,
+    output logic active,
+    output logic attempt_fired,
+    output logic disabled_o
+);
+    logic sig_prev_q, attempt_fired_q;
+    always_ff @(posedge clk) begin
+        if (!rst_n) sig_prev_q <= 1'b0;
+        else        sig_prev_q <= sig;
+    end
+    always_ff @(posedge clk) begin
+        if (!rst_n) attempt_fired_q <= 1'b0;
+        else if (start) attempt_fired_q <= 1'b1;
+    end
+    wire rose_detect = sig && !sig_prev_q;
+    assign active        = start;
+    assign pass          = start && rose_detect;
+    assign fail          = start && !rose_detect;
+    assign attempt_fired = attempt_fired_q;
+    assign disabled_o    = 1'b0;
+endmodule
+"""
+
+
 # ── bool_expr ───────────────────────────────────────────────────────────────
 # Monitor timing (templates/bool_expr.sv.j2): fail_q <= start & ~bool_result,
 # registered one cycle. With start pulsed every cycle, fail at cycle t reflects
@@ -75,8 +189,7 @@ class TestBoolExprSvaEquiv:
         #   prev_expr_q  = delayed (a&&b)
         #   valid_q      = "at least one clock has elapsed since reset"
         #   ref_violation = valid_q && !prev_expr_q
-        sigs = [p for p, _ in checker.observed_signals]
-        expr = " && ".join(sigs)
+        expr = _semantic_bool_reference_expr(checker)
         helper = (
             "    logic prev_expr_q;\n"
             "    logic valid_q;\n"
@@ -93,6 +206,84 @@ class TestBoolExprSvaEquiv:
         reference = "valid_q && !prev_expr_q"
         passed, output = run_sva_equiv_check(checker, reference, helper_regs=helper, depth=15)
         assert passed, f"bool_simple SVA↔RTL equivalence FAILED:\n{output[-2000:]}"
+
+    def test_bool_simple_arbitrary_start_bmc_depth15(self) -> None:
+        """Phase 10: arbitrary_start BMC depth 15 for a bool leaf."""
+        checker = _build("bool_simple")
+        expr = _semantic_bool_reference_expr(checker)
+        helper = (
+            "    logic prev_start_q;\n"
+            "    logic prev_expr_q;\n"
+            "    always_ff @(posedge clk) begin\n"
+            "        if (!rst_n) begin\n"
+            "            prev_start_q <= 1'b0;\n"
+            "            prev_expr_q  <= 1'b0;\n"
+            "        end else begin\n"
+            "            prev_start_q <= formal_start;\n"
+            f"            prev_expr_q  <= ({expr});\n"
+            "        end\n"
+            "    end\n"
+        )
+        reference = "prev_start_q && !prev_expr_q"
+        passed, output = run_sva_equiv_check(
+            checker,
+            reference,
+            helper_regs=helper,
+            depth=15,
+            config=_arbitrary_start_config(),
+        )
+        assert passed, f"bool_simple arbitrary_start BMC depth 15 FAILED:\n{output[-2000:]}"
+
+    def test_bool_simple_arbitrary_disable_contract_bmc_depth12(self) -> None:
+        """Phase 10: arbitrary_disable contract BMC guards HARDEN-01 stickiness."""
+        checker = _build("bool_simple")
+        ref_name = "ref_bool_contract_disable"
+        config = FormalHarnessConfig(
+            start_mode="arbitrary_start",
+            disable_mode="arbitrary_disable",
+            output_contract=FormalOutputContract.full_monitor(include_overflow=False),
+            assumptions=("start and disable are low while reset is asserted",),
+            covers=("pass", "fail", "disable"),
+            reference_disable_port=True,
+        )
+        passed, output = run_sva_miter_check(
+            checker,
+            _bool_contract_ref_module(ref_name),
+            ref_name,
+            depth=12,
+            config=config,
+        )
+        assert passed, (
+            "bool_simple arbitrary_disable full-contract BMC depth 12 FAILED:\n"
+            f"{output[-2500:]}"
+        )
+
+    def test_bool_simple_reset_recovery_bmc_depth15(self) -> None:
+        """Phase 10: reset_recovery BMC depth 15 for a bool leaf."""
+        checker = _build("bool_simple")
+        expr = _semantic_bool_reference_expr(checker)
+        helper = (
+            "    logic prev_expr_q;\n"
+            "    logic valid_q;\n"
+            "    always_ff @(posedge clk) begin\n"
+            "        if (!rst_n) begin\n"
+            "            prev_expr_q <= 1'b0;\n"
+            "            valid_q     <= 1'b0;\n"
+            "        end else begin\n"
+            f"            prev_expr_q <= ({expr});\n"
+            "            valid_q     <= 1'b1;\n"
+            "        end\n"
+            "    end\n"
+        )
+        reference = "valid_q && !prev_expr_q"
+        passed, output = run_sva_equiv_check(
+            checker,
+            reference,
+            helper_regs=helper,
+            depth=15,
+            config=_reset_recovery_config(),
+        )
+        assert passed, f"bool_simple reset_recovery BMC depth 15 FAILED:\n{output[-2000:]}"
 
 
 # ── $rose sampled-value function ──────────────────────────────────────────────
@@ -125,6 +316,39 @@ class TestRoseSvaEquiv:
         reference = f"!({sig} && !{sig}_prev_ref_q)"
         passed, output = run_sva_equiv_check(checker, reference, helper_regs=helper, depth=15)
         assert passed, f"rose SVA↔RTL equivalence FAILED:\n{output[-2000:]}"
+
+    def test_rose_arbitrary_start_bmc_depth15(self) -> None:
+        """Phase 10: arbitrary_start BMC depth 15 for a sampled-value leaf."""
+        checker = _build("rose")
+        sig = checker.observed_signals[0][0]
+        helper = _prev_helper(sig)
+        reference = f"formal_start && !({sig} && !{sig}_prev_ref_q)"
+        passed, output = run_sva_equiv_check(
+            checker,
+            reference,
+            helper_regs=helper,
+            depth=15,
+            config=_arbitrary_start_config(),
+        )
+        assert passed, f"rose arbitrary_start BMC depth 15 FAILED:\n{output[-2000:]}"
+
+    def test_rose_full_contract_bmc_depth12(self) -> None:
+        """Phase 10: full-contract BMC depth 12 for a sampled-value leaf."""
+        checker = _build("rose")
+        config = FormalHarnessConfig(
+            start_mode="arbitrary_start",
+            output_contract=FormalOutputContract.full_monitor(include_overflow=False),
+            assumptions=("start is low while reset is asserted",),
+            covers=("pass", "fail"),
+        )
+        passed, output = run_sva_miter_check(
+            checker,
+            _rose_contract_ref_module("ref_rose_contract"),
+            "ref_rose_contract",
+            depth=12,
+            config=config,
+        )
+        assert passed, f"rose full-contract BMC depth 12 FAILED:\n{output[-2500:]}"
 
 
 # ── $fell / $stable / $changed — structurally identical to $rose ──────────────
@@ -264,6 +488,26 @@ class TestDelaySvaEquiv:
         passed, output = run_sva_miter_check(checker, ref, ref_name, compare="pass", depth=20)
         assert passed, f"a ##[{m}:{n}] b SVA↔RTL equivalence FAILED:\n{output[-2500:]}"
 
+    def test_delay_fixed_arbitrary_start_bmc_depth20(self) -> None:
+        """Phase 10: arbitrary_start BMC depth 20 for fixed delay ##1."""
+        checker = _build_delay_checker(1, 1)
+        ref_name = "ref_a_1_1_b_arbitrary_start"
+        ref = _delay_ref_module(ref_name, 1, 1)
+        passed, output = run_sva_miter_check(
+            checker,
+            ref,
+            ref_name,
+            compare="pass",
+            depth=20,
+            config=FormalHarnessConfig(
+                start_mode="arbitrary_start",
+                output_contract=FormalOutputContract.single("pass"),
+                assumptions=("start is low while reset is asserted",),
+                overlap="bounded",
+            ),
+        )
+        assert passed, f"delay ##1 arbitrary_start BMC depth 20 FAILED:\n{output[-2500:]}"
+
 
 # ── Implication |-> and |=> (BUG-IMPL-01 fix) ─────────────────────────────────
 # After the BUG-IMPL-01 fix, the single-cycle-consequent implication monitors
@@ -282,6 +526,55 @@ def _impl_sigs(checker: CheckerNode) -> tuple[str, str]:
     ant = checker.children[0].observed_signals[0][0]
     con = checker.children[1].observed_signals[0][0]
     return ant, con
+
+
+def _implication_overlap_contract_ref_module(name: str) -> str:
+    """Independent full-contract reference for single-cycle ``a |-> b``."""
+    return f"""
+module {name} (
+    input  logic clk,
+    input  logic rst_n,
+    input  logic start,
+    input  logic a,
+    input  logic b,
+    output logic pass,
+    output logic fail,
+    output logic active,
+    output logic attempt_fired,
+    output logic disabled_o,
+    output logic overflow_flag
+);
+    logic ant_active_q, ant_pass_q, ant_fail_q;
+    logic con_active_q, con_pass_q, con_fail_q;
+    logic attempt_fired_q;
+
+    always_ff @(posedge clk) begin
+        if (!rst_n) begin
+            ant_active_q <= 1'b0; ant_pass_q <= 1'b0; ant_fail_q <= 1'b0;
+            con_active_q <= 1'b0; con_pass_q <= 1'b0; con_fail_q <= 1'b0;
+        end else begin
+            ant_active_q <= start;
+            ant_pass_q   <= start &  a;
+            ant_fail_q   <= start & ~a;
+            con_active_q <= start;
+            con_pass_q   <= start &  b;
+            con_fail_q   <= start & ~b;
+        end
+    end
+
+    always_ff @(posedge clk) begin
+        if (!rst_n) attempt_fired_q <= 1'b0;
+        else if (ant_pass_q) attempt_fired_q <= 1'b1;
+    end
+
+    assign active        = ant_active_q | con_active_q;
+    assign pass          = ant_pass_q & con_pass_q;
+    assign fail          = ant_pass_q & con_fail_q;
+    assign attempt_fired = attempt_fired_q;
+    assign disabled_o    = 1'b0;
+    assign overflow_flag = 1'b0;
+endmodule
+"""
 
 
 class TestImplicationSvaEquiv:
@@ -304,6 +597,47 @@ class TestImplicationSvaEquiv:
         reference = f"vld1 & {a}_d1 & ~{b}_d1"
         passed, output = run_sva_equiv_check(checker, reference, helper_regs=helper, depth=15)
         assert passed, f"a |-> b SVA↔RTL equivalence FAILED:\n{output[-2500:]}"
+
+    def test_overlap_arbitrary_start_bmc_depth15(self) -> None:
+        """Phase 10: arbitrary_start BMC depth 15 for simple overlapping implication."""
+        checker = _build("implication_overlap")  # a |-> b
+        a, b = _impl_sigs(checker)
+        helper = (
+            f"    logic start_d1, {a}_d1, {b}_d1, vld1;\n"
+            "    always_ff @(posedge clk) begin\n"
+            "        if (!rst_n) begin\n"
+            f"            start_d1 <= 1'b0; {a}_d1 <= 1'b0; {b}_d1 <= 1'b0; vld1 <= 1'b0;\n"
+            "        end else begin\n"
+            f"            start_d1 <= formal_start; {a}_d1 <= {a}; {b}_d1 <= {b}; vld1 <= 1'b1;\n"
+            "        end\n"
+            "    end\n"
+        )
+        reference = f"vld1 & start_d1 & {a}_d1 & ~{b}_d1"
+        passed, output = run_sva_equiv_check(
+            checker,
+            reference,
+            helper_regs=helper,
+            depth=15,
+            config=_arbitrary_start_config(overlap="bounded"),
+        )
+        assert passed, f"a |-> b arbitrary_start BMC depth 15 FAILED:\n{output[-2500:]}"
+
+    def test_overlap_full_contract_bmc_depth15(self) -> None:
+        """Phase 10: full-contract BMC depth 15 for overlap implication."""
+        checker = _build("implication_overlap")
+        config = FormalHarnessConfig(
+            start_mode="single_shot",
+            output_contract=FormalOutputContract.full_monitor(include_overflow=True),
+            covers=("pass", "fail", "overlap", "overflow"),
+        )
+        passed, output = run_sva_miter_check(
+            checker,
+            _implication_overlap_contract_ref_module("ref_impl_overlap_contract"),
+            "ref_impl_overlap_contract",
+            depth=15,
+            config=config,
+        )
+        assert passed, f"a |-> b full-contract BMC depth 15 FAILED:\n{output[-2500:]}"
 
     def test_nonoverlap_equiv(self) -> None:
         checker = _build("implication_nonoverlap")  # a |=> b
@@ -692,6 +1026,29 @@ endmodule
 """
 
 
+def _ref_disable_iff_with_disable(name: str) -> str:
+    """Independent reference for ``disable iff`` with incoming disable_i variable."""
+    return f"""
+module {name} (
+    input  logic clk, rst_n, start, a, b, disable_i,
+    output logic pass, fail
+);
+    logic prev_a_q, prev_b_q;
+    always_ff @(posedge clk) begin
+        if (!rst_n || disable_i) begin
+            prev_a_q <= 1'b0;
+            prev_b_q <= 1'b0;
+        end else begin
+            prev_a_q <= start & a;
+            prev_b_q <= start & b;
+        end
+    end
+    assign pass = rst_n & !disable_i & prev_a_q & prev_b_q;
+    assign fail = rst_n & !disable_i & prev_a_q & ~prev_b_q;
+endmodule
+"""
+
+
 class TestDisableIffSvaEquiv:
     """``disable iff`` monitor proven equiv to independent reference."""
 
@@ -708,6 +1065,31 @@ class TestDisableIffSvaEquiv:
             depth=15,
         )
         assert passed, f"disable_iff {compare} SVA↔RTL equiv FAILED:\n{output[-2500:]}"
+
+    @pytest.mark.parametrize("compare", ["pass", "fail"])
+    def test_disable_iff_arbitrary_disable_bmc_depth15(self, compare: str) -> None:
+        """Phase 10: arbitrary_disable BMC depth 15 for disable iff."""
+        checker = _build("disable_iff")
+        ref_name = "ref_diff_arbitrary_disable"
+        ref = _ref_disable_iff_with_disable(ref_name)
+        config = FormalHarnessConfig(
+            start_mode="single_shot",
+            disable_mode="arbitrary_disable",
+            output_contract=FormalOutputContract.single(compare),  # type: ignore[arg-type]
+            reference_disable_port=True,
+        )
+        passed, output = run_sva_miter_check(
+            checker,
+            ref,
+            ref_name,
+            compare=compare,
+            depth=15,
+            config=config,
+        )
+        assert passed, (
+            f"disable_iff {compare} arbitrary_disable BMC depth 15 FAILED:\n"
+            f"{output[-2500:]}"
+        )
 
 
 def _ref_rep_consecutive(name: str, n: int) -> str:
@@ -744,6 +1126,42 @@ endmodule
 """
 
 
+def _ref_rep_consecutive_contract(name: str, n: int) -> str:
+    """Independent full-contract reference for ``a[*N]`` consecutive repetition."""
+    return f"""
+module {name} (
+    input  logic clk, rst_n, start, a,
+    output logic pass, fail, active, attempt_fired, disabled_o
+);
+    logic [1:0] cnt_q;
+    logic running_q, attempt_fired_q;
+    always_ff @(posedge clk) begin
+        if (!rst_n) begin
+            cnt_q     <= 0;
+            running_q <= 1'b0;
+        end else if (start && a) begin
+            cnt_q     <= 1;
+            running_q <= 1'b1;
+        end else if (running_q && a) begin
+            if (cnt_q < {n}) cnt_q <= cnt_q + 1'b1;
+        end else if (running_q && !a) begin
+            running_q <= 1'b0;
+            cnt_q     <= 0;
+        end
+    end
+    always_ff @(posedge clk) begin
+        if (!rst_n) attempt_fired_q <= 1'b0;
+        else if (start) attempt_fired_q <= 1'b1;
+    end
+    assign active        = running_q;
+    assign pass          = running_q && a && (cnt_q == {n});
+    assign fail          = running_q && !a && (cnt_q < {n});
+    assign attempt_fired = attempt_fired_q;
+    assign disabled_o    = 1'b0;
+endmodule
+"""
+
+
 class TestRepConsecutiveSvaEquiv:
     """``[*N]`` consecutive repetition proven equiv to independent reference."""
 
@@ -759,6 +1177,45 @@ class TestRepConsecutiveSvaEquiv:
             depth=20,
         )
         assert passed, f"[*3] SVA↔RTL equiv FAILED:\n{output[-2500:]}"
+
+    def test_rep_fixed_arbitrary_start_bmc_depth20(self) -> None:
+        """Phase 10: arbitrary_start BMC depth 20 for fixed consecutive repetition."""
+        checker = _build("rep_fixed")
+        ref_name = "ref_rep3_arbitrary_start"
+        ref = _ref_rep_consecutive(ref_name, 3)
+        passed, output = run_sva_miter_check(
+            checker,
+            ref,
+            ref_name,
+            compare="pass",
+            depth=20,
+            config=FormalHarnessConfig(
+                start_mode="arbitrary_start",
+                output_contract=FormalOutputContract.single("pass"),
+                assumptions=("start is low while reset is asserted",),
+                overlap="bounded",
+            ),
+        )
+        assert passed, f"[*3] arbitrary_start BMC depth 20 FAILED:\n{output[-2500:]}"
+
+    def test_rep_fixed_full_contract_bmc_depth20(self) -> None:
+        """Phase 10: full-contract BMC depth 20 for fixed consecutive repetition."""
+        checker = _build("rep_fixed")
+        config = FormalHarnessConfig(
+            start_mode="arbitrary_start",
+            output_contract=FormalOutputContract.full_monitor(include_overflow=False),
+            assumptions=("start is low while reset is asserted",),
+            covers=("pass", "fail", "overlap"),
+            overlap="bounded",
+        )
+        passed, output = run_sva_miter_check(
+            checker,
+            _ref_rep_consecutive_contract("ref_rep3_contract", 3),
+            "ref_rep3_contract",
+            depth=20,
+            config=config,
+        )
+        assert passed, f"[*3] full-contract BMC depth 20 FAILED:\n{output[-2500:]}"
 
 
 def _ref_past(name: str, depth: int) -> str:

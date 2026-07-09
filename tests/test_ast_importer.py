@@ -4,18 +4,34 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from sva2rtl.ast_importer import (
     UNSUPPORTED_KINDS_PHASE1,
     _dispatch_expr_to_ir,
+    build_bool_expr,
     expr_to_sv,
     extract_source_loc,
     import_assertion,
 )
+from sva2rtl.bool_semantics import render_bool_expr
 from sva2rtl.errors import UnsupportedConstruct
-from sva2rtl.ir import BoolExpr, ClockSpec, PropImplication, SeqConcat, SourceLoc
+from sva2rtl.ir import (
+    BoolBinary,
+    BoolBitSelect,
+    BoolCompare,
+    BoolConst,
+    BoolExpr,
+    BoolIdent,
+    BoolUnary,
+    ClockSpec,
+    DisableIff,
+    PropImplication,
+    SeqConcat,
+    SourceLoc,
+)
 
 # Fixture directory
 _FIXTURES = Path(__file__).parent / "fixtures"
@@ -139,6 +155,159 @@ def test_expr_to_sv_nested() -> None:
     assert expr_to_sv(node) == "((a && b) || c)"
 
 
+def test_build_bool_expr_nested_structure_and_source_locations() -> None:
+    """Nested property boolean syntax becomes concrete BoolNode structure."""
+    node = {
+        "kind": "BinaryPropertyExpr",
+        "op": "Or",
+        "source_file_start": "nested.sv",
+        "source_line_start": 10,
+        "source_column_start": 4,
+        "left": {
+            "kind": "BinaryPropertyExpr",
+            "op": "And",
+            "source_file_start": "nested.sv",
+            "source_line_start": 10,
+            "source_column_start": 5,
+            "left": {
+                "kind": "SequenceExpr",
+                "expr": {
+                    "kind": "NamedValue",
+                    "symbol": "1 a",
+                    "source_file_start": "nested.sv",
+                    "source_line_start": 10,
+                    "source_column_start": 5,
+                },
+            },
+            "right": {
+                "kind": "SequenceExpr",
+                "expr": {
+                    "kind": "NamedValue",
+                    "symbol": "2 b",
+                    "source_file_start": "nested.sv",
+                    "source_line_start": 10,
+                    "source_column_start": 10,
+                },
+            },
+        },
+        "right": {
+            "kind": "UnaryPropertyExpr",
+            "op": "Not",
+            "source_file_start": "nested.sv",
+            "source_line_start": 10,
+            "source_column_start": 16,
+            "expr": {
+                "kind": "SequenceExpr",
+                "expr": {
+                    "kind": "NamedValue",
+                    "symbol": "3 c",
+                    "source_file_start": "nested.sv",
+                    "source_line_start": 10,
+                    "source_column_start": 17,
+                },
+            },
+        },
+    }
+
+    expr = build_bool_expr(node)
+
+    assert isinstance(expr, BoolBinary)
+    assert expr.op == "or"
+    assert expr.source_loc == SourceLoc("nested.sv", 10, 4)
+    assert isinstance(expr.left, BoolBinary)
+    assert expr.left.op == "and"
+    assert isinstance(expr.left.left, BoolIdent)
+    assert expr.left.left.name == "a"
+    assert expr.left.left.source_loc == SourceLoc("nested.sv", 10, 5)
+    assert isinstance(expr.left.right, BoolIdent)
+    assert expr.left.right.name == "b"
+    assert isinstance(expr.right, BoolUnary)
+    assert expr.right.op == "not"
+    assert isinstance(expr.right.operand, BoolIdent)
+    assert expr.right.operand.source_loc == SourceLoc("nested.sv", 10, 17)
+    assert render_bool_expr(expr) == "((a && b) || (!c))"
+
+
+def test_build_bool_expr_constants_comparisons_and_bit_select() -> None:
+    """Constants, eq/ne comparisons, and single-bit selects are structured."""
+    eq_node = {
+        "kind": "BinaryOp",
+        "op": "Equality",
+        "left": {
+            "kind": "ElementSelect",
+            "value": {"kind": "NamedValue", "symbol": "1 data"},
+            "selector": {"kind": "IntegerLiteral", "value": "2"},
+        },
+        "right": {"kind": "IntegerLiteral", "value": "1'b1"},
+    }
+    ne_node = {
+        "kind": "BinaryOp",
+        "op": "Inequality",
+        "left": {"kind": "NamedValue", "symbol": "2 vec"},
+        "right": {"kind": "IntegerLiteral", "value": "4'hf"},
+    }
+
+    eq_expr = build_bool_expr(eq_node)
+    ne_expr = build_bool_expr(ne_node)
+
+    assert isinstance(eq_expr, BoolCompare)
+    assert eq_expr.op == "eq"
+    assert isinstance(eq_expr.left, BoolBitSelect)
+    assert eq_expr.left.index == 2
+    assert isinstance(eq_expr.right, BoolConst)
+    assert eq_expr.right.value == 1
+    assert eq_expr.right.width == 1
+    assert expr_to_sv(eq_node) == "(data[2] == 1'b1)"
+    assert isinstance(ne_expr, BoolCompare)
+    assert ne_expr.op == "ne"
+    assert expr_to_sv(ne_node) == "(vec != 4'hf)"
+
+
+def test_build_bool_expr_conversion_unwraps_to_inner_structure() -> None:
+    """Conversion wrappers do not erase the underlying BoolNode structure."""
+    node = {
+        "kind": "Conversion",
+        "expr": {
+            "kind": "BinaryOp",
+            "op": "LogicalOr",
+            "left": {"kind": "NamedValue", "symbol": "1 a"},
+            "right": {"kind": "NamedValue", "symbol": "2 b"},
+        },
+    }
+
+    expr = build_bool_expr(node)
+
+    assert isinstance(expr, BoolBinary)
+    assert expr.op == "or"
+    assert render_bool_expr(expr) == "(a || b)"
+
+
+@pytest.mark.parametrize(
+    "node",
+    [
+        {
+            "kind": "BinaryOp",
+            "op": "Add",
+            "left": {"kind": "NamedValue", "symbol": "1 a"},
+            "right": {"kind": "NamedValue", "symbol": "2 b"},
+        },
+        {
+            "kind": "UnaryOp",
+            "op": "ReductionAnd",
+            "operand": {"kind": "NamedValue", "symbol": "1 a"},
+        },
+        {"kind": "PartSelect", "value": {"kind": "NamedValue", "symbol": "1 data"}},
+        {"kind": "CallExpression", "subroutineName": "$foo", "arguments": []},
+    ],
+)
+def test_build_bool_expr_rejects_unsupported_boolean_subforms(
+    node: dict[str, Any],
+) -> None:
+    """Out-of-scope boolean forms raise rather than producing text-only leaves."""
+    with pytest.raises(UnsupportedConstruct):
+        build_bool_expr(node)
+
+
 def test_expr_to_sv_unsupported_kind_raises() -> None:
     """Unknown kind raises UnsupportedConstruct with source loc."""
     node = {
@@ -188,6 +357,8 @@ def test_dispatch_boolean_kind_still_flattens() -> None:
     ir = _dispatch_expr_to_ir(node)
     assert isinstance(ir, BoolExpr)
     assert ir.text == "sig"
+    assert isinstance(ir.expr, BoolIdent)
+    assert ir.expr.name == "sig"
 
 
 # ── import_assertion tests using fixture files ────────────────────────────
@@ -198,6 +369,8 @@ def test_import_assertion_bool_simple_returns_bool_expr() -> None:
     ast = json.loads((_FIXTURES / "bool_simple.json").read_text())
     node, clock, text, label = import_assertion(ast)
     assert isinstance(node, BoolExpr)
+    assert node.expr is not None
+    assert node.text == render_bool_expr(node.expr)
     assert text != ""
 
 
@@ -238,10 +411,24 @@ def test_import_assertion_labeled() -> None:
 def test_import_assertion_complex_expr() -> None:
     """bool_complex.json ((a && b) || (!c)) parses with || and ! in output."""
     ast = json.loads((_FIXTURES / "bool_complex.json").read_text())
-    _, _, text, _ = import_assertion(ast)
+    node, _, text, _ = import_assertion(ast)
+    assert isinstance(node, BoolExpr)
+    assert isinstance(node.expr, BoolBinary)
+    assert node.text == render_bool_expr(node.expr)
     assert "||" in text
     assert "&&" in text
     assert "!" in text
+
+
+def test_import_assertion_disable_iff_condition_has_structured_expr() -> None:
+    """disable iff conditions are imported through the structure-first bool path."""
+    ast = json.loads((_FIXTURES / "disable_iff.json").read_text())
+    node, _, _, _ = import_assertion(ast)
+
+    assert isinstance(node, DisableIff)
+    assert isinstance(node.condition, BoolExpr)
+    assert node.condition.expr is not None
+    assert node.condition.text == render_bool_expr(node.condition.expr)
 
 
 def test_import_assertion_seq_concat_returns_seq_concat() -> None:
@@ -274,6 +461,8 @@ def test_import_assertion_seq_concat_elements_are_bool_expr() -> None:
     assert isinstance(node, SeqConcat)
     assert isinstance(node.elements[0], BoolExpr)
     assert isinstance(node.elements[1], BoolExpr)
+    assert node.elements[0].expr is not None
+    assert node.elements[1].expr is not None
 
 
 def test_import_assertion_seq_concat_element_texts() -> None:
@@ -390,6 +579,7 @@ def test_import_implication_antecedent_is_bool_expr() -> None:
     node, _, _, _ = import_assertion(ast)
     assert isinstance(node, PropImplication)
     assert isinstance(node.antecedent, BoolExpr)
+    assert node.antecedent.expr is not None
 
 
 def test_import_implication_consequent_is_bool_expr() -> None:
@@ -398,6 +588,7 @@ def test_import_implication_consequent_is_bool_expr() -> None:
     node, _, _, _ = import_assertion(ast)
     assert isinstance(node, PropImplication)
     assert isinstance(node.consequent, BoolExpr)
+    assert node.consequent.expr is not None
 
 
 def test_import_implication_antecedent_text() -> None:

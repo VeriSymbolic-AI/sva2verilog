@@ -19,6 +19,7 @@ import math
 import re
 
 from sva2rtl import __version__
+from sva2rtl.bool_semantics import collect_bool_signals, render_bool_expr, serialize_bool_expr
 from sva2rtl.errors import SvaCompileError, UnsupportedConstruct
 from sva2rtl.ir import (
     BoolExpr,
@@ -362,6 +363,25 @@ def extract_signals(expr_text: str) -> tuple[tuple[str, str], ...]:
     return tuple((name, name) for name in seen)
 
 
+def _bool_expr_text(node: BoolExpr) -> str:
+    """Render a BoolExpr from structure when available, else legacy text."""
+    if node.expr is not None:
+        return render_bool_expr(node.expr)
+    return node.text
+
+
+def _bool_expr_observed(node: BoolExpr) -> tuple[tuple[str, str], ...]:
+    """Collect observed signal pairs from structure when available."""
+    if node.expr is not None:
+        return collect_bool_signals(node.expr)
+    return extract_signals(node.text)
+
+
+def _bool_expr_signal_names(node: BoolExpr) -> tuple[str, ...]:
+    """Return sorted unique signal names for NFA params."""
+    return tuple(sorted({signal for _port, signal in _bool_expr_observed(node)}))
+
+
 # ── Structural hashing (Phase 4) ─────────────────────────────────────────
 
 # Params excluded from structural hash — positional/presentation metadata
@@ -530,17 +550,20 @@ def _compose_bool_expr(
 ) -> CheckerNode:
     """Build a leaf CheckerNode for a BoolExpr."""
     module_name = module_name_from_label(label, original_text)
-    observed = extract_signals(node.text)
+    rendered = _bool_expr_text(node)
+    observed = _bool_expr_observed(node)
 
     params: dict[str, str] = {
         "module_name": module_name,
-        "bool_expr": node.text,
+        "bool_expr": rendered,
         "clock_signal": clock.signal,
         "clock_edge": clock.edge,
         "source_loc": str(node.source_loc),
         "sva2rtl_version": __version__,
         "original_text": original_text,
     }
+    if node.expr is not None:
+        params["bool_semantic"] = serialize_bool_expr(node.expr)
 
     return CheckerNode(
         template_name="bool_expr",
@@ -758,8 +781,8 @@ def _compose_repetition(
     cnt_width = max(1, math.ceil(math.log2(node.rep_max + 1))) if node.rep_max > 0 else 1
 
     if isinstance(node.expr, BoolExpr):
-        observed = extract_signals(node.expr.text)
-        signal_expr = node.expr.text
+        observed = _bool_expr_observed(node.expr)
+        signal_expr = _bool_expr_text(node.expr)
     else:
         raise SvaCompileError(
             message=(
@@ -1040,8 +1063,8 @@ def _compose_implication_nfa(
 
     # Antecedent guard — raw boolean expression text (e.g. "a", "a && b").
     assert isinstance(node.antecedent, BoolExpr), "implication antecedent must be BoolExpr"
-    ant_guard = node.antecedent.text
-    ant_sigs = tuple(sorted({s for s, _ in extract_signals(ant_guard)}))
+    ant_guard = _bool_expr_text(node.antecedent)
+    ant_sigs = _bool_expr_signal_names(node.antecedent)
 
     # Consequent → sub-NFA (property-kind: dead-end = fail after attempt).
     cons_states, cons_trans, cons_accept, cons_sigs = _lift_to_nfa(
@@ -1205,7 +1228,7 @@ def _compose_disable_iff(
 
     # Extract the condition expression text from the condition node
     if isinstance(node.condition, BoolExpr):
-        cond_expr = node.condition.text
+        cond_expr = _bool_expr_text(node.condition)
     else:
         cond_expr = "<cond>"
 
@@ -1213,7 +1236,8 @@ def _compose_disable_iff(
     # Exclude rst_n and clock_signal — these are always hardcoded ports in every
     # generated module and must not appear again in the observed_signals loop.
     _reserved_ports = {"rst_n", clock.signal}
-    cond_signals = tuple((p, s) for p, s in extract_signals(cond_expr) if p not in _reserved_ports)
+    cond_raw = _bool_expr_observed(node.condition) if isinstance(node.condition, BoolExpr) else ()
+    cond_signals = tuple((p, s) for p, s in cond_raw if p not in _reserved_ports)
     cond_seen = {p for p, _ in cond_signals}
     body_extra = tuple(
         (p, s)
@@ -1293,8 +1317,8 @@ def _compose_goto_rep(
     cnt_width = max(1, math.ceil(math.log2(node.rep_max + 1))) if node.rep_max > 0 else 1
 
     if isinstance(node.expr, BoolExpr):
-        observed = extract_signals(node.expr.text)
-        signal_expr = node.expr.text
+        observed = _bool_expr_observed(node.expr)
+        signal_expr = _bool_expr_text(node.expr)
     else:
         raise SvaCompileError(
             message=f"Goto repetition [->N] requires a boolean expression, "
@@ -1338,8 +1362,8 @@ def _compose_nonconsec_rep(
     cnt_width = max(1, math.ceil(math.log2(node.rep_max + 1))) if node.rep_max > 0 else 1
 
     if isinstance(node.expr, BoolExpr):
-        observed = extract_signals(node.expr.text)
-        signal_expr = node.expr.text
+        observed = _bool_expr_observed(node.expr)
+        signal_expr = _bool_expr_text(node.expr)
     else:
         raise SvaCompileError(
             message=f"Non-consecutive repetition [=N] requires a boolean expression, "
@@ -1620,8 +1644,8 @@ def _lift_to_nfa(
     """
     if isinstance(operand, BoolExpr):
         # 0 --expr--> 1 (accept)
-        guard = f"({operand.text})"
-        signals = tuple(sorted({s for s, _ in extract_signals(operand.text)}))
+        guard = f"({_bool_expr_text(operand)})"
+        signals = _bool_expr_signal_names(operand)
         return 2, ((0, guard, 1),), frozenset({1}), signals
 
     if isinstance(operand, SeqConcat):
@@ -1649,8 +1673,8 @@ def _lift_to_nfa(
         current = 0
         for i, element in enumerate(operand.elements):
             assert isinstance(element, BoolExpr)
-            guard = f"({element.text})"
-            for s, _ in extract_signals(element.text):
+            guard = f"({_bool_expr_text(element)})"
+            for s, _ in _bool_expr_observed(element):
                 signal_set.add(s)
             if i == 0:
                 trans.append((current, guard, current + 1))
@@ -1673,9 +1697,9 @@ def _lift_to_nfa(
         # a[*N]: 0 --a--> 1 --a--> ... --a--> N (accept)
         assert isinstance(operand.expr, BoolExpr)
         n = operand.rep_min
-        guard = f"({operand.expr.text})"
+        guard = f"({_bool_expr_text(operand.expr)})"
         rep_trans: tuple[tuple[int, str, int], ...] = tuple((i, guard, i + 1) for i in range(n))
-        signals = tuple(sorted({s for s, _ in extract_signals(operand.expr.text)}))
+        signals = _bool_expr_signal_names(operand.expr)
         return n + 1, rep_trans, frozenset({n}), signals
 
     raise ValueError(f"cannot lift {type(operand).__name__} to NFA yet")
@@ -1748,13 +1772,13 @@ def _try_lift_operand(
         if not body or not isinstance(operand.condition, BoolExpr):
             return None
         states, trans, accept = _nfa_product_throughout(
-            operand.condition.text,
+            _bool_expr_text(operand.condition),
             body[0],
             body[1],
             body[2],
-            tuple(sorted({s for s, _ in extract_signals(operand.condition.text)})),
+            _bool_expr_signal_names(operand.condition),
         )
-        sigs = tuple(sorted(set(body[3]) | {s for s, _ in extract_signals(operand.condition.text)}))
+        sigs = tuple(sorted(set(body[3]) | set(_bool_expr_signal_names(operand.condition))))
         return states, trans, accept, sigs
     return None
 
@@ -2186,8 +2210,8 @@ def _compose_throughout_nfa(
             construct_name="throughout with non-boolean condition",
             source_loc=node.source_loc,
         )
-    cond_text = node.condition.text
-    cond_signals = tuple(sorted({s for s, _ in extract_signals(cond_text)}))
+    cond_text = _bool_expr_text(node.condition)
+    cond_signals = _bool_expr_signal_names(node.condition)
 
     body_nfa = _try_lift_operand(node.body, clock, label, original_text)
     assert body_nfa, "pre-checked by _is_nfa_liftable"
@@ -2340,7 +2364,7 @@ def _compose_throughout_bool(
     body_checker = compose(node.body, clock, f"{base}_body", original_text)
     all_signals = _collect_signals([cond_checker, body_checker])
     if isinstance(node.condition, BoolExpr):
-        cond_text = node.condition.text
+        cond_text = _bool_expr_text(node.condition)
     else:
         cond_text = "<cond>"
     params: dict[str, str] = {
@@ -2415,9 +2439,9 @@ def _compose_prop_if_else(
         children.append(false_checker)
     all_signals = _collect_signals(children)
     if isinstance(node.condition, BoolExpr):
-        cond_text = node.condition.text
+        cond_text = _bool_expr_text(node.condition)
         # Add condition signals to observed_signals (used in comb. MUX)
-        cond_sigs = extract_signals(cond_text)
+        cond_sigs = _bool_expr_observed(node.condition)
         cond_seen = {p for p, _ in all_signals}
         cond_extra = tuple((p, s) for p, s in cond_sigs if p not in cond_seen)
         all_signals = all_signals + cond_extra
@@ -2467,11 +2491,12 @@ def _compose_bounded_eventually(
             source_loc=node.source_loc,
         )
     module_name = module_name_from_label(label, original_text)
-    observed = extract_signals(node.body.text)
+    observed = _bool_expr_observed(node.body)
+    body_text = _bool_expr_text(node.body)
     cnt_width = max(1, math.ceil(math.log2(node.hi + 1))) if node.hi > 0 else 1
     params: dict[str, str] = {
         "module_name": module_name,
-        "bool_expr": node.body.text,
+        "bool_expr": body_text,
         "lo": str(node.lo),
         "hi": str(node.hi),
         "cnt_width": str(cnt_width),
@@ -2516,11 +2541,12 @@ def _compose_bounded_always(
             source_loc=node.source_loc,
         )
     module_name = module_name_from_label(label, original_text)
-    observed = extract_signals(node.body.text)
+    observed = _bool_expr_observed(node.body)
+    body_text = _bool_expr_text(node.body)
     cnt_width = max(1, math.ceil(math.log2(node.hi + 1))) if node.hi > 0 else 1
     params: dict[str, str] = {
         "module_name": module_name,
-        "bool_expr": node.body.text,
+        "bool_expr": body_text,
         "lo": str(node.lo),
         "hi": str(node.hi),
         "cnt_width": str(cnt_width),
@@ -2566,8 +2592,10 @@ def _compose_until(
             source_loc=node.source_loc,
         )
     module_name = module_name_from_label(label, original_text)
-    left_obs = extract_signals(node.left.text)
-    right_obs = extract_signals(node.right.text)
+    left_obs = _bool_expr_observed(node.left)
+    right_obs = _bool_expr_observed(node.right)
+    left_text = _bool_expr_text(node.left)
+    right_text = _bool_expr_text(node.right)
     # Ordered union (left first), preserving first-appearance order.
     seen: set[str] = set()
     observed: list[tuple[str, str]] = []
@@ -2577,8 +2605,8 @@ def _compose_until(
             observed.append((port, sig))
     params: dict[str, str] = {
         "module_name": module_name,
-        "left_expr": node.left.text,
-        "right_expr": node.right.text,
+        "left_expr": left_text,
+        "right_expr": right_text,
         "left_signals": ",".join(p for p, _ in left_obs),
         "right_signals": ",".join(p for p, _ in right_obs),
         "with_": "1" if node.with_ else "0",

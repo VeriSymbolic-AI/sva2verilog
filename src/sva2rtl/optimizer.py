@@ -26,8 +26,9 @@ import hashlib
 import logging
 from collections.abc import Callable
 
+from sva2rtl.bool_semantics import deserialize_bool_expr
 from sva2rtl.composer import structural_hash
-from sva2rtl.ir import CheckerNode
+from sva2rtl.ir import BoolConst, CheckerNode
 
 _LOG = logging.getLogger(__name__)
 
@@ -94,6 +95,17 @@ def constant_fold(root: CheckerNode) -> CheckerNode:
 
     def _fold(node: CheckerNode) -> CheckerNode:
         if node.template_name == "bool_expr":
+            semantic = node.params.get("bool_semantic")
+            if semantic is not None:
+                expr_node = deserialize_bool_expr(semantic)
+                if isinstance(expr_node, BoolConst):
+                    if expr_node.value == 1:
+                        new_params = {**node.params, "_const_true": "1"}
+                        return dataclasses.replace(node, params=new_params)
+                    if expr_node.value == 0:
+                        new_params = {**node.params, "_const_false": "1"}
+                        return dataclasses.replace(node, params=new_params)
+                return node
             expr = node.params.get("bool_expr", "")
             if expr in ("1'b1", "1"):
                 new_params = {**node.params, "_const_true": "1"}

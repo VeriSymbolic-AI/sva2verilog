@@ -20,9 +20,17 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from sva2rtl.bool_semantics import render_bool_expr
 from sva2rtl.errors import SvaCompileError, UnsupportedConstruct
 from sva2rtl.ir import (
+    BoolBinary,
+    BoolBitSelect,
+    BoolCompare,
+    BoolConst,
     BoolExpr,
+    BoolIdent,
+    BoolNode,
+    BoolUnary,
     ClockedSeq,
     ClockSpec,
     DisableIff,
@@ -93,6 +101,8 @@ _BOOLEAN_EXPR_KINDS: frozenset[str] = frozenset(
         "BinaryOp",
         "UnaryOp",
         "IntegerLiteral",
+        "Conversion",
+        "ElementSelect",
         "SequenceExpr",
         "Simple",
         "CallExpression",
@@ -271,10 +281,11 @@ def extract_dut_module(ast: dict[str, Any]) -> str:
 
 
 def expr_to_sv(node: dict[str, Any]) -> str:
-    """Recursively convert a slang JSON expression node to an SV text string.
+    """Convert a supported slang JSON boolean expression node to SV text.
 
-    All binary sub-expressions are wrapped in parentheses to preserve
-    precedence unambiguously in the generated RTL (prevents P8.2).
+    Rendering is structure-first: slang JSON is converted to ``BoolNode`` IR,
+    then rendered by ``render_bool_expr()``. This keeps ``expr_to_sv`` as a
+    compatibility wrapper without duplicating semantics.
 
     Parameters
     ----------
@@ -291,97 +302,226 @@ def expr_to_sv(node: dict[str, Any]) -> str:
     UnsupportedConstruct
         For any expression node kind not handled in Phase 1.
     """
+    return render_bool_expr(build_bool_expr(node))
+
+
+def build_bool_expr(node: dict[str, Any]) -> BoolNode:
+    """Build structured boolean IR from a supported slang JSON expression node."""
     source_loc = extract_source_loc(node)
     _check_unsupported(node, source_loc)
 
-    match node["kind"]:
+    kind = str(node.get("kind", ""))
+    if kind not in _BOOLEAN_EXPR_KINDS:
+        _reject_non_boolean_kind(node, source_loc)
+
+    match kind:
         case "NamedValue":
-            symbol: str = str(node.get("symbol", " "))
-            return symbol.split(" ", 1)[-1]
-
-        case "BinaryOp":
-            op_str = node.get("op", "")
-            if op_str in _UNSUPPORTED_BINARY_OPS:
-                raise UnsupportedConstruct(
-                    message="Use a future version of sva2rtl for this feature",
-                    construct_name=_UNSUPPORTED_BINARY_OPS[op_str],
-                    source_loc=source_loc,
-                )
-            if op_str not in _BINARY_OPS:
-                raise UnsupportedConstruct(
-                    message=f"Unknown binary operator: '{op_str}'",
-                    construct_name=op_str,
-                    source_loc=source_loc,
-                )
-            op = _BINARY_OPS[op_str]
-            left = expr_to_sv(node["left"])
-            right = expr_to_sv(node["right"])
-            return f"({left} {op} {right})"
-
-        case "UnaryOp":
-            op_str = node.get("op", "")
-            if op_str not in _UNARY_OPS:
-                raise UnsupportedConstruct(
-                    message=f"Unknown unary operator: '{op_str}'",
-                    construct_name=op_str,
-                    source_loc=source_loc,
-                )
-            op = _UNARY_OPS[op_str]
-            operand = expr_to_sv(node["operand"])
-            return f"({op}{operand})"
+            return BoolIdent(name=_symbol_name(node), source_loc=source_loc)
 
         case "IntegerLiteral":
-            return str(node.get("value", "0"))
+            value, width, raw = _parse_integer_literal(node, source_loc)
+            return BoolConst(value=value, width=width, raw=raw, source_loc=source_loc)
 
-        case "SequenceExpr":
-            return expr_to_sv(node["expr"])
+        case "SequenceExpr" | "Simple" | "Conversion":
+            return build_bool_expr(_required_expr_child(node, source_loc))
 
-        case "Simple":
-            # v11.0: unwrap Simple wrapper
-            return expr_to_sv(node["expr"])
-
-        case "CallExpression" | "Call":
-            func_name = str(node.get("subroutineName", node.get("subroutine", "")))
-            if func_name in _SUPPORTED_SIGNAL_FUNCS:
-                sf = _build_signal_func(node, source_loc)
-                return _reconstruct_signal_func_text(sf)
-            raise UnsupportedConstruct(
-                message=f"Unsupported system function: '{func_name}'",
-                construct_name=func_name,
+        case "UnaryOp":
+            op_str = str(node.get("op", ""))
+            if op_str != "LogicalNot":
+                raise UnsupportedConstruct(
+                    message=f"Unsupported unary boolean operator: '{op_str}'",
+                    construct_name=op_str,
+                    source_loc=source_loc,
+                )
+            return BoolUnary(
+                op="not",
+                operand=build_bool_expr(_required_child(node, "operand", source_loc)),
                 source_loc=source_loc,
             )
 
+        case "UnaryPropertyExpr":
+            op_str = str(node.get("op", ""))
+            if op_str != "Not":
+                raise UnsupportedConstruct(
+                    message=f"Unsupported UnaryPropertyExpr op: '{op_str}'",
+                    construct_name=op_str,
+                    source_loc=source_loc,
+                )
+            return BoolUnary(
+                op="not",
+                operand=build_bool_expr(_required_expr_child(node, source_loc)),
+                source_loc=source_loc,
+            )
+
+        case "BinaryOp":
+            return _build_bool_binary_op(node, source_loc)
+
         case "BinaryPropertyExpr":
-            op_str = node.get("op", "")
-            _prop_op_map = {"And": "&&", "Or": "||"}
-            if op_str not in _prop_op_map:
+            op_str = str(node.get("op", ""))
+            if op_str not in {"And", "Or"}:
                 raise UnsupportedConstruct(
                     message=f"Unsupported BinaryPropertyExpr op: '{op_str}'",
                     construct_name=op_str,
                     source_loc=source_loc,
                 )
-            op = _prop_op_map[op_str]
-            left = expr_to_sv(node["left"])
-            right = expr_to_sv(node["right"])
-            return f"({left} {op} {right})"
-
-        case "UnaryPropertyExpr":
-            op_str = node.get("op", "")
-            if op_str == "Not":
-                inner = expr_to_sv(node["expr"])
-                return f"(!{inner})"
-            raise UnsupportedConstruct(
-                message=f"Unsupported UnaryPropertyExpr op: '{op_str}'",
-                construct_name=op_str,
+            return BoolBinary(
+                op="and" if op_str == "And" else "or",
+                left=build_bool_expr(_required_child(node, "left", source_loc)),
+                right=build_bool_expr(_required_child(node, "right", source_loc)),
                 source_loc=source_loc,
             )
 
-        case _:
+        case "ElementSelect":
+            selected_value = build_bool_expr(
+                _first_child(node, ("value", "expr", "base", "operand"), source_loc)
+            )
+            if not isinstance(selected_value, BoolIdent):
+                raise UnsupportedConstruct(
+                    message="ElementSelect is only supported on named signals",
+                    construct_name="ElementSelect",
+                    source_loc=source_loc,
+                )
+            selector = _first_child(node, ("selector", "index", "select"), source_loc)
+            if selector.get("kind") != "IntegerLiteral":
+                raise UnsupportedConstruct(
+                    message="ElementSelect selector must be an integer literal",
+                    construct_name="ElementSelect",
+                    source_loc=extract_source_loc(selector),
+                )
+            index, _width, _raw = _parse_integer_literal(selector, extract_source_loc(selector))
+            return BoolBitSelect(value=selected_value, index=index, source_loc=source_loc)
+
+        case "CallExpression" | "Call":
+            func_name = str(node.get("subroutineName", node.get("subroutine", "")))
             raise UnsupportedConstruct(
-                message=f"Unsupported expression kind: '{node['kind']}'",
-                construct_name=node["kind"],
+                message=f"Unsupported boolean call or system function: '{func_name}'",
+                construct_name=func_name or kind,
                 source_loc=source_loc,
             )
+
+    raise UnsupportedConstruct(
+        message=f"Unsupported expression kind: '{kind}'",
+        construct_name=kind,
+        source_loc=source_loc,
+    )
+
+
+def _build_bool_leaf(node: dict[str, Any]) -> BoolExpr:
+    """Build a BoolExpr wrapper with structured semantics and rendered text."""
+    expr = build_bool_expr(node)
+    return BoolExpr(text=render_bool_expr(expr), expr=expr, source_loc=expr.source_loc)
+
+
+def _build_bool_binary_op(node: dict[str, Any], source_loc: SourceLoc) -> BoolNode:
+    op_str = str(node.get("op", ""))
+    left = build_bool_expr(_required_child(node, "left", source_loc))
+    right = build_bool_expr(_required_child(node, "right", source_loc))
+
+    if op_str == "LogicalAnd":
+        return BoolBinary(op="and", left=left, right=right, source_loc=source_loc)
+    if op_str == "LogicalOr":
+        return BoolBinary(op="or", left=left, right=right, source_loc=source_loc)
+    if op_str == "Equality":
+        return BoolCompare(op="eq", left=left, right=right, source_loc=source_loc)
+    if op_str == "Inequality":
+        return BoolCompare(op="ne", left=left, right=right, source_loc=source_loc)
+
+    if op_str in _UNSUPPORTED_BINARY_OPS:
+        construct_name = _UNSUPPORTED_BINARY_OPS[op_str]
+    else:
+        construct_name = op_str
+    raise UnsupportedConstruct(
+        message=f"Unsupported binary boolean operator: '{op_str}'",
+        construct_name=construct_name,
+        source_loc=source_loc,
+    )
+
+
+def _symbol_name(node: dict[str, Any]) -> str:
+    symbol = str(node.get("symbol", " "))
+    return symbol.split(" ", 1)[-1]
+
+
+def _required_expr_child(node: dict[str, Any], source_loc: SourceLoc) -> dict[str, Any]:
+    return _first_child(node, ("expr", "operand"), source_loc)
+
+
+def _required_child(node: dict[str, Any], key: str, source_loc: SourceLoc) -> dict[str, Any]:
+    value = node.get(key)
+    if isinstance(value, dict):
+        return value
+    raise UnsupportedConstruct(
+        message=f"{node.get('kind', '<unknown>')} missing required child '{key}'",
+        construct_name=str(node.get("kind", "<unknown>")),
+        source_loc=source_loc,
+    )
+
+
+def _first_child(
+    node: dict[str, Any],
+    keys: tuple[str, ...],
+    source_loc: SourceLoc,
+) -> dict[str, Any]:
+    for key in keys:
+        value = node.get(key)
+        if isinstance(value, dict):
+            return value
+    raise UnsupportedConstruct(
+        message=f"{node.get('kind', '<unknown>')} missing required child",
+        construct_name=str(node.get("kind", "<unknown>")),
+        source_loc=source_loc,
+    )
+
+
+def _parse_integer_literal(
+    node: dict[str, Any],
+    source_loc: SourceLoc,
+) -> tuple[int, int | None, str]:
+    raw_value = node.get("value", "0")
+    raw = str(raw_value)
+    width = _integer_literal_width(raw)
+    try:
+        return _integer_literal_value(raw, source_loc), width, raw
+    except ValueError as exc:
+        raise UnsupportedConstruct(
+            message=f"Unsupported integer literal: '{raw}'",
+            construct_name="IntegerLiteral",
+            source_loc=source_loc,
+        ) from exc
+
+
+def _integer_literal_value(raw: str, source_loc: SourceLoc) -> int:
+    text = raw.strip().replace("_", "")
+    lowered = text.lower()
+    if any(char in lowered for char in ("x", "z", "?")):
+        raise UnsupportedConstruct(
+            message=f"Four-state literal '{raw}' is not supported in boolean semantics",
+            construct_name="four-state literal",
+            source_loc=source_loc,
+        )
+    if "'" not in lowered:
+        return int(lowered or "0", 0)
+
+    _width_text, literal_body = lowered.split("'", 1)
+    if literal_body.startswith("s"):
+        literal_body = literal_body[1:]
+    if not literal_body:
+        raise ValueError("missing based literal body")
+
+    base_char = literal_body[0]
+    digits = literal_body[1:] if base_char in {"b", "o", "d", "h"} else literal_body
+    base = {"b": 2, "o": 8, "d": 10, "h": 16}.get(base_char, 10)
+    return int(digits or "0", base)
+
+
+def _integer_literal_width(raw: str) -> int | None:
+    text = raw.strip().replace("_", "")
+    if "'" not in text:
+        return None
+    width_text, _literal_body = text.split("'", 1)
+    if width_text.isdigit():
+        return int(width_text)
+    return None
 
 
 def extract_source_loc(node: dict[str, Any]) -> SourceLoc:
@@ -659,8 +799,9 @@ def _import_concurrent_assertion(
                     ir_node = sf_ir
                     text = _reconstruct_signal_func_text(sf_ir)
                 else:
-                    text = expr_to_sv(inner)
-                    ir_node = BoolExpr(text=text, source_loc=source_loc)
+                    bool_ir = _build_bool_leaf(inner)
+                    ir_node = bool_ir
+                    text = bool_ir.text
             elif inner_kind == "SimpleAssertionExpr":
                 # v7.0 legacy: repetition inside SimpleAssertionExpr sub-node
                 rep_kind2 = inner.get("repetition", {}).get("kind", "")
@@ -672,11 +813,13 @@ def _import_concurrent_assertion(
                     ir_node = rep_ir
                     text = _reconstruct_rep_text(rep_ir)
                 else:
-                    text = expr_to_sv(inner)
-                    ir_node = BoolExpr(text=text, source_loc=source_loc)
+                    bool_ir = _build_bool_leaf(inner)
+                    ir_node = bool_ir
+                    text = bool_ir.text
             else:
-                text = expr_to_sv(inner)
-                ir_node = BoolExpr(text=text, source_loc=source_loc)
+                bool_ir = _build_bool_leaf(inner)
+                ir_node = bool_ir
+                text = bool_ir.text
         case "SequenceConcat":
             seq_ir = _build_seq_concat(expr_node, source_loc)
             ir_node = seq_ir
@@ -767,17 +910,17 @@ def _import_concurrent_assertion(
         case _:
             _check_unsupported(expr_node, extract_source_loc(expr_node))
             _reject_non_boolean_kind(expr_node, extract_source_loc(expr_node))
-            text = expr_to_sv(expr_node)
-            ir_node = BoolExpr(text=text, source_loc=source_loc)
+            bool_ir = _build_bool_leaf(expr_node)
+            ir_node = bool_ir
+            text = bool_ir.text
 
     # ── disable iff wrapping ────────────────────────────────────────────────
     # slang puts the disable condition in PropertySpec.disableIff when the
     # property uses ``disable iff (cond) <body>`` syntax.
     disable_node: dict[str, Any] | None = body.get("disableIff")
     if disable_node is not None:
-        disable_loc = extract_source_loc(disable_node)
-        cond_text = expr_to_sv(disable_node)
-        cond_ir = BoolExpr(text=cond_text, source_loc=disable_loc)
+        cond_ir = _build_bool_leaf(disable_node)
+        cond_text = cond_ir.text
         ir_node = DisableIff(condition=cond_ir, body=ir_node, source_loc=source_loc)
         text = f"disable iff ({cond_text}) {text}"
 
@@ -843,8 +986,7 @@ def _dispatch_expr_to_ir(node: dict[str, Any], _visited: frozenset[str] = frozen
         case _:
             _check_unsupported(node, source_loc)
             _reject_non_boolean_kind(node, source_loc)
-            text = expr_to_sv(node)
-            return BoolExpr(text=text, source_loc=source_loc)
+            return _build_bool_leaf(node)
 
 
 def _build_seq_repetition(

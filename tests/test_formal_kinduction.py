@@ -32,12 +32,14 @@ from pathlib import Path
 import pytest
 
 from sva2rtl.ast_importer import import_assertion
+from sva2rtl.bool_semantics import deserialize_bool_expr, render_bool_expr
 from sva2rtl.composer import compose
 from sva2rtl.formal_equiv import (
     run_sva_equiv_check,
+    run_sva_miter_check,
     sby_is_available,
 )
-from sva2rtl.ir import CheckerNode
+from sva2rtl.ir import BoolExpr, CheckerNode, ClockSpec, SeqConcat, SeqRepetition, SourceLoc
 from sva2rtl.normalizer import normalize
 from sva2rtl.optimizer import optimize
 
@@ -48,6 +50,7 @@ pytestmark = pytest.mark.skipif(
 
 _FIXTURES = Path(__file__).parent / "fixtures"
 _DEFAULT_PROVE_TIMEOUT_SECONDS = 600
+_PHASE10_PROVE_TIMEOUT_SECONDS = 60
 
 
 def _prove_timeout() -> int:
@@ -61,12 +64,121 @@ def _prove_timeout() -> int:
         return _DEFAULT_PROVE_TIMEOUT_SECONDS
 
 
+def _phase10_prove_timeout() -> int:
+    """Keep Phase 10 expansion proofs bounded for local developer loops."""
+    return min(_prove_timeout(), _PHASE10_PROVE_TIMEOUT_SECONDS)
+
+
 def _build(name: str) -> CheckerNode:
     ast = json.loads((_FIXTURES / f"{name}.json").read_text(encoding="utf-8"))
     node, clock, label, text = import_assertion(ast)
     node = normalize(node)
     checker = optimize(compose(node, clock, label, text))
     return checker
+
+
+def _semantic_bool_reference_expr(checker: CheckerNode) -> str:
+    """Render the formal reference expression from bool_semantic params."""
+    payload = checker.params.get("bool_semantic")
+    assert payload is not None, "bool_expr checker must carry bool_semantic"
+    return render_bool_expr(deserialize_bool_expr(payload))
+
+
+def _loc() -> SourceLoc:
+    return SourceLoc("test.sv", 1, 1)
+
+
+def _clock(loc: SourceLoc) -> ClockSpec:
+    return ClockSpec(edge="posedge", signal="clk", source_loc=loc)
+
+
+def _delay_ref_module(name: str, m: int, n: int) -> str:
+    """Independent single-attempt reference monitor for ``a ##[m:n] b``."""
+    return f"""\
+module {name} (
+    input  logic clk,
+    input  logic rst_n,
+    input  logic start,
+    input  logic a,
+    input  logic b,
+    output logic pass
+);
+    logic [7:0] cnt_q;
+    logic       armed_q;
+    always_ff @(posedge clk) begin
+        if (!rst_n) begin
+            cnt_q   <= 8'd0;
+            armed_q <= 1'b0;
+        end else if (start && a) begin
+            cnt_q   <= 8'd1;
+            armed_q <= 1'b1;
+        end else if (armed_q) begin
+            if (cnt_q >= 8'd{n}) armed_q <= 1'b0;
+            cnt_q <= cnt_q + 8'd1;
+        end
+    end
+    wire b_sample = armed_q && (cnt_q >= 8'd{m}) && (cnt_q <= 8'd{n});
+    logic pass_q;
+    always_ff @(posedge clk) begin
+        if (!rst_n) pass_q <= 1'b0;
+        else        pass_q <= b_sample && b;
+    end
+    assign pass = pass_q;
+endmodule
+"""
+
+
+def _build_delay_checker(m: int, n: int) -> CheckerNode:
+    """Compose+optimize the monitor for ``a ##[m:n] b`` directly from IR."""
+    loc = _loc()
+    seq = SeqConcat(
+        elements=(BoolExpr(text="a", source_loc=loc), BoolExpr(text="b", source_loc=loc)),
+        delays=((m, n),),
+        source_loc=loc,
+    )
+    text = f"a ##[{m}:{n}] b" if m != n else f"a ##{n} b"
+    return optimize(compose(seq, _clock(loc), "dly", text))
+
+
+def _ref_rep_consecutive(name: str, n: int) -> str:
+    """Independent reference for ``a[*N]`` consecutive repetition."""
+    return f"""
+module {name} (
+    input  logic clk, rst_n, start, a,
+    output logic pass
+);
+    logic [1:0] cnt_q;
+    logic running_q;
+    always_ff @(posedge clk) begin
+        if (!rst_n) begin
+            cnt_q     <= 0;
+            running_q <= 1'b0;
+        end else if (start && a) begin
+            cnt_q     <= 1;
+            running_q <= 1'b1;
+        end else if (running_q && a) begin
+            if (cnt_q < {n})
+                cnt_q <= cnt_q + 1'b1;
+        end else if (running_q && !a) begin
+            running_q <= 1'b0;
+            cnt_q     <= 0;
+        end
+    end
+    assign pass = running_q && a && (cnt_q == {n});
+endmodule
+"""
+
+
+def _build_rep_checker(n: int) -> CheckerNode:
+    """Compose+optimize the monitor for ``a[*N]`` directly from IR."""
+    loc = _loc()
+    node = SeqRepetition(
+        expr=BoolExpr(text="a", source_loc=loc),
+        rep_min=n,
+        rep_max=n,
+        source_loc=loc,
+    )
+    return optimize(compose(node, _clock(loc), "rep", f"a[*{n}]"))
 
 
 def _is_induction_boundary(output: str) -> bool:
@@ -117,8 +229,7 @@ class TestKinductionBoolExpr:
         This is a COMPLETE proof (all reachable states), not just bounded.
         """
         checker = _build("bool_simple")
-        sigs = [p for p, _ in checker.observed_signals]
-        expr = " && ".join(sigs)
+        expr = _semantic_bool_reference_expr(checker)
         helper = (
             "    logic prev_expr_q;\n"
             "    logic valid_q;\n"
@@ -258,3 +369,74 @@ class TestKinductionChanged:
             timeout=_prove_timeout(),
         )
         _assert_kinduction_passed(passed, output, "$changed")
+
+
+# ── Phase 10 expansion: small finite-state templates ─────────────────────
+
+
+class TestKinductionFixedDelay:
+    """Attempt complete proof for fixed-delay sequence monitor pass behavior."""
+
+    def test_fixed_delay_kinduction_prove(self) -> None:
+        """Phase 10: `a ##1 b` pass behavior attempted with k-induction."""
+        checker = _build_delay_checker(1, 1)
+        ref_name = "ref_delay_1_1_prove"
+        passed, output = run_sva_miter_check(
+            checker,
+            _delay_ref_module(ref_name, 1, 1),
+            ref_name,
+            compare="pass",
+            depth=10,
+            mode="prove",
+            timeout=_phase10_prove_timeout(),
+        )
+        _assert_kinduction_passed(passed, output, "fixed delay ##1")
+
+
+class TestKinductionImplication:
+    """Attempt complete proof for simple overlapping implication."""
+
+    def test_overlap_implication_kinduction_prove(self) -> None:
+        """Phase 10: `a |-> b` fail behavior attempted with k-induction."""
+        checker = _build("implication_overlap")
+        a = checker.children[0].observed_signals[0][0]
+        b = checker.children[1].observed_signals[0][0]
+        helper = (
+            f"    logic {a}_d1, {b}_d1, vld1;\n"
+            "    always_ff @(posedge clk) begin\n"
+            "        if (!rst_n) begin\n"
+            f"            {a}_d1 <= 1'b0; {b}_d1 <= 1'b0; vld1 <= 1'b0;\n"
+            "        end else begin\n"
+            f"            {a}_d1 <= {a}; {b}_d1 <= {b}; vld1 <= 1'b1;\n"
+            "        end\n"
+            "    end\n"
+        )
+        reference = f"vld1 & {a}_d1 & ~{b}_d1"
+        passed, output = run_sva_equiv_check(
+            checker,
+            reference,
+            helper_regs=helper,
+            depth=10,
+            mode="prove",
+            timeout=_phase10_prove_timeout(),
+        )
+        _assert_kinduction_passed(passed, output, "overlap implication")
+
+
+class TestKinductionRepConsecutive:
+    """Attempt complete proof for fixed consecutive repetition."""
+
+    def test_rep_fixed_kinduction_prove(self) -> None:
+        """Phase 10: `a[*3]` pass behavior attempted with k-induction."""
+        checker = _build_rep_checker(3)
+        ref_name = "ref_rep3_prove"
+        passed, output = run_sva_miter_check(
+            checker,
+            _ref_rep_consecutive(ref_name, 3),
+            ref_name,
+            compare="pass",
+            depth=10,
+            mode="prove",
+            timeout=_phase10_prove_timeout(),
+        )
+        _assert_kinduction_passed(passed, output, "fixed consecutive repetition [*3]")

@@ -1,6 +1,6 @@
 # sva2verilog 项目进展报告
 
-> 更新日期：2026-07-08
+> 更新日期：2026-07-09
 > 仓库：public GitHub repository
 > 当前版本：v1.5.2 + current main hardening
 
@@ -10,7 +10,7 @@ sva2verilog 是一个开源的 SystemVerilog Assertion (SVA) 到可综合 RTL �
 
 - 测试套件：1094 passed, 4 skipped, 1 xfailed, 0 failed
 - 代码质量：mypy --strict 0 errors, ruff 0 errors
-- 形式化验证：62 个非循环 BMC 等价证明（覆盖所有已支持算子）+ 5 个 Tier-A k-induction 完备证明
+- 形式化验证：历史基线为 62 个非循环 BMC 等价证明（覆盖所有已支持算子）+ 5 个 Tier-A k-induction 完备证明；Phase 10 本地目标文件当前为 56 个 BMC/契约测试 + 8 个 k-induction 证明目标
 - 覆盖度：约 95%+ 的实际断言场景
 - 支持状态权威：`SUPPORT_MATRIX.md` 记录逐构造支持边界、证据完整度和降级原因；README / SUPPORTED_CONSTRUCTS 只作概览和解释
 - 工业级验证缺口：已记录在 `INDUSTRIAL_VALIDATION_GAPS.md`，包含当前进展、P0/P1/P2 严重度、修复计划和 fully-supported 定义标准
@@ -82,6 +82,16 @@ remain tracked in `SUPPORT_MATRIX.md` and later v1.6 phases.
 
 新增 `tests/test_formal_kinduction.py`，对 `bool_expr`、`$rose`、`$fell`、`$stable`、`$changed` 5 个 Tier-A 核心监控器运行 SymbiYosys `prove` 模式（BMC basecase + induction step）。本轮修复 `$stable` / `$changed` reference 的反向错误，并收紧 xfail 判定：只有 induction 未收敛/超时才 xfail，真实 counterexample 必须失败。
 
+### Phase 10 形式化深度更新
+
+Phase 10 扩展的是形式化 harness 深度，而不是新增 SVA 语言范围。本地目标验证记录：
+
+- `tests/test_formal_harness_modes.py`：8 个 harness 文本契约测试，覆盖 `continuous`、`single_shot`、`arbitrary_start`、`arbitrary_disable`、`reset_recovery`、full-contract 输出集合、cover probe 和 reference `disable_i` 连接。
+- `tests/test_formal_sva_equiv.py`：56 个 BMC/契约测试，新增代表性 `arbitrary_start`、`arbitrary_disable`、`reset_recovery` 和 full-contract miter slice。具体深度记录在 `SUPPORT_MATRIX.md` 的 Phase 10 formal evidence ledger。
+- `tests/test_formal_kinduction.py`：8 个 k-induction proof 目标，除了原 5 个 Tier-A leaf/sampled-value 目标，新增 `##1` fixed delay、simple `|->` overlap implication、`[*3]` fixed consecutive repetition。
+- full-contract 证据是代表性子集：bool、`$rose`、simple overlap implication、fixed consecutive repetition；`disable iff` 当前提升为 variable-disable pass/fail BMC，不单独宣称 full-contract bundle 已闭环。
+- 仍不把 Phase 10 本地目标验证等同于 remote full formal sweep、Yosys synthesis gate 或随机差分测试。
+
 ### GitHub 发布
 
 推送到公开 GitHub 仓库，干净历史（orphan branch），无私人身份或内部资料。
@@ -91,7 +101,7 @@ remain tracked in `SUPPORT_MATRIX.md` and later v1.6 phases.
 1. first_match posedge bug：存在多版本未发现，因为该算子缺仿真和形式化测试。教训：每个算子必须有 RTL 编译验证 + 形式化等价。
 2. mypy 49 errors：CI lint job 一直失败但未处理。教训：CI 红就必须立即修。
 3. 形式化参考时序对齐：写 BMC miter 参考监控器时，寄存延迟必须与 RTL 模板精确对齐。5/6 新参考需要时序迭代。教训：时序对齐是形式化等价验证中最耗时的部分。
-4. GitHub workflow scope 与 CI 时长：此前 OAuth token 缺 workflow scope，CI 文件无法推送；后续全量 formal 放在 push/PR CI 中又导致超时。本轮已切分为快速 push/PR baseline 与 manual/scheduled `Full Formal`，并确认 run `28931676000` 绿灯。
+4. GitHub workflow 权限与 CI 时长：此前 GitHub workflow 权限不足，CI 文件无法推送；后续全量 formal 放在 push/PR CI 中又导致超时。本轮已切分为快速 push/PR baseline 与 manual/scheduled `Full Formal`，并确认 run `28931676000` 绿灯。
 
 ## 验证体系
 
@@ -99,8 +109,8 @@ remain tracked in `SUPPORT_MATRIX.md` and later v1.6 phases.
 
 1. 行为预言机（950 单元测试）：纯 Python IEEE 模型，与 RTL 结构独立
 2. iverilog/Verilator 仿真交叉验证（129 测试）：逐周期 pass/fail 比对
-3. SymbiYosys BMC 形式化等价（62 证明）：独立 IEEE 1800 参考监控器 + sby BMC miter
-4. SymbiYosys k-induction 完备证明（5 证明）：Tier-A 核心监控器的无界证明
+3. SymbiYosys BMC 形式化等价（历史全算子基线 62 证明；Phase 10 目标文件当前 56 个 BMC/契约测试）：独立 IEEE 1800 参考监控器 + sby BMC miter
+4. SymbiYosys k-induction 完备证明（Phase 10 当前 8 个证明目标）：Tier-A 核心监控器加 `##1`、simple `|->`、`[*3]` 代表性小状态模板
 
 RISK-01 纪律：预言机和参考监控器必须与 RTL 实现结构独立。曾两次发现被循环证明掩盖的真实缺陷（BUG-DELAY-01、BUG-IMPL-01）。
 
@@ -108,7 +118,7 @@ RISK-01 纪律：预言机和参考监控器必须与 RTL 实现结构独立。�
 
 - 1 xfail：`bool_expr` 叶子不独立产生 fail 的结构性见证，fail 语义来自蕴含父节点
 - ##0 fusion 保留 +1；当前 main 对 boolean `##0` 发 warning，并建议用 `a && b` 替代。自动 rewrite/reject 仍是后续语义迁移工作
-- 62 个全算子等价证明仍是 BMC 有界（depth=15-30）；k-induction 已覆盖 5 个 Tier-A 核心监控器，尚未扩展到全部算子
+- 全算子等价证明仍以 BMC 有界为主（历史 depth=15-30）；k-induction 当前覆盖 8 个小状态目标，尚未扩展到全部算子、复杂 NFA、liveness 或 CDC 边界
 - 多时钟形式化等价永久排除（行业通用限制）
 - NFA 仍拒绝：范围延迟操作数、intersect 内 SeqOr/goto/nonconsec
 
@@ -124,7 +134,7 @@ RISK-01 纪律：预言机和参考监控器必须与 RTL 实现结构独立。�
 
 4. 变异测试（mutmut）：验证测试套件区分力，目标变异杀死率 >85%
 5. 差分测试框架：随机生成 SVA → 编译 → 仿真 → 比对，发现未知组合 bug
-6. 扩展 k-induction：从 5 个 Tier-A 核心证明扩大到更多 BMC miter
+6. 继续扩展 k-induction：Phase 10 已从 5 个 Tier-A 核心证明扩大到 8 个小状态目标；下一步需要为更多 BMC-only 家族补 invariants/cutpoints 或明确保留 bounded 边界
 7. v1.6 决策：单线程局部变量 / 多时钟×NFA / FPGA 原型（需求拉动）
 
 ### 长期

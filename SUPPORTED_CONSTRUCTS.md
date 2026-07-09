@@ -5,6 +5,16 @@ Exact support status, subset boundaries, and verification evidence are governed
 by [SUPPORT_MATRIX.md](SUPPORT_MATRIX.md). Treat the tiers below as implemented
 syntax groups, not as full-evidence claims.
 
+## Formal Evidence Note
+
+Phase 10 adds focused formal harness evidence for the existing language subset:
+representative `arbitrary_start`, `arbitrary_disable`, `reset_recovery`,
+full-contract, cover-probe, and k-induction slices are recorded in
+`SUPPORT_MATRIX.md`. These are evidence-strength upgrades for named constructs
+and modes, not a blanket claim that every supported operator has full-contract
+or arbitrary-start proof coverage. Synthesis gates, random differential testing,
+and complex NFA/liveness proof expansion remain separate validation work.
+
 ## Tier 1 Operators (Implemented Core Subset)
 
 | Operator | Category | Description | Example SVA | Generated Template |
@@ -236,7 +246,9 @@ multi-thread slot allocation) now supports:
   prove equivalence against shift-register reference monitors (structurally
   distinct from one-hot NFA). 18 dual-oracle iverilog simulations match
   cycle-for-cycle. Behavioral oracle uses rule-based thread simulator
-  (RISK-01 independent).
+  (RISK-01 independent). Phase 10 does not promote the complex NFA composition
+  family to full-contract or k-induction proof; those boundaries remain governed
+  by `SUPPORT_MATRIX.md`.
 
 **Still rejected**: ranged delays in operands, SeqOr/SeqGotoRep/
 SeqNonconsecRep inside intersections, multi-cycle condition expressions
