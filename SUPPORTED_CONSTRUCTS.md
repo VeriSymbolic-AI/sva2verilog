@@ -35,7 +35,7 @@ mutation/coverage release metrics remain separate validation work.
 > consequent NFA start. Multi-thread slots (T ≤ 4) handle overlapping ant matches.
 > Single-cycle consequents continue to use the formally-proven overlap_bitvec/
 > nonoverlap path (byte-identical to v1.5.0). Ranged delays in the consequent
-> (`a |-> b ##[2:5] c`) are still rejected — use a fixed delay or split the
+> (`a |-> b ##[2:5] c`) are now supported via NFA engine (v1.7 LANG-03)
 > property.
 | `[*N]` | Repetition | Exact consecutive repetition | `a[*3]` | Counter counts N consecutive matches |
 | `[*M:N]` | Repetition | Bounded consecutive repetition | `a[*1:4]` | Counter with [M,N] range check |
@@ -189,13 +189,10 @@ proven non-circularly (FPV) in `tests/test_formal_sva_equiv.py`
 > circular equivalence test. It was found and fixed in v1.4; see
 > `.planning/BUG-delay-spacing.md`.
 
-> **Fusion limitation (`##0`).** `a ##0 b` (and any ranged delay whose lower
-> bound is 0) requires sampling two operands in the SAME cycle, which the
-> registered-leaf token-passing pipeline cannot express; `##0` retains a 1-cycle
-> separation. Current main emits a warning for boolean `##0` and suggests
-> `a && b` for true same-cycle conjunction. Automatic rewrite/reject remains a
-> tracked future migration because it changes compile-time behavior for existing
-> zero-delay properties.
+> **Fusion (`##0`).** `a ##0 b` with two BoolExpr operands is automatically
+> rewritten to `(a) && (b)` in the normalizer (v1.7 LANG-01). The registered-leaf
+> pipeline no longer emits non-standard RTL for `##0`. Non-BoolExpr `##0` forms
+> (e.g. `a ##0 (b[*3])`) are rejected at compile time with a suggestion.
 
 ### Semantic boundary: intersect / within / throughout (v1.5 update)
 
@@ -255,17 +252,17 @@ multi-thread slot allocation) now supports:
   family to full-contract or k-induction proof; those boundaries remain governed
   by `SUPPORT_MATRIX.md`.
 
-**Still rejected**: ranged delays in operands, SeqOr/SeqGotoRep/
-SeqNonconsecRep inside intersections, multi-cycle condition expressions
-in throughout.
+**Now supported (v1.7 LANG-02..04):** SeqOr, ranged delays, ranged repetition,
+SeqGotoRep, SeqNonconsecRep inside intersections/within/throughout via the NFA
+engine. The only remaining rejection is K-state budget exceedance (>32).
 
 ### Fixed-count `[->N]` / `[=N]` boundary
 
-`[->N]` and `[=N]` are supported only for fixed positive counts. Ranged
+`[->N]` and `[=N]` are supported for fixed positive counts. Ranged
 goto/non-consecutive repetition such as `a[->2:4]` or `a[=1:3]` is recognized
-and rejected with `SVA-E002`; v1 does not silently collapse the range to the
-lower bound. Split the property or use an explicit fixed count until ranged
-count semantics are implemented.
+and rejected with `SVA-E002`; use a fixed count until ranged count NFA
+semantics are implemented. Fixed-count goto/nonconsecutive are now NFA-liftable
+(v1.7 LANG-04).
 
 ### Unsupported / Deliberately Rejected Operators
 

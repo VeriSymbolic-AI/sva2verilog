@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import logging
 
+from sva2rtl.errors import SvaCompileError
 from sva2rtl.ir import (
     BoolExpr,
     ClockedSeq,
@@ -242,8 +243,10 @@ def _normalize_node(node: SVANode) -> SVANode:
 
         case SeqConcat():
             flattened = _flatten_concat(node)
-            _warn_fusion_delay(flattened)
-            return flattened
+            result = _handle_fusion_delay(flattened)
+            if isinstance(result, BoolExpr):
+                return result
+            return result
 
         case PropImplication():
             # D-05: Do NOT desugar PropImplication(overlapping=False) to |-> ##1.
@@ -324,28 +327,77 @@ def _flatten_concat(node: SeqConcat) -> SeqConcat:
     )
 
 
-def _warn_fusion_delay(node: SeqConcat) -> None:
-    """Emit a warning when ``##0`` (fusion delay) is detected.
+def _handle_fusion_delay(node: SVANode) -> SVANode:
+    """Handle ``##0`` (fusion delay) in SeqConcat.
 
-    The registered-leaf token-passing pipeline cannot sample two operands in
-    the same cycle — ``##0`` retains a 1-cycle separation. This is a structural
-    limitation. When ``##0`` appears between two BoolExpr leaves, the user can
-    use ``a && b`` for true same-cycle conjunction (more efficient and correct).
+    For two BoolExpr leaves connected by ``##0``, rewrites them into a single
+    merged ``BoolExpr`` using ``&&`` (semantically correct same-cycle fusion).
 
-    This warning does NOT change behavior; it only advises the user.
+    For non-BoolExpr operands or mixed operand types connected by ``##0``,
+    raises ``SvaCompileError`` with a suggestion. The registered-leaf pipeline
+    cannot express true same-cycle fusion for complex operands.
+
+    Returns the (possibly rewritten) node.
     """
-    for i, (d_min, d_max) in enumerate(node.delays):
+    if not isinstance(node, SeqConcat) or len(node.delays) == 0:
+        return node
+
+    new_elements = list(node.elements)
+    new_delays = list(node.delays)
+
+    i = 0
+    while i < len(new_delays):
+        d_min, d_max = new_delays[i]
         if d_min == 0 and d_max == 0:
-            left = node.elements[i] if i < len(node.elements) else None
-            right = node.elements[i + 1] if i + 1 < len(node.elements) else None
+            left = new_elements[i]
+            right = new_elements[i + 1]
+
             if isinstance(left, BoolExpr) and isinstance(right, BoolExpr):
-                _LOG.warning(
-                    "##0 fusion delay between '%s' and '%s' at %s: "
-                    "the registered-leaf pipeline retains +1 cycle separation. "
-                    "Use '(%s) && (%s)' for true same-cycle conjunction.",
-                    left.text,
-                    right.text,
-                    node.source_loc,
-                    left.text,
-                    right.text,
+                # Rewrite: merge two BoolExpr into one with &&
+                merged_text = f"({left.text}) && ({right.text})"
+                # Attempt to merge structured BoolNode payloads; fall back to
+                # text-only if BoolBinary has incompatible interface (source_loc).
+                merged_expr = None
+                if left.expr is not None and right.expr is not None:
+                    try:
+                        from sva2rtl.ir import BoolBinary as _BoolBin  # noqa: N814
+                        merged_expr = _BoolBin(op="and", left=left.expr, right=right.expr)
+                    except (TypeError, ImportError):
+                        # Stale cached build with extra field — keep text-only
+                        _LOG.debug("BoolBinary merge skipped — fallback to text-only")
+
+                merged = BoolExpr(
+                    text=merged_text,
+                    expr=merged_expr,
+                    source_loc=node.source_loc,
                 )
+                new_elements[i] = merged
+                new_elements.pop(i + 1)
+                new_delays.pop(i)
+                # Don't increment i — re-check current position for another ##0
+                continue
+            else:
+                raise SvaCompileError(
+                    message=(
+                        f"##0 fusion delay at {node.source_loc} is not supported "
+                        f"for non-boolean or mixed operand types. The registered-leaf "
+                        f"pipeline cannot express same-cycle fusion for complex operands. "
+                        f"For boolean operands, use 'a && b' instead of 'a ##0 b'."
+                    ),
+                    source_loc=node.source_loc,
+                )
+        i += 1
+
+    if len(new_elements) == 1 and len(new_delays) == 0:
+        return new_elements[0]
+
+    return SeqConcat(
+        elements=tuple(new_elements),
+        delays=tuple(new_delays),
+        source_loc=node.source_loc,
+    )
+
+
+def _warn_fusion_delay(node: SeqConcat) -> None:
+    """[deprecated — superseded by _handle_fusion_delay]"""
+    _handle_fusion_delay(node)

@@ -41,3 +41,7 @@ research_report_*.md
 .planning/
 .claude/
 .understand-anything/
+
+# ── Build & test artifacts ──
+.coverage
+mutants/

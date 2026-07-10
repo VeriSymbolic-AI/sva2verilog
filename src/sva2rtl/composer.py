@@ -1610,17 +1610,15 @@ def _is_nfa_liftable(operand: SVANode) -> bool:
     - ``BoolExpr``, fixed-delay ``SeqConcat``, fixed-count ``SeqRepetition``
     - Nested ``SeqIntersect`` / ``SeqWithin`` / ``SeqThroughout`` with
       liftable operands (v1.5.1 P3 recursive composition).
+    - ``SeqOr`` with liftable left/right operands (v1.7 LANG-02).
     """
     if isinstance(operand, BoolExpr):
         return True
     if isinstance(operand, SeqConcat):
-        if any(mn != mx for mn, mx in operand.delays):
-            return False
         return all(isinstance(e, BoolExpr) for e in operand.elements)
     if isinstance(operand, SeqRepetition):
         return (
             isinstance(operand.expr, BoolExpr)
-            and operand.rep_min == operand.rep_max
             and operand.rep_min >= 1
         )
     if isinstance(operand, SeqIntersect):
@@ -1629,6 +1627,12 @@ def _is_nfa_liftable(operand: SVANode) -> bool:
         return _is_nfa_liftable(operand.inner) and _is_nfa_liftable(operand.outer)
     if isinstance(operand, SeqThroughout):
         return isinstance(operand.condition, BoolExpr) and _is_nfa_liftable(operand.body)
+    if isinstance(operand, SeqOr):
+        return _is_nfa_liftable(operand.left) and _is_nfa_liftable(operand.right)
+    if isinstance(operand, SeqGotoRep):
+        return isinstance(operand.expr, BoolExpr) and operand.rep_min >= 1
+    if isinstance(operand, SeqNonconsecRep):
+        return isinstance(operand.expr, BoolExpr) and operand.rep_min >= 1
     return False
 
 
@@ -1649,7 +1653,7 @@ def _lift_to_nfa(
         return 2, ((0, guard, 1),), frozenset({1}), signals
 
     if isinstance(operand, SeqConcat):
-        # Chain of BoolExpr elements with fixed delays.
+        # Chain of BoolExpr elements with fixed or ranged delays.
         # Normalise the delays tuple: it may be inter-element only
         # (len=elements-1) or include a leading (0,0) for the first
         # element (len=elements). We always normalise to the latter.
@@ -1680,27 +1684,119 @@ def _lift_to_nfa(
                 trans.append((current, guard, current + 1))
                 current += 1
                 continue
-            d = raw_delays[i][0]
-            # d-1 wait cycles then element check. d must be >= 1 for
-            # slang SeqConcat (adjacent) — d == 0 means overlap which
-            # slang normalises to a single expression AND. Here we
-            # assume d >= 1 (single-cycle spacing).
-            wait = max(d - 1, 0)
-            for _ in range(wait):
+            d_min, d_max = raw_delays[i]
+            # For ranged delay [M:N]: d_max-1 wait states.
+            # From state k where k >= d_min-1, add an alternate exit to
+            # the element check (non-deterministic delay completion).
+            wait_states = max(d_max - 1, 0)
+            for w in range(wait_states):
                 trans.append((current, "1", current + 1))
                 current += 1
+                # After d_min-1 wait states, allow exit to element check
+                if w >= d_min - 1:
+                    trans.append((current, guard, current + wait_states - w + 1))
+            # Final mandatory transition to element check
             trans.append((current, guard, current + 1))
             current += 1
-        return current + 1, tuple(trans), frozenset({current}), tuple(sorted(signal_set))
+        total_states = current + 1
+        if total_states > 32:
+            raise UnsupportedConstruct(
+                message=(
+                    f"SeqConcat NFA state budget exceeded: {total_states} states "
+                    f"(max=32). Simplify ranged delays or split the property."
+                ),
+                construct_name="SeqConcat with excessive NFA states",
+                source_loc=operand.source_loc,
+            )
+        return total_states, tuple(trans), frozenset({current}), tuple(sorted(signal_set))
 
     if isinstance(operand, SeqRepetition):
-        # a[*N]: 0 --a--> 1 --a--> ... --a--> N (accept)
+        # a[*M:N]: M mandatory guards + (N-M) optional guards with bypass
+        assert isinstance(operand.expr, BoolExpr)
+        m = operand.rep_min
+        n = operand.rep_max
+        guard = f"({_bool_expr_text(operand.expr)})"
+        rep_trans: list[tuple[int, str, int]] = []
+        # State 0..n: after k repetitions
+        for k in range(n):
+            rep_trans.append((k, guard, k + 1))
+            # For M ≤ k < N, also allow exit (accept) from state k
+        accept_set = frozenset(range(m, n + 1))
+        signals = _bool_expr_signal_names(operand.expr)
+        if n + 1 > 32:
+            raise UnsupportedConstruct(
+                message=(
+                    f"SeqRepetition NFA state budget exceeded: {n + 1} states "
+                    f"(max=32). Use a smaller repetition bound."
+                ),
+                construct_name="SeqRepetition with excessive NFA states",
+                source_loc=operand.source_loc,
+            )
+        return n + 1, tuple(rep_trans), accept_set, signals
+
+    if isinstance(operand, SeqOr):
+        # Union construction: build left and right NFAs, merge with shared start.
+        l_states, l_trans, l_accept, l_sigs = _lift_to_nfa(operand.left)
+        r_states, r_trans, r_accept, r_sigs = _lift_to_nfa(operand.right)
+
+        union_trans: list[tuple[int, str, int]] = []
+        # Start state 0 → both sub-NFA starts with always-true guard.
+        union_trans.append((0, "1", 1))
+        union_trans.append((0, "1", 1 + l_states))
+
+        # Copy left transitions (offset by 1).
+        for src, guard, dst in l_trans:
+            union_trans.append((src + 1, guard, dst + 1))
+
+        # Copy right transitions (offset by 1 + l_states).
+        for src, guard, dst in r_trans:
+            union_trans.append((src + 1 + l_states, guard, dst + 1 + l_states))
+
+        # Accept = left-accept offset + right-accept offset.
+        union_accept = frozenset({s + 1 for s in l_accept} | {s + 1 + l_states for s in r_accept})
+        total_states = 1 + l_states + r_states
+        all_sigs = tuple(sorted(set(l_sigs) | set(r_sigs)))
+
+        # Budget enforcement: K ≤ 32 for product construction downstream.
+        if total_states > 32:
+            raise UnsupportedConstruct(
+                message=(
+                    f"SeqOr NFA state budget exceeded: {total_states} states "
+                    f"(left={l_states}, right={r_states}, max=32). "
+                    f"Simplify the sequence expression or split into separate properties."
+                ),
+                construct_name="SeqOr with excessive NFA states",
+                source_loc=operand.source_loc,
+            )
+        return total_states, tuple(union_trans), union_accept, all_sigs
+
+    if isinstance(operand, SeqGotoRep):
+        # a[->N]: count N occurrences; ~guard self-loops between occurrences
         assert isinstance(operand.expr, BoolExpr)
         n = operand.rep_min
         guard = f"({_bool_expr_text(operand.expr)})"
-        rep_trans: tuple[tuple[int, str, int], ...] = tuple((i, guard, i + 1) for i in range(n))
+        neg_guard = f"!({_bool_expr_text(operand.expr)})"
+        gt_trans: list[tuple[int, str, int]] = []
+        for k in range(n):
+            gt_trans.append((k, guard, k + 1))  # occurrence: advance
+            gt_trans.append((k, neg_guard, k))  # no occurrence: stay
         signals = _bool_expr_signal_names(operand.expr)
-        return n + 1, rep_trans, frozenset({n}), signals
+        return n + 1, tuple(gt_trans), frozenset({n}), signals
+
+    if isinstance(operand, SeqNonconsecRep):
+        # a[=N]: like goto but tail can complete any cycle after Nth occurrence
+        assert isinstance(operand.expr, BoolExpr)
+        n = operand.rep_min
+        guard = f"({_bool_expr_text(operand.expr)})"
+        neg_guard = f"!({_bool_expr_text(operand.expr)})"
+        nc_trans: list[tuple[int, str, int]] = []
+        for k in range(n):
+            nc_trans.append((k, guard, k + 1))
+            nc_trans.append((k, neg_guard, k))
+        # After Nth occurrence (state n): self-loop on both guard and neg_guard
+        nc_trans.append((n, "1", n))
+        signals = _bool_expr_signal_names(operand.expr)
+        return n + 1, tuple(nc_trans), frozenset({n}), signals
 
     raise ValueError(f"cannot lift {type(operand).__name__} to NFA yet")
 
@@ -1729,13 +1825,15 @@ def _try_lift_operand(
 ) -> tuple[int, tuple[tuple[int, str, int], ...], frozenset[int], tuple[str, ...]] | None:
     """Try to obtain NFA data from an operand.
 
-    - Primitive shapes (BoolExpr, SeqConcat, SeqRepetition): lifted
+    - Primitive shapes (BoolExpr, SeqConcat, SeqRepetition, SeqOr): lifted
       directly via ``_lift_to_nfa``.
     - Nested composed shapes (SeqIntersect, SeqWithin, SeqThroughout):
       recursively lifted via their own product constructions (no
       compose() dispatch — avoids the bool-bool legacy path).
     """
-    if isinstance(operand, (BoolExpr, SeqConcat, SeqRepetition)):
+    # (BoolExpr, SeqConcat, SeqRepetition, SeqOr, SeqGotoRep, SeqNonconsecRep)
+    _primitives = (BoolExpr, SeqConcat, SeqRepetition, SeqOr, SeqGotoRep, SeqNonconsecRep)
+    if isinstance(operand, _primitives):
         return _lift_to_nfa(operand)
     if isinstance(operand, SeqIntersect):
         left = _try_lift_operand(operand.left, clock, label, original_text)

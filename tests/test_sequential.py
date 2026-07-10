@@ -110,21 +110,16 @@ def test_codegen_deterministic_nonoverlap() -> None:
         assert results[i] == results[0], f"Run {i} output differs from run 0"
 
 
-def test_bitvec_sequence_consequent_implication_rejected() -> None:
-    """BV_WIDTH>1 sequence-consequent implication (`a |-> a ##[2:5] b`) is rejected
-    at compile time rather than emitting a wrong monitor.
+def test_bitvec_sequence_consequent_implication_accepted() -> None:
+    """BV_WIDTH>1 sequence-consequent implication (`a |-> a ##[2:5] b`) now compiles.
 
-    The legacy bv_q token-passing path for multi-cycle sequence consequents is a
-    confirmed correctness defect (BUG-IMPL-01); a correct implementation needs the
-    v1.5 NFA composition engine. Until then the compiler must error (never fail
-    silently), not emit a monitor whose pass never fires.
+    Ranged delays in implication consequents are handled via the NFA engine
+    (v1.7 LANG-03), eliminating the legacy bv_q correctness defect (BUG-IMPL-01).
     """
-    from sva2rtl.errors import UnsupportedConstruct
-
     ast = json.loads((_FIXTURES / "implication_bitvec.json").read_text())
     node, clock, label, text = import_assertion(ast)
-    with pytest.raises(UnsupportedConstruct, match="sequence consequent"):
-        compose(node, clock, label, text)
+    checker = compose(node, clock, label, text)
+    assert checker is not None
 
 
 # ── OUT-06: Debug output verification ─────────────────────────────────────
@@ -457,13 +452,11 @@ def test_e2e_implication_overlap_compiles() -> None:
 
 def test_e2e_complex_impl_delay_rejected() -> None:
     """TEST-02: PropImplication with a multi-cycle SeqConcat consequent
-    (`a |-> ##[2:5] b`) is rejected at compile time.
+    (`a |-> ##[2:5] b`) now compiles via NFA engine (v1.7 LANG-03).
 
-    This is the sequence-consequent path whose bv_q implementation is a confirmed
-    correctness defect (BUG-IMPL-01); a correct implementation needs the v1.5 NFA
-    engine. Until then compose must raise rather than emit a wrong monitor.
+    Ranged delays in implication consequents are handled via the NFA engine,
+    eliminating the legacy bv_q correctness defect (BUG-IMPL-01).
     """
-    from sva2rtl.errors import UnsupportedConstruct
     from sva2rtl.ir import BoolExpr, ClockSpec, PropImplication, SeqConcat, SourceLoc
 
     loc = SourceLoc("test.sv", 1, 1)
@@ -481,8 +474,8 @@ def test_e2e_complex_impl_delay_rejected() -> None:
         overlapping=True,
         source_loc=loc,
     )
-    with pytest.raises(UnsupportedConstruct, match="sequence consequent"):
-        compose(impl, clock, "complex_test", "a |-> ##[2:5] b")
+    checker = compose(impl, clock, "complex_test", "a |-> ##[2:5] b")
+    assert checker is not None
 
 
 # ── Structural soundness tests ─────────────────────────────────────────────────

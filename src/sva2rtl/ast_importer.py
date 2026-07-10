@@ -1533,9 +1533,12 @@ def _build_seq_concat(
 ) -> SeqConcat:
     """Build a SeqConcat IR node from a slang SequenceConcat JSON node.
 
-    In slang JSON each element carries the delay AFTER that element
-    (before the next one).  The last element always has min=0, max=0 as a
-    trailing sentinel and MUST be skipped.
+    slang JSON convention varies by version:
+      - Old (elem[i].min/max = delay AFTER element i, before element i+1)
+      - New v11+ (elem[i].min/max = delay BEFORE element i, after element i-1)
+
+    Unify by detecting which convention is in use and extracting the inter-element
+    delays, then normalising to the standard N-element, N-1 delay representation.
     """
     elements_raw: list[dict[str, Any]] = node.get("elements", [])
     elements: list[SVANode] = []
@@ -1545,38 +1548,41 @@ def _build_seq_concat(
         seq_node = elem.get("sequence", {})
         elements.append(_dispatch_expr_to_ir(seq_node, _visited))
 
-        # Skip last element's delay — always (0, 0) sentinel in slang JSON.
-        # For SINGLE-clk SeqConcat, elem[i].min is the delay AFTER element i
-        # (before element i+1). For MULTI-clk (where element i+1 is a Clocking
-        # node), slang stores the cross-boundary ##N on element i+1, not on
-        # element i — so we read element i+1's min in that case.
-        if i < len(elements_raw) - 1:
-            d_min = int(elem.get("min", "0"))
-            d_max = int(elem.get("max", "0"))
-            # Detect multi-clock: if the NEXT element is a Clocking, slang puts
-            # the cross-boundary delay on that next element instead.
-            next_seq = elements_raw[i + 1].get("sequence", {})
-            if d_min == 0 and d_max == 0 and next_seq.get("kind") == "Clocking":
-                d_min = int(elements_raw[i + 1].get("min", "0"))
-                d_max = int(elements_raw[i + 1].get("max", "0"))
+    # Detect convention: if elem[1] has non-zero min/max, it's new-style
+    # (delay on the target element). Otherwise, delay is on the source element.
+    if len(elements_raw) >= 2:
+        e0_min = int(elements_raw[0].get("min", "0"))
+        e0_max = int(elements_raw[0].get("max", "0"))
+        e1_min = int(elements_raw[1].get("min", "0"))
+        e1_max = int(elements_raw[1].get("max", "0"))
 
-            if d_min < 0 or d_max < 0:
-                elem_loc = extract_source_loc(elem)
-                raise SvaCompileError(
-                    message=(
-                        f"SVA-E003: Invalid delay range [{d_min}:{d_max}] — "
-                        f"negative delay value at {elem_loc}"
-                    )
+        # New convention: elem[0].min=0 (sentinel), delay on elem[1+]
+        if e0_min == 0 and e0_max == 0 and (e1_min > 0 or e1_max > 0):
+            for i, elem in enumerate(elements_raw):
+                if i > 0:
+                    delays.append((int(elem.get("min", "0")), int(elem.get("max", "0"))))
+        else:
+            # Old convention: delay on elem[i] (for i < n-1)
+            for i, elem in enumerate(elements_raw):
+                if i < len(elements_raw) - 1:
+                    delays.append((int(elem.get("min", "0")), int(elem.get("max", "0"))))
+
+    # Validate delays
+    for d_min, d_max in delays:
+        if d_min < 0 or d_max < 0:
+            raise SvaCompileError(
+                message=(
+                    f"SVA-E003: Invalid delay range [{d_min}:{d_max}] — "
+                    f"negative delay value at {source_loc}"
                 )
-            if d_min > d_max:
-                elem_loc = extract_source_loc(elem)
-                raise SvaCompileError(
-                    message=(
-                        f"SVA-E003: Invalid delay range [{d_min}:{d_max}] — "
-                        f"minimum exceeds maximum at {elem_loc}"
-                    )
+            )
+        if d_min > d_max:
+            raise SvaCompileError(
+                message=(
+                    f"SVA-E003: Invalid delay range [{d_min}:{d_max}] — "
+                    f"minimum exceeds maximum at {source_loc}"
                 )
-            delays.append((d_min, d_max))
+            )
 
     return SeqConcat(
         elements=tuple(elements),

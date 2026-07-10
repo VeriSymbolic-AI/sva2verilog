@@ -145,10 +145,9 @@ RISK-01 纪律：预言机和参考监控器必须与 RTL 实现结构独立。�
 ## 已知限制
 
 - 1 xfail：`bool_expr` 叶子不独立产生 fail 的结构性见证，fail 语义来自蕴含父节点
-- ##0 fusion 保留 +1；当前 main 对 boolean `##0` 发 warning，并建议用 `a && b` 替代。自动 rewrite/reject 仍是后续语义迁移工作
 - 全算子等价证明仍以 BMC 有界为主（历史 depth=15-30）；k-induction 当前覆盖 8 个小状态目标，尚未扩展到全部算子、复杂 NFA、liveness 或 CDC 边界
 - 多时钟形式化等价永久排除（行业通用限制）
-- NFA 仍拒绝：范围延迟操作数、intersect 内 SeqOr/goto/nonconsec
+- K-state budget (>32) 和 CDC 边界是 NFA 引擎仅存的拒绝路径
 
 ## 未来规划
 

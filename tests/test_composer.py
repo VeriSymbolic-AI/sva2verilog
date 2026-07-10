@@ -619,19 +619,17 @@ def test_compose_implication_bv_width_bool_consequent() -> None:
     assert checker.params["bv_width"] == "1"
 
 
-def test_compose_implication_delay_consequent_rejected() -> None:
-    """SeqConcat consequent with delays=((2,5),) (BV_WIDTH=6>1) is rejected.
+def test_compose_implication_delay_consequent_accepted() -> None:
+    """SeqConcat consequent with delays=((2,5),) is now NFA-liftable (v1.7 LANG-03).
 
-    Multi-cycle sequence consequents use the legacy bv_q path, a confirmed
-    correctness defect (BUG-IMPL-01); compose raises rather than emit a wrong
-    monitor. A correct implementation needs the v1.5 NFA engine.
+    Ranged delays in implication consequents are handled via the NFA engine,
+    eliminating the legacy bv_q correctness defect (BUG-IMPL-01).
     """
-    from sva2rtl.errors import UnsupportedConstruct
-
     node = _make_impl_node(consequent_delays=((2, 5),))
     clock = _make_clock()
-    with pytest.raises(UnsupportedConstruct, match="sequence consequent"):
-        compose(node, clock, "impl_check", "a |-> a ##[2:5] b")
+    checker = compose(node, clock, "impl_check", "a |-> a ##[2:5] b")
+    assert checker is not None
+    assert checker.template_name == "implication_nfa"
 
 
 def test_compose_implication_multi_delay_consequent_nfa() -> None:

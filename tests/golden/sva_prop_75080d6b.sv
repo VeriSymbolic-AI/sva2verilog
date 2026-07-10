@@ -14,62 +14,41 @@ output  logic fail,
 output  logic attempt_fired,
 output  logic disabled_o
 );
-    // ── Internal token wires (N+1 wires for N children) ─────────────────────
-    logic w_pass_0;
-    logic w_active_0;
-    logic w_fail_0;
-    logic w_afired_0;
-    logic w_pass_1;
-    logic w_active_1;
-    logic w_fail_1;
-    logic w_afired_1;
-    logic w_pass_2;
-    logic w_active_2;
-    logic w_fail_2;
-    logic w_afired_2;
 
-    // ── Child module instantiations (token-passing chain) ────────────────────
-    sva_prop_75080d6b_e0 u_sva_prop_75080d6b_e0_0 (
-        .clk(clk),
-        .rst_n    (rst_n),
-        .start    (start),
-        .a(a),
-        .disable_i     (disable_i),
-        .active        (w_active_0),
-        .pass          (w_pass_0),
-        .fail          (w_fail_0),
-        .attempt_fired (w_afired_0),
-        .disabled_o    ()
-    );
-    sva_delay_0_0 u_sva_delay_0_0_1 (
-        .clk(clk),
-        .rst_n    (rst_n),
-        .start    (w_pass_0),
-        .disable_i     (disable_i),
-        .active        (w_active_1),
-        .pass          (w_pass_1),
-        .fail          (w_fail_1),
-        .attempt_fired (w_afired_1),
-        .disabled_o    ()
-    );
-    sva_prop_75080d6b_e1 u_sva_prop_75080d6b_e1_2 (
-        .clk(clk),
-        .rst_n    (rst_n),
-        .start    (w_pass_1),
-        .b(b),
-        .disable_i     (disable_i),
-        .active        (w_active_2),
-        .pass          (w_pass_2),
-        .fail          (w_fail_2),
-        .attempt_fired (w_afired_2),
-        .disabled_o    ()
-    );
+    // ── Combinational evaluation ───────────────────────────────────────
+    logic bool_result;
+    assign bool_result = ((a) && (b));
 
-    // ── Top-level output aggregation ─────────────────────────────────────────
-    assign active = disable_i ? 1'b0 : (w_active_0 | w_active_1 | w_active_2);
-    assign pass   = disable_i ? 1'b0 : w_pass_2;
-    assign fail   = disable_i ? 1'b0 : (w_fail_0 | w_fail_1 | w_fail_2);
-    assign attempt_fired = w_afired_0;
+    // ── Registered outputs (OUT-02: no combinational glitches) ─────────
+    logic active_q, pass_q, fail_q;
+
+always_ff @(posedge clk) begin
+        if (!rst_n || disable_i) begin
+            active_q <= 1'b0;
+            pass_q   <= 1'b0;
+            fail_q   <= 1'b0;
+        end else begin
+            active_q <= start;
+            pass_q   <= start &  bool_result;
+            fail_q   <= start & ~bool_result;
+        end
+    end
+
+    // ── HARDEN-01: attempt_fired_q never cleared by disable_i ──────────
+    logic attempt_fired_q;
+
+always_ff @(posedge clk) begin
+        if (!rst_n) begin
+            attempt_fired_q <= '0;
+        end else if (start) begin
+            attempt_fired_q <= 1'b1;  // sticky — never cleared by disable_i (HARDEN-01)
+        end
+    end
+
+    assign active        = disable_i ? 1'b0 : active_q;
+    assign pass          = disable_i ? 1'b0 : pass_q;
+    assign fail          = disable_i ? 1'b0 : fail_q;
+    assign attempt_fired = attempt_fired_q;
     assign disabled_o    = disable_i;
 
 endmodule

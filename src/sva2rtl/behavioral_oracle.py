@@ -719,7 +719,12 @@ class _HierarchicalSim:
         start = bool(signals.get("start", False))
         truth = _eval_bool_semantic_param(node, signals)
         if truth is None:
-            truth = True
+            # Fall back to observed-signal semantics (AND of all watched signals).
+            sigs = [port for port, _ in node.observed_signals]
+            if sigs:
+                truth = all(bool(signals.get(s, False)) for s in sigs)
+            else:
+                truth = bool(signals.get("sig", True))
         state["active"] = start
         state["pass"] = start and truth
         state["fail"] = start and not truth

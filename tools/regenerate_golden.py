@@ -1,31 +1,44 @@
-"""Regenerate all golden files after template changes."""
+"""Regenerate all golden SV files from JSON fixtures."""
 import json
 from pathlib import Path
 
-from sva2rtl.ast_importer import import_all_assertions, import_assertion
+from sva2rtl.ast_importer import import_assertion
 from sva2rtl.composer import compose
-from sva2rtl.emitter import emit_all
+from sva2rtl.emitter import emit, emit_all
+from sva2rtl.normalizer import normalize
 
-fixtures_dir = Path('tests/fixtures')
-golden_dir = Path('tests/golden')
+FIXTURES = Path("tests/fixtures")
+GOLDEN = Path("tests/golden")
 
-for fpath in sorted(fixtures_dir.glob('*.json')):
-    ast = json.loads(fpath.read_text(encoding='utf-8'))
-    try:
-        assertions = import_all_assertions(ast)
-    except Exception:
-        try:
-            node, clock, text, label = import_assertion(ast)
-            assertions = [(node, clock, text, label)]
-        except Exception as e:
-            print(f'Skip {fpath.name}: {e}')
-            continue
-    for node, clock, text, label in assertions:
-        checker = compose(node, clock, label, text)
-        modules = emit_all(checker)
-        for mod_name, mod_src in modules.items():
-            out_path = golden_dir / f'{mod_name}.sv'
-            text = mod_src.rstrip('\n') + '\n'
-            out_path.write_text(text, encoding='utf-8')
-            print(f'R: {out_path.name}')
-print('All golden files regenerated')
+CASES = [
+    ("bool_simple.json", "bool_simple.sv"),
+    ("bool_labeled.json", "bool_labeled.sv"),
+    ("rose.json", "sva_rose.sv"),
+    ("fell.json", "sva_fell.sv"),
+    ("stable.json", "sva_stable.sv"),
+    ("past.json", "sva_past.sv"),
+    ("rep_fixed.json", "sva_rep_fixed.sv"),
+    ("rep_range.json", "sva_rep_range.sv"),
+    ("s_eventually_1_3.json", "sva_se_1_3.sv"),
+    ("always_1_3.json", "sva_sa_1_3.sv"),
+    ("until_ab.json", "sva_until_ab.sv"),
+]
+
+for fixture_name, golden_file in CASES:
+    ast = json.loads((FIXTURES / fixture_name).read_text())
+    node, clock, text, label = import_assertion(ast)
+    node = normalize(node)
+    checker = compose(node, clock, label, text)
+    if checker.children:
+        result = emit_all(checker)
+        for name, sv in result.items():
+            path = GOLDEN / f"{name}.sv"
+            path.write_text(sv)
+            print(f"  {path}")
+    else:
+        sv = emit(checker)
+        path = GOLDEN / golden_file
+        path.write_text(sv)
+        print(f"  {path}")
+
+print(f"Done: regenerated {len(CASES)} golden files.")

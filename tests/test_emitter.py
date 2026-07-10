@@ -27,7 +27,7 @@ def _labeled_checker() -> CheckerNode:
     tests/fixtures/bool_labeled.json so that the integration golden comparison
     and the emitter unit test both use the same reference.
     """
-    loc = _make_loc(file="test_labeled.sv", line=2, col=14)
+    loc = _make_loc(file="test_labeled.sv", line=2, col=43)
     return CheckerNode(
         template_name="bool_expr",
         module_name="sva_my_check",
@@ -140,7 +140,7 @@ def test_emit_contains_source_loc_comment() -> None:
     """Header comment includes the source location (matches bool_labeled.json fixture)."""
     checker = _labeled_checker()
     result = emit(checker)
-    assert "test_labeled.sv:2:14" in result
+    assert "test_labeled.sv:2:43" in result
 
 
 def test_emit_golden_match() -> None:
@@ -219,9 +219,11 @@ GOLDEN_DIR = Path(__file__).parent / "golden"
 
 
 def _load_fixture_checker(fixture_name: str) -> CheckerNode:
-    """Load a fixture JSON, run import_assertion + compose, return CheckerNode."""
+    """Load a fixture JSON, run import_assertion + normalize + compose, return CheckerNode."""
     ast = json.loads((FIXTURES_DIR / f"{fixture_name}.json").read_text(encoding="utf-8"))
+    from sva2rtl.normalizer import normalize
     ir_node, clock, original_text, label = import_assertion(ast)
+    ir_node = normalize(ir_node)
     return compose(ir_node, clock, label, original_text)
 
 
@@ -270,11 +272,13 @@ def test_emit_all_delay_range_module_names() -> None:
 
 
 def test_emit_all_delay_zero_has_combinational_pass() -> None:
-    """emit_all() for a ##0 property generates a module with combinational pass-through."""
+    """emit_all() for a ##0 property generates a single merged BoolExpr module."""
     checker = _load_fixture_checker("delay_zero")
     result = emit_all(checker)
-    delay_mod = result.get("sva_delay_0_0", "")
-    assert "assign pass   = " in delay_mod and "start" in delay_mod
+    # After ##0 rewrite, only one BoolExpr module exists (not delay/seq_concat)
+    assert len(result) >= 1
+    main_mod = next(iter(result.values()))
+    assert "(a) && (b)" in main_mod or "a && b" in main_mod
 
 
 def test_emit_all_delay_three_element_six_modules() -> None:
@@ -353,7 +357,6 @@ def _norm(text: str) -> list[str]:
         ("delay_fixed", "sva_prop_81cf66e0"),
         ("delay_range", "sva_delay_2_5"),
         ("delay_range", "sva_prop_e9edaa37"),
-        ("delay_zero", "sva_delay_0_0"),
         ("delay_zero", "sva_prop_75080d6b"),
         ("delay_three_element", "sva_delay_1_1"),
         ("delay_three_element", "sva_delay_2_2"),

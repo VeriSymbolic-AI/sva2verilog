@@ -243,8 +243,8 @@ class TestNonoverlapImplNfa:
 
 
 class TestImplNfaRejection:
-    def test_ranged_delay_consequent_rejected(self) -> None:
-        """a |-> b ##[2:5] c — ranged delay not NFA-liftable → reject."""
+    def test_ranged_delay_consequent_accepted(self) -> None:
+        """a |-> b ##[2:5] c — ranged delay now NFA-liftable (v1.7 LANG-03)."""
         node = PropImplication(
             antecedent=_b("a"),
             consequent=SeqConcat(
@@ -254,5 +254,6 @@ class TestImplNfaRejection:
             ),
             overlapping=True, source_loc=_LOC,
         )
-        with pytest.raises(UnsupportedConstruct, match="sequence consequent"):
-            compose(node, _CLK, None, "a |-> b ##[2:5] c")
+        checker = compose(node, _CLK, None, "a |-> b ##[2:5] c")
+        assert checker is not None
+        assert checker.template_name == "implication_nfa"

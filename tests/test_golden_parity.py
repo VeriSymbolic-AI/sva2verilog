@@ -120,22 +120,23 @@ _MULTI_MODULE_CASES: list[tuple[str, list[tuple[str, str]]]] = [
     (
         "delay_zero.json",
         [
-            ("sva_prop_75080d6b_e0", "sva_prop_75080d6b_e0.sv"),
-            ("sva_delay_0_0", "sva_delay_0_0.sv"),
-            ("sva_prop_75080d6b_e1", "sva_prop_75080d6b_e1.sv"),
             ("sva_prop_75080d6b", "sva_prop_75080d6b.sv"),
         ],
     ),
     (
         "implication_overlap.json",
         [
-            ("sva_impl_check", "overlap_impl.sv"),
+            ("sva_impl_check_ant", "sva_impl_check_ant.sv"),
+            ("sva_impl_check_con", "sva_impl_check_con.sv"),
+            ("sva_impl_check", "sva_impl_check.sv"),
         ],
     ),
     (
         "implication_nonoverlap.json",
         [
-            ("sva_nonoverlap_check", "nonoverlap_impl.sv"),
+            ("sva_nonoverlap_check_ant", "sva_nonoverlap_check_ant.sv"),
+            ("sva_nonoverlap_check_con", "sva_nonoverlap_check_con.sv"),
+            ("sva_nonoverlap_check", "sva_nonoverlap_check.sv"),
         ],
     ),
 
