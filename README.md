@@ -182,6 +182,11 @@ uv run ruff check src/ tests/
 uv run ruff format src/ tests/
 ```
 
+## Project Analysis
+
+See [Project Analysis (2026-07-11)](PROJECT_ANALYSIS_2026-07-11.md) for the
+current project progress, evidence boundaries, risks, and phased roadmap.
+
 ## Architecture
 
 sva2rtl uses a token-passing composition model (inspired by TIMA Lab research) with operator-aware templates and counter encoding for range operators.
