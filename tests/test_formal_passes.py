@@ -163,13 +163,21 @@ endmodule
     def test_implication_with_shared_structure(self) -> None:
         """|-> with repeated signal patterns exercises CSE in sub-trees.
 
+        Uses a boolean antecedent ``a`` and a multi-cycle consequent
+        ``b ##2 b`` (b repeats) so the NFA implication path is exercised
+        and CSE can share the ``b`` sub-tree. A sequence antecedent form
+        like ``a ##2 b |-> c ##2 b`` is deliberately avoided because
+        sequence antecedents with multi-cycle consequents are not yet
+        supported (rejected with UnsupportedConstruct); the shared-signal
+        CSE intent is preserved by repeating ``b`` inside the consequent.
+
         (v1.4.1 Part B incidentally enabled live-slang ``|->``/``|=>`` via the
         v11 ``Binary`` implication kind, so this no longer needs a fixture and the
         prior ``xfail`` was removed.)
         """
         sv = """
-module test(input logic clk, a, b, c);
-    a_impl: assert property (@(posedge clk) a ##2 b |-> c ##2 b);
+module test(input logic clk, a, b);
+    a_impl: assert property (@(posedge clk) a |-> b ##2 b);
 endmodule
 """
         passed, output = _check_equiv(sv)

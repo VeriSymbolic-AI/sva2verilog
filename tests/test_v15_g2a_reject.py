@@ -15,10 +15,7 @@ NFA path lands in G2b and un-shields the same constructs one by one.
 
 from __future__ import annotations
 
-import pytest
-
 from sva2rtl.composer import compose
-from sva2rtl.errors import UnsupportedConstruct
 from sva2rtl.ir import (
     BoolExpr,
     ClockSpec,

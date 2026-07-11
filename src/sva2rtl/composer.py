@@ -989,6 +989,31 @@ def _compose_implication_sc(
     bv_width = _compute_bv_width(node.consequent)
     if bv_width > 1:
         if _is_nfa_liftable(node.consequent):
+            # The NFA implication path evaluates the antecedent
+            # combinationally (ant_guard = start & (ant_expr)) and uses it
+            # to gate the consequent NFA start. A multi-cycle sequence
+            # antecedent (e.g. ``a ##2 b``) requires an antecedent NFA whose
+            # accept state triggers the consequent — not yet implemented.
+            # Reject explicitly rather than crashing on a bare assertion
+            # (honesty-first: never fail silently, always give actionable
+            # diagnostics).
+            if not isinstance(node.antecedent, BoolExpr):
+                raise UnsupportedConstruct(
+                    message=(
+                        "implication ('|->' / '|=>') with a multi-cycle sequence "
+                        "consequent currently requires a single-cycle boolean "
+                        "expression antecedent. Sequence antecedents (e.g. "
+                        "'a ##2 b |-> c ##2 b') need an antecedent NFA to "
+                        "trigger the consequent, which is not yet implemented. "
+                        "Use a boolean antecedent (e.g. 'a |-> c ##2 b') or "
+                        "flatten the antecedent into the consequent sequence."
+                    ),
+                    construct_name=(
+                        "implication with sequence antecedent and "
+                        "multi-cycle consequent"
+                    ),
+                    source_loc=node.source_loc,
+                )
             return _compose_implication_nfa(
                 node,
                 clock,
@@ -999,14 +1024,14 @@ def _compose_implication_sc(
         raise UnsupportedConstruct(
             message=(
                 "implication ('|->' / '|=>') with a multi-cycle sequence "
-                "consequent is not yet supported: the consequent must be a "
-                "single-cycle boolean expression or sampled-value function "
-                "($rose/$fell/$stable/$past/$changed). Multi-cycle sequence "
-                "consequents with fixed-delay ``SeqConcat`` or fixed-count "
-                "``SeqRepetition`` (e.g. 'a |-> b ##2 c', 'a |-> b[*3]') "
-                "are supported via the v1.5 NFA composition engine. "
-                "Ranged delays, SeqOr, goto/nonconsec repetition in the "
-                "consequent are deferred to a later version."
+                "consequent is not supported for this shape: the consequent "
+                "must be NFA-liftable. Supported multi-cycle consequents "
+                "include fixed/ranged delay SeqConcat, fixed/ranged "
+                "SeqRepetition, SeqOr, SeqGotoRep, and SeqNonconsecRep "
+                "(v1.7). Complex nested shapes exceeding the K-state budget "
+                "(>32) are rejected. Single-cycle boolean expressions and "
+                "sampled-value functions ($rose/$fell/$stable/$past/$changed) "
+                "are always supported."
             ),
             construct_name="implication with non-NFA-liftable sequence consequent",
             source_loc=node.source_loc,
@@ -1062,7 +1087,20 @@ def _compose_implication_nfa(
     base = module_name[4:] if module_name.startswith("sva_") else module_name
 
     # Antecedent guard — raw boolean expression text (e.g. "a", "a && b").
-    assert isinstance(node.antecedent, BoolExpr), "implication antecedent must be BoolExpr"
+    # Defensive: the router (_compose_implication_sc) should have rejected
+    # non-BoolExpr antecedents before reaching here. Keep this as a guard
+    # rather than a bare assert so any future caller gets an actionable
+    # error instead of an AssertionError crash.
+    if not isinstance(node.antecedent, BoolExpr):
+        raise UnsupportedConstruct(
+            message=(
+                "implication antecedent must be a single-cycle boolean "
+                "expression for the NFA composition path; sequence "
+                "antecedents are not yet supported."
+            ),
+            construct_name="implication with non-boolean antecedent on NFA path",
+            source_loc=node.source_loc,
+        )
     ant_guard = _bool_expr_text(node.antecedent)
     ant_sigs = _bool_expr_signal_names(node.antecedent)
 
@@ -1676,7 +1714,16 @@ def _lift_to_nfa(
         signal_set: set[str] = set()
         current = 0
         for i, element in enumerate(operand.elements):
-            assert isinstance(element, BoolExpr)
+            if not isinstance(element, BoolExpr):
+                raise UnsupportedConstruct(
+                    message=(
+                        "NFA SeqConcat element must be a boolean expression; "
+                        f"got {type(element).__name__}. This should have been "
+                        "filtered by _is_nfa_liftable."
+                    ),
+                    construct_name="NFA SeqConcat non-boolean element",
+                    source_loc=operand.source_loc,
+                )
             guard = f"({_bool_expr_text(element)})"
             for s, _ in _bool_expr_observed(element):
                 signal_set.add(s)
@@ -1712,7 +1759,16 @@ def _lift_to_nfa(
 
     if isinstance(operand, SeqRepetition):
         # a[*M:N]: M mandatory guards + (N-M) optional guards with bypass
-        assert isinstance(operand.expr, BoolExpr)
+        if not isinstance(operand.expr, BoolExpr):
+            raise UnsupportedConstruct(
+                message=(
+                    "NFA SeqRepetition operand must be a boolean expression; "
+                    f"got {type(operand.expr).__name__}. This should have been "
+                    "filtered by _is_nfa_liftable."
+                ),
+                construct_name="NFA SeqRepetition non-boolean operand",
+                source_loc=operand.source_loc,
+            )
         m = operand.rep_min
         n = operand.rep_max
         guard = f"({_bool_expr_text(operand.expr)})"
@@ -1772,7 +1828,16 @@ def _lift_to_nfa(
 
     if isinstance(operand, SeqGotoRep):
         # a[->N]: count N occurrences; ~guard self-loops between occurrences
-        assert isinstance(operand.expr, BoolExpr)
+        if not isinstance(operand.expr, BoolExpr):
+            raise UnsupportedConstruct(
+                message=(
+                    "NFA SeqGotoRep operand must be a boolean expression; "
+                    f"got {type(operand.expr).__name__}. This should have been "
+                    "filtered by _is_nfa_liftable."
+                ),
+                construct_name="NFA SeqGotoRep non-boolean operand",
+                source_loc=operand.source_loc,
+            )
         n = operand.rep_min
         guard = f"({_bool_expr_text(operand.expr)})"
         neg_guard = f"!({_bool_expr_text(operand.expr)})"
@@ -1785,7 +1850,16 @@ def _lift_to_nfa(
 
     if isinstance(operand, SeqNonconsecRep):
         # a[=N]: like goto but tail can complete any cycle after Nth occurrence
-        assert isinstance(operand.expr, BoolExpr)
+        if not isinstance(operand.expr, BoolExpr):
+            raise UnsupportedConstruct(
+                message=(
+                    "NFA SeqNonconsecRep operand must be a boolean expression; "
+                    f"got {type(operand.expr).__name__}. This should have been "
+                    "filtered by _is_nfa_liftable."
+                ),
+                construct_name="NFA SeqNonconsecRep non-boolean operand",
+                source_loc=operand.source_loc,
+            )
         n = operand.rep_min
         guard = f"({_bool_expr_text(operand.expr)})"
         neg_guard = f"!({_bool_expr_text(operand.expr)})"
@@ -1805,9 +1879,15 @@ def _extract_nfa_from_checker(
     checker: CheckerNode,
 ) -> tuple[int, tuple[tuple[int, str, int], ...], frozenset[int], tuple[str, ...]]:
     """Extract NFA data from an already-composed ``nfa_generic`` CheckerNode."""
-    assert checker.template_name == "nfa_generic", (
-        f"expected nfa_generic, got {checker.template_name}"
-    )
+    if checker.template_name != "nfa_generic":
+        raise UnsupportedConstruct(
+            message=(
+                f"expected nfa_generic checker, got '{checker.template_name}'. "
+                "NFA product construction requires nfa_generic children."
+            ),
+            construct_name="non-nfa-generic checker in NFA product",
+            source_loc=checker.source_loc,
+        )
     states = int(checker.params["nfa_states"])
     raw_trans = checker.params.get("nfa_transitions", "")
     trans = _deserialise_transitions(raw_trans.split(";") if raw_trans else [])
@@ -2114,7 +2194,15 @@ def _compose_intersect_nfa(
     """
     left_nfa = _try_lift_operand(node.left, clock, label, original_text)
     right_nfa = _try_lift_operand(node.right, clock, label, original_text)
-    assert left_nfa and right_nfa, "pre-checked by _is_nfa_liftable"
+    if not (left_nfa and right_nfa):
+        raise UnsupportedConstruct(
+            message=(
+                "NFA intersect operands failed to lift (pre-checked by "
+                "_is_nfa_liftable). This indicates a routing inconsistency."
+            ),
+            construct_name="NFA intersect operand lift failure",
+            source_loc=node.source_loc,
+        )
     n_left, t_left, acc_left, sigs_left = left_nfa
     n_right, t_right, acc_right, sigs_right = right_nfa
     states, trans, accept = _nfa_product_intersect(
@@ -2229,7 +2317,15 @@ def _compose_within_nfa(
     """
     inner_nfa = _try_lift_operand(node.inner, clock, label, original_text)
     outer_nfa = _try_lift_operand(node.outer, clock, label, original_text)
-    assert inner_nfa and outer_nfa, "pre-checked by _is_nfa_liftable"
+    if not (inner_nfa and outer_nfa):
+        raise UnsupportedConstruct(
+            message=(
+                "NFA within operands failed to lift (pre-checked by "
+                "_is_nfa_liftable). This indicates a routing inconsistency."
+            ),
+            construct_name="NFA within operand lift failure",
+            source_loc=node.source_loc,
+        )
     n_inner, t_inner, acc_inner, sigs_inner = inner_nfa
     n_outer, t_outer, acc_outer, sigs_outer = outer_nfa
     states, trans, accept = _nfa_product_within(
@@ -2312,7 +2408,15 @@ def _compose_throughout_nfa(
     cond_signals = _bool_expr_signal_names(node.condition)
 
     body_nfa = _try_lift_operand(node.body, clock, label, original_text)
-    assert body_nfa, "pre-checked by _is_nfa_liftable"
+    if not body_nfa:
+        raise UnsupportedConstruct(
+            message=(
+                "NFA throughout body failed to lift (pre-checked by "
+                "_is_nfa_liftable). This indicates a routing inconsistency."
+            ),
+            construct_name="NFA throughout body lift failure",
+            source_loc=node.source_loc,
+        )
     n_body, t_body, acc_body, sigs_body = body_nfa
     states, trans, accept = _nfa_product_throughout(
         cond_text,
@@ -2531,8 +2635,7 @@ def _compose_prop_if_else(
     true_checker = compose(node.true_branch, clock, f"{base}_true", original_text)
     children = [true_checker]
     has_else = node.false_branch is not None
-    if has_else:
-        assert node.false_branch is not None
+    if has_else and node.false_branch is not None:
         false_checker = compose(node.false_branch, clock, f"{base}_false", original_text)
         children.append(false_checker)
     all_signals = _collect_signals(children)

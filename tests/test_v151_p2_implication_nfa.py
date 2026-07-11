@@ -257,3 +257,27 @@ class TestImplNfaRejection:
         checker = compose(node, _CLK, None, "a |-> b ##[2:5] c")
         assert checker is not None
         assert checker.template_name == "implication_nfa"
+
+    def test_sequence_antecedent_multi_cycle_consequent_rejected(self) -> None:
+        """a ##2 b |-> c ##2 b — sequence antecedent + multi-cycle consequent.
+
+        The NFA implication path evaluates the antecedent combinationally as
+        a boolean guard, so a multi-cycle sequence antecedent cannot be
+        handled. This must raise UnsupportedConstruct (not crash on a bare
+        AssertionError), per the honesty-first discipline.
+        """
+        node = PropImplication(
+            antecedent=SeqConcat(
+                elements=(_b("a"), _b("b")),
+                delays=((2, 2),),
+                source_loc=_LOC,
+            ),
+            consequent=SeqConcat(
+                elements=(_b("c"), _b("b")),
+                delays=((2, 2),),
+                source_loc=_LOC,
+            ),
+            overlapping=True, source_loc=_LOC,
+        )
+        with pytest.raises(UnsupportedConstruct):
+            compose(node, _CLK, None, "a ##2 b |-> c ##2 b")

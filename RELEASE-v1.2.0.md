@@ -1,8 +1,14 @@
 # sva2rtl v1.2.0 — Quality-First Hardening Release
 
 **Released:** June 2026
-**Tag:** `v1.2.0`
+**Tag:** `v1.2.0` (not available — see note below)
 **Milestone:** v1.2 Quality-First Hardening
+
+> **Tag note (2026-07-11):** The `v1.2.0` Git tag is missing. The repository
+> was published as an orphan branch (history starts at v1.5.2 initial release).
+> The original v1.2.0 commit is not in the current history and cannot be
+> safely tagged without external backup confirmation. If the original repo
+> still exists, run `git tag v1.2.0 <commit-sha>` from the original history.
 
 This release establishes formal equivalence verification for the optimizer pipeline, closes all 6 remaining Nyquist coverage gaps, hardens input handling against silent failures, extends the behavioral oracle to composed checker hierarchies, and upgrades slang compatibility to v11.0.
 

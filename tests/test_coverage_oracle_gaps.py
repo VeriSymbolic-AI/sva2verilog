@@ -6,8 +6,6 @@ until, and edge cases for tick dispatch.
 
 from __future__ import annotations
 
-import pytest
-
 from sva2rtl.behavioral_oracle import (
     simulate_checker_hierarchy,
 )

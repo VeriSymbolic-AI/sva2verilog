@@ -816,6 +816,19 @@ def _import_concurrent_assertion(
                     bool_ir = _build_bool_leaf(inner)
                     ir_node = bool_ir
                     text = bool_ir.text
+            elif inner_kind == "AssertionInstance":
+                # v11.0: named sequence reference inlined as AssertionInstance.
+                # The ``body`` field contains the inlined sequence definition
+                # (e.g. SequenceConcat). We expand it directly.
+                seq_body = inner.get("body", {})
+                if seq_body:
+                    expanded = _dispatch_expr_to_ir(seq_body, frozenset())
+                    ir_node = expanded
+                    text = _reconstruct_node_text(expanded)
+                else:
+                    bool_ir = _build_bool_leaf(inner)
+                    ir_node = bool_ir
+                    text = bool_ir.text
             else:
                 bool_ir = _build_bool_leaf(inner)
                 ir_node = bool_ir
@@ -907,6 +920,35 @@ def _import_concurrent_assertion(
             expanded = _expand_named_sequence(expr_node, source_loc, frozenset())
             ir_node = expanded
             text = _reconstruct_node_text(expanded)
+        case "DisableIff":
+            # v11.0: disable iff is expr.kind == "DisableIff" with
+            # ``condition`` (the disable condition) and ``expr`` (the
+            # wrapped property). We recursively import the wrapped
+            # property by re-dispatching on the inner expr, then wrap
+            # the result in a DisableIff IR node.
+            cond_node = expr_node.get("condition", {})
+            inner_node = expr_node.get("expr", {})
+            cond_ir = _build_bool_leaf(cond_node)
+            cond_text = cond_ir.text
+            # Build a synthetic body so we can recurse via the same
+            # property-spec dispatch. The inner_node is the actual
+            # property expression (BinaryPropertyExpr, Simple, etc).
+            inner_body = {
+                "kind": "Clocking",
+                "expr": inner_node,
+                "clocking": body.get("clocking", {}),
+            }
+            inner_ir, _, inner_text, _ = _import_concurrent_assertion(
+                {"kind": "ConcurrentAssertion", "propertySpec": inner_body,
+                 "source_file_start": node.get("source_file_start", ""),
+                 "source_line_start": node.get("source_line_start", 0),
+                 "source_column_start": node.get("source_column_start", 0)},
+                label,
+            )
+            ir_node = DisableIff(
+                condition=cond_ir, body=inner_ir, source_loc=source_loc,
+            )
+            text = f"disable iff ({cond_text}) {inner_text}"
         case _:
             _check_unsupported(expr_node, extract_source_loc(expr_node))
             _reject_non_boolean_kind(expr_node, extract_source_loc(expr_node))
@@ -956,6 +998,17 @@ def _dispatch_expr_to_ir(node: dict[str, Any], _visited: frozenset[str] = frozen
             return _build_signal_func(node, source_loc)
         case "SequenceInstance":
             return _expand_named_sequence(node, source_loc, _visited)
+        case "AssertionInstance":
+            # v11.0: named sequence reference inlined with body field.
+            # Expand the inlined body directly (the body is the sequence
+            # definition, e.g. SequenceConcat).
+            seq_body = node.get("body", {})
+            if seq_body:
+                return _dispatch_expr_to_ir(seq_body, _visited)
+            raise SvaCompileError(
+                message=f"AssertionInstance at {source_loc} has no inlined body",
+                source_loc=source_loc,
+            )
         case "BinaryPropertyExpr" if node.get("op") == "And" and not _is_boolean_binary(node):
             ir_node, _text = _build_binary_seq_op(node, source_loc, "and")
             return ir_node

@@ -68,13 +68,14 @@ omit = [
 [tool.coverage.report]
 # Phase 13 coverage target for fast CI tests (excludes formal modules
 # which are only exercised by dedicated formal CI jobs).
-# Baseline 2026-07-09: 78.5% with branch coverage on fast tests.
+# Baseline 2026-07-09: 78.5%. Updated 2026-07-11: 82.7% after P1-1
+# real-source fixture E2E tests. Target trajectory: 82 → 85 → 90 → 95.
 exclude_also = [
     "if TYPE_CHECKING:",
     "class .*\\bProtocol\\):",
     "@(abc\\.)?abstractmethod",
 ]
-fail_under = 78
+fail_under = 82
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

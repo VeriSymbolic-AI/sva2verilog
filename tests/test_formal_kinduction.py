@@ -440,3 +440,158 @@ class TestKinductionRepConsecutive:
             timeout=_phase10_prove_timeout(),
         )
         _assert_kinduction_passed(passed, output, "fixed consecutive repetition [*3]")
+
+
+# ── Phase P2-1 expansion: bounded delay and bounded repetition ────────────
+
+
+class TestKinductionBoundedDelay:
+    """Attempt complete proof for bounded (ranged) delay sequence monitor."""
+
+    def test_bounded_delay_kinduction_prove(self) -> None:
+        """P2-1: `a ##[1:5] b` pass behavior attempted with k-induction.
+
+        The ranged delay monitor has a small finite state space (counter
+        0..5 + armed flag), making k-induction convergence feasible.
+        """
+        checker = _build_delay_checker(1, 5)
+        ref_name = "ref_delay_1_5_prove"
+        passed, output = run_sva_miter_check(
+            checker,
+            _delay_ref_module(ref_name, 1, 5),
+            ref_name,
+            compare="pass",
+            depth=12,
+            mode="prove",
+            timeout=_phase10_prove_timeout(),
+        )
+        _assert_kinduction_passed(passed, output, "bounded delay ##[1:5]")
+
+
+class TestKinductionBoundedRepetition:
+    """Attempt complete proof for bounded (ranged) consecutive repetition."""
+
+    def test_bounded_rep_kinduction_prove(self) -> None:
+        """P2-1: `a[*2:5]` pass behavior attempted with k-induction.
+
+        Ranged consecutive repetition uses a counter with acceptance window
+        [2,5]. The state space is small enough for k-induction to converge.
+        """
+        loc = _loc()
+        node = SeqRepetition(
+            expr=BoolExpr(text="a", source_loc=loc),
+            rep_min=2,
+            rep_max=5,
+            source_loc=loc,
+        )
+        checker = optimize(compose(node, _clock(loc), "brep", "a[*2:5]"))
+        ref_name = "ref_brep_2_5_prove"
+        # Independent reference: count consecutive a, pass when count in [2,5] and a
+        ref_module = f"""
+module {ref_name} (
+    input  logic clk, rst_n, start, a,
+    output logic pass
+);
+    logic [2:0] cnt_q;
+    logic running_q;
+    always_ff @(posedge clk) begin
+        if (!rst_n) begin
+            cnt_q     <= 3'd0;
+            running_q <= 1'b0;
+        end else if (start && a) begin
+            cnt_q     <= 3'd1;
+            running_q <= 1'b1;
+        end else if (running_q && a) begin
+            if (cnt_q < 3'd5)
+                cnt_q <= cnt_q + 3'd1;
+        end else if (running_q && !a) begin
+            running_q <= 1'b0;
+            cnt_q     <= 3'd0;
+        end
+    end
+    assign pass = running_q && a && (cnt_q >= 3'd2) && (cnt_q <= 3'd5);
+endmodule
+"""
+        passed, output = run_sva_miter_check(
+            checker,
+            ref_module,
+            ref_name,
+            compare="pass",
+            depth=12,
+            mode="prove",
+            timeout=_phase10_prove_timeout(),
+        )
+        _assert_kinduction_passed(
+            passed, output, "bounded consecutive repetition [*2:5]"
+        )
+
+
+# ── Phase P2-1 expansion: bounded liveness ───────────────────────────────
+
+
+class TestKinductionBoundedEventually:
+    """Attempt complete proof for bounded eventually ``s_eventually[1:3] a``."""
+
+    @pytest.mark.xfail(
+        reason="bounded eventually is a liveness property; k-induction on the "
+               "pass signal may not converge without additional invariants",
+        strict=False,
+    )
+    def test_bounded_eventually_kinduction_prove(self) -> None:
+        """P2-1: `s_eventually[1:3] a` pass behavior attempted with k-induction.
+
+        The bounded eventually monitor has a small finite state space
+        (counter 0..3 + running flag), making k-induction convergence feasible.
+        Uses the same independent reference monitor structure as the BMC test
+        in test_formal_sva_equiv.py (registered pass_q, offset counter o
+        starting at 1 on start cycle, in-window check o >= lo && o <= hi).
+        """
+        from sva2rtl.ir import PropBoundedEventually
+
+        lo, hi = 1, 3
+        loc = _loc()
+        node = PropBoundedEventually(
+            body=BoolExpr(text="a", source_loc=loc),
+            lo=lo, hi=hi, strong=True, source_loc=loc,
+        )
+        checker = optimize(compose(node, _clock(loc), "be", f"s_eventually[{lo}:{hi}] a"))
+        ref_name = "ref_be_1_3_prove"
+        ref_module = f"""\
+module {ref_name} (
+    input  logic clk, rst_n, start, a,
+    output logic pass
+);
+    logic [7:0] o;
+    logic       armed, sat, pass_q;
+    wire in_win   = armed && (o >= 8'd{lo}) && (o <= 8'd{hi});
+    wire hit      = in_win && a && !sat;
+    always_ff @(posedge clk) begin
+        if (!rst_n) begin
+            o <= 8'd0; armed <= 1'b0; sat <= 1'b0; pass_q <= 1'b0;
+        end else begin
+            pass_q <= 1'b0;
+            if (start) begin
+                o <= 8'd1; armed <= 1'b1; sat <= 1'b0;
+            end else if (armed) begin
+                if (hit) pass_q <= 1'b1;
+                if (hit) sat <= 1'b1;
+                if (o == 8'd{hi}) armed <= 1'b0;
+                o <= o + 8'd1;
+            end
+        end
+    end
+    assign pass = pass_q;
+endmodule
+"""
+        passed, output = run_sva_miter_check(
+            checker,
+            ref_module,
+            ref_name,
+            compare="pass",
+            depth=12,
+            mode="prove",
+            timeout=_phase10_prove_timeout(),
+        )
+        _assert_kinduction_passed(
+            passed, output, "bounded eventually s_eventually[1:3]"
+        )

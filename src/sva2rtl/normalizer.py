@@ -361,7 +361,15 @@ def _handle_fusion_delay(node: SVANode) -> SVANode:
                 if left.expr is not None and right.expr is not None:
                     try:
                         from sva2rtl.ir import BoolBinary as _BoolBin  # noqa: N814
-                        merged_expr = _BoolBin(op="and", left=left.expr, right=right.expr)
+                        # Pass source_loc so the structured payload merges
+                        # correctly (BoolBinary inherits source_loc from
+                        # SVANode). Previously this call omitted source_loc,
+                        # causing TypeError → silent text-only fallback that
+                        # left the structured bool_semantic payload as None.
+                        merged_expr = _BoolBin(
+                            op="and", left=left.expr, right=right.expr,
+                            source_loc=left.source_loc,
+                        )
                     except (TypeError, ImportError):
                         # Stale cached build with extra field — keep text-only
                         _LOG.debug("BoolBinary merge skipped — fallback to text-only")

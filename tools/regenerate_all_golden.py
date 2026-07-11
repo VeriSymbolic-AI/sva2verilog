@@ -1,10 +1,11 @@
 """Regenerate ALL golden SV files using the current pipeline (after importer fix)."""
 import json
 from pathlib import Path
+
 from sva2rtl.ast_importer import import_assertion
-from sva2rtl.normalizer import normalize as norm
 from sva2rtl.composer import compose
 from sva2rtl.emitter import emit, emit_all
+from sva2rtl.normalizer import normalize as norm
 
 FIXTURES = Path("tests/fixtures")
 GOLDEN = Path("tests/golden")

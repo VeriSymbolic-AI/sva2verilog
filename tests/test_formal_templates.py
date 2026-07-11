@@ -114,18 +114,19 @@ class TestOverlapBitvecTemplate:
         passed, output = _check_fixture_equiv("implication_overlap")
         assert passed, f"overlap_bitvec FAILED:\n{output}"
 
-    def test_implication_bitvec_rejected(self) -> None:
-        """`a |-> a ##[2:5] b` (BV_WIDTH>1 sequence consequent) is rejected.
+    def test_implication_bitvec_accepted_via_nfa(self) -> None:
+        """`a |-> a ##[2:5] b` (BV_WIDTH>1 ranged-delay consequent) compiles via NFA.
 
-        The legacy bv_q path for multi-cycle sequence consequents is a confirmed
-        correctness defect (BUG-IMPL-01); rather than emit a wrong monitor the
-        compiler raises. A correct implementation requires the v1.5 NFA engine.
-        (Was previously an optimizer-equivalence test; the path no longer compiles.)
+        The legacy bv_q path for multi-cycle sequence consequents was a
+        confirmed correctness defect (BUG-IMPL-01) and was previously
+        rejected. Since v1.7 LANG-03, ranged-delay consequents are
+        NFA-liftable, so this now compiles through the NFA composition
+        engine instead of raising. The BoolExpr antecedent ``a`` is
+        handled combinationally as the NFA start guard.
         """
-        from sva2rtl.errors import UnsupportedConstruct
-
-        with pytest.raises(UnsupportedConstruct, match="sequence consequent"):
-            _build_from_fixture("implication_bitvec")
+        checker = _build_from_fixture("implication_bitvec")
+        assert checker is not None
+        assert checker.template_name == "implication_nfa"
 
 
 # ── nonoverlap template ───────────────────────────────────────────────────

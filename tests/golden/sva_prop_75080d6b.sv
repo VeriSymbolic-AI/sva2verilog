@@ -17,7 +17,7 @@ output  logic disabled_o
 
     // ── Combinational evaluation ───────────────────────────────────────
     logic bool_result;
-    assign bool_result = ((a) && (b));
+    assign bool_result = ((a && b));
 
     // ── Registered outputs (OUT-02: no combinational glitches) ─────────
     logic active_q, pass_q, fail_q;

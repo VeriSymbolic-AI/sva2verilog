@@ -1,0 +1,103 @@
+name: differential-nightly
+
+# Nightly differential sweep: captures Verilator differential evidence (P1-2)
+# and the slow randomized differential sweep excluded from push/PR CI.
+# Records dual-oracle parity for both iverilog and Verilator backends.
+
+on:
+  schedule:
+    - cron: "0 4 * * *"
+  workflow_dispatch:
+
+jobs:
+  differential-slow-iverilog:
+    name: differential slow sweep (iverilog)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+
+      - name: Install Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --dev
+
+      - name: Install iverilog
+        run: sudo apt-get update && sudo apt-get install -y iverilog
+
+      - name: Install slang
+        run: |
+          SLANG_VERSION="v11.0"
+          wget -q "https://github.com/MikePopoloski/slang/releases/download/${SLANG_VERSION}/slang-linux-x86_64.tar.gz"
+          tar xzf slang-linux-x86_64.tar.gz
+          sudo mv slang /usr/local/bin/slang
+          slang --version
+
+      - name: Run slow differential sweep (iverilog)
+        run: uv run pytest tests/test_differential.py -m "differential_slow" --simulator=iverilog -v --timeout=600
+        env:
+          SLANG_PATH: /usr/local/bin/slang
+
+  differential-verilator:
+    name: differential smoke + fast (Verilator)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+
+      - name: Install Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --dev
+
+      - name: Install Verilator
+        run: sudo apt-get update && sudo apt-get install -y verilator
+
+      - name: Install slang
+        run: |
+          SLANG_VERSION="v11.0"
+          wget -q "https://github.com/MikePopoloski/slang/releases/download/${SLANG_VERSION}/slang-linux-x86_64.tar.gz"
+          tar xzf slang-linux-x86_64.tar.gz
+          sudo mv slang /usr/local/bin/slang
+          slang --version
+
+      - name: Run differential smoke + fast (Verilator)
+        run: uv run pytest tests/test_differential.py -m "not differential_slow" --simulator=verilator -v --timeout=300
+        env:
+          SLANG_PATH: /usr/local/bin/slang
+
+  mutation-full-sweep:
+    name: mutation full sweep (composer + ast_importer)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+
+      - name: Install Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --dev
+
+      - name: Install slang
+        run: |
+          SLANG_VERSION="v11.0"
+          wget -q "https://github.com/MikePopoloski/slang/releases/download/${SLANG_VERSION}/slang-linux-x86_64.tar.gz"
+          tar xzf slang-linux-x86_64.tar.gz
+          sudo mv slang /usr/local/bin/slang
+          slang --version
+
+      - name: Run full mutation sweep on composer.py
+        run: uv run python tools/mutation/run_mutation.py --module composer.py
+        env:
+          SLANG_PATH: /usr/local/bin/slang
+
+      - name: Run full mutation sweep on ast_importer.py
+        run: uv run python tools/mutation/run_mutation.py --module ast_importer.py
+        env:
+          SLANG_PATH: /usr/local/bin/slang

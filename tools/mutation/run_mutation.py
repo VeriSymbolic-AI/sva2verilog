@@ -5,19 +5,21 @@ semantic modules. Operates at the AST level, runs pytest on mutated source,
 and reports kill/survive rates.
 
 Usage:
-    uv run python tools/mutation/run_mutation.py
+    uv run python tools/mutation/run_mutation.py                    # all modules
+    uv run python tools/mutation/run_mutation.py --module composer.py
+    uv run python tools/mutation/run_mutation.py --module ast_importer.py --sample 30
 """
 
 from __future__ import annotations
 
+import argparse
 import ast
 import copy
+import random
 import subprocess
 import sys
-import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
 
 # ── Configuration ──────────────────────────────────────────────────────────
 
@@ -34,9 +36,15 @@ MUTATION_TARGETS: dict[str, list[str]] = {
     ],
     "composer.py": [
         "tests/test_composer.py",
+        "tests/test_v151_p2_implication_nfa.py",
+        "tests/test_sequential.py",
+        "tests/test_v13_operators.py",
+        "tests/test_repetition.py",
     ],
     "ast_importer.py": [
         "tests/test_ast_importer.py",
+        "tests/test_errors.py",
+        "tests/test_nyquist_gaps.py",
     ],
 }
 
@@ -76,7 +84,7 @@ class ModuleReport:
 class MutationVisitor(ast.NodeTransformer):
     """Walk AST and collect candidate mutations."""
 
-    def __init__(self, source_lines: list[str], module_name: str):
+    def __init__(self, source_lines: list[str], module_name: str) -> None:
         self.source_lines = source_lines
         self.module_name = module_name
         self.mutations: list[Mutation] = []
@@ -165,13 +173,20 @@ def apply_mutation(source: str, mutation: Mutation) -> str:
 
 
 def run_tests(test_files: list[str]) -> bool:
-    """Run pytest on specified test files. Returns True if all pass."""
+    """Run pytest on specified test files. Returns True if all pass.
+
+    Excludes simulation/formal/differential tests to keep mutation runs fast.
+    """
     cmd = [
         sys.executable, "-m", "pytest",
         "-x", "-q", "--timeout=30",
+        "-m", "not simulation and not differential and not differential_slow",
     ] + test_files
-    result = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True, timeout=120)
-    return result.returncode == 0
+    try:
+        result = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True, timeout=120)
+        return result.returncode == 0
+    except subprocess.TimeoutExpired:
+        return True  # treat timeout as "survived" (tests didn't catch the mutant fast enough)
 
 
 def test_mutation(filepath: Path, mutation: Mutation, test_files: list[str]) -> MutationResult:
@@ -191,15 +206,26 @@ def test_mutation(filepath: Path, mutation: Mutation, test_files: list[str]) -> 
         filepath.write_text(original_source, encoding="utf-8")
 
 
-def run_module(filepath: Path, module_name: str) -> ModuleReport:
-    """Run mutation testing on a single module."""
+def run_module(filepath: Path, module_name: str, sample_n: int = 0) -> ModuleReport:
+    """Run mutation testing on a single module.
+
+    If ``sample_n`` > 0, randomly sample that many mutations instead of
+    running all (useful for long modules like composer.py / ast_importer.py
+    where a full run takes hours).
+    """
     test_files = MUTATION_TARGETS.get(module_name, [])
     if not test_files:
         print(f"  No test targets configured for {module_name}, skipping.")
         return ModuleReport(module=module_name)
 
     mutations = collect_mutations(filepath, module_name)
-    print(f"  {len(mutations)} candidate mutations found")
+    if sample_n > 0 and len(mutations) > sample_n:
+        random.seed(42)  # deterministic sampling for reproducibility
+        mutations = sorted(random.sample(mutations, sample_n), key=lambda m: m.line_no)
+        total = len(collect_mutations(filepath, module_name))
+        print(f"  {len(mutations)} candidate mutations (sampled from {total})")
+    else:
+        print(f"  {len(mutations)} candidate mutations found")
 
     report = ModuleReport(module=module_name, total=len(mutations))
 
@@ -218,20 +244,36 @@ def run_module(filepath: Path, module_name: str) -> ModuleReport:
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description="sva2rtl mutation testing")
+    parser.add_argument(
+        "--module", default=None,
+        help="Run only this module (e.g. composer.py, ast_importer.py)",
+    )
+    parser.add_argument(
+        "--sample", type=int, default=0,
+        help="Randomly sample N mutations (for large modules). 0 = run all.",
+    )
+    args = parser.parse_args()
+
     print("=" * 60)
     print("sva2rtl Phase 13 Mutation Testing Report")
     print("=" * 60)
 
     reports: list[ModuleReport] = []
 
-    for module_name, _targets in MUTATION_TARGETS.items():
+    modules_to_run = (
+        {args.module: []} if args.module
+        else MUTATION_TARGETS
+    )
+
+    for module_name, _targets in modules_to_run.items():
         filepath = SRC_DIR / module_name
         if not filepath.exists():
             print(f"\n[{module_name}] FILE NOT FOUND, skipping")
             continue
 
         print(f"\n[{module_name}]")
-        report = run_module(filepath, module_name)
+        report = run_module(filepath, module_name, sample_n=args.sample)
         reports.append(report)
         print(f"  Kill rate: {report.killed}/{report.total} = {report.kill_rate:.1%}")
 
@@ -258,7 +300,7 @@ def main() -> None:
                 print(f"    [{r.module}:{s.line_no}] {s.operator}")
                 print(f"      {s.original[:80]}")
 
-    print(f"\n  Target kill rate: 85%")
+    print("\n  Target kill rate: 85%")
     if total_mut > 0:
         status = "PASS" if total_killed/max(total_mut, 1) >= 0.85 else "BELOW TARGET"
         print(f"  Status: {status}")
