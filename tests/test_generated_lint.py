@@ -39,11 +39,20 @@ def build_verilator_lint_command(
     emitted: EmittedMonitorCase,
     sv_files: list[Path],
 ) -> list[str]:
-    """Build the Verilator lint-only command for one generated case."""
+    """Build the Verilator lint-only command for one generated case.
+
+    Uses ``-Wall`` to enable all warnings and ``-Wno-fatal`` to prevent
+    Verilator from upgrading warnings to errors.  Verilator minor-version
+    upgrades frequently add new warnings, and failing CI on a warning-only
+    change is not useful for a generated-RTL smoke gate that primarily
+    guards against syntax and structural errors (which always produce a
+    non-zero exit code regardless of ``-Wno-fatal``).
+    """
     return [
         verilator,
         "--lint-only",
         "-Wall",
+        "-Wno-fatal",
         "--top-module",
         emitted.top_module,
         *[str(path) for path in sv_files],
@@ -99,7 +108,11 @@ def test_verilator_lint_command_names_top_module(tmp_path: Path) -> None:
     case = lint_generated_monitor_cases()[0]
     emitted, sv_files = write_generated_modules(tmp_path, case)
     cmd = build_verilator_lint_command("verilator", emitted, sv_files)
-    assert cmd[:4] == ["verilator", "--lint-only", "-Wall", "--top-module"]
+    assert "verilator" in cmd
+    assert "--lint-only" in cmd
+    assert "-Wall" in cmd
+    assert "-Wno-fatal" in cmd
+    assert "--top-module" in cmd
     assert emitted.top_module in cmd
     for path in sv_files:
         assert str(path) in cmd

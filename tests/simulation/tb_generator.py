@@ -351,6 +351,35 @@ def _run_simulation_iverilog(
     return _parse_output(sim_result.stdout, has_overflow_flag=has_overflow_flag)
 
 
+def _verilator_timing_flag(verilator: str) -> str:
+    """Return the appropriate ``--timing`` or ``--no-timing`` flag.
+
+    Verilator 5.024+ enables timing by default.  Passing ``--timing`` to
+    a version that already has it on by default may trigger spurious
+    warnings or errors on some platforms (e.g. macOS brew).  This helper
+    queries the installed Verilator version and returns ``--timing`` only
+    when needed; otherwise it returns an empty string to let the default
+    take effect.
+    """
+    try:
+        result = subprocess.run(
+            [verilator, "--version"],
+            capture_output=True, text=True, timeout=10,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return "--timing"  # safest fallback
+
+    import re
+    m = re.search(r"Verilator\s+(\d+)\.(\d+)", result.stdout)
+    if m is None:
+        return "--timing"
+    major, minor = int(m.group(1)), int(m.group(2))
+    if major > 5 or (major == 5 and minor >= 24):
+        return ""  # timing is on by default
+    return "--timing"
+
+
 def _generate_verilator_wrapper(
     module_name: str,
     clock_signal: str,
@@ -397,6 +426,11 @@ def _run_simulation_verilator(
             "verilator not found on PATH — install Verilator to run simulation tests"
         )
 
+    # Detect Verilator version to decide timing flag.
+    # Verilator 5.024+ enables timing by default; --timing may be
+    # unnecessary or behave differently on newer versions.
+    timing_flag = _verilator_timing_flag(verilator)
+
     # Write DUT source
     dut_path = work_dir / "dut.sv"
     dut_path.write_text("\n\n".join(sv_sources), encoding="utf-8")
@@ -417,7 +451,8 @@ def _run_simulation_verilator(
     compile_result = subprocess.run(
         [
             verilator,
-            "--cc", "--exe", "--build", "--timing",
+            "--cc", "--exe", "--build",
+            timing_flag,
             "-Wno-fatal",
             "-Wall",
             "--top-module", module_name,

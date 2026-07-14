@@ -73,7 +73,7 @@ def _build_json_fixture(name: str) -> CheckerNode:
     ast = json.loads((_FIXTURES / name).read_text(encoding="utf-8"))
     node, clock, label, text = import_assertion(ast)
     node = normalize(node)
-    return optimize(compose(node, clock, label, text))
+    return optimize(compose(node, clock, label if label is not None else "synth", text))
 
 
 def _build(node: SVANode, label: str, text: str) -> CheckerNode:
