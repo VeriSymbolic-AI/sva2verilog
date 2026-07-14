@@ -44,14 +44,15 @@ def build_verilator_lint_command(
     Uses ``-Wno-fatal`` to prevent Verilator from upgrading warnings to
     errors.  ``-Wall`` is intentionally omitted because Verilator minor-
     version upgrades frequently add new warning categories that cannot be
-    anticipated, and the smoke gate should only fail on genuine
-    structural or syntax errors (which always produce a non-zero exit
-    code with or without ``-Wall``).
+    anticipated.  ``-Wno-UNOPTFLAT`` suppresses the common false positive
+    on generated RTL with unused flattened signals; this does not mask
+    genuine structural or syntax errors.
     """
     return [
         verilator,
         "--lint-only",
         "-Wno-fatal",
+        "-Wno-UNOPTFLAT",
         "--top-module",
         emitted.top_module,
         *[str(path) for path in sv_files],
@@ -110,6 +111,7 @@ def test_verilator_lint_command_names_top_module(tmp_path: Path) -> None:
     assert "verilator" in cmd
     assert "--lint-only" in cmd
     assert "-Wno-fatal" in cmd
+    assert "-Wno-UNOPTFLAT" in cmd
     assert "--top-module" in cmd
     assert emitted.top_module in cmd
     for path in sv_files:
