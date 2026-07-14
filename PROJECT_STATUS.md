@@ -1,41 +1,60 @@
 # sva2verilog 项目进展报告
 
-> 更新日期：2026-07-09
+> 更新日期：2026-07-14
 > 仓库：public GitHub repository
-> 当前版本：v1.5.2 + current main hardening
+> 当前版本：v1.7.0
 
 ## 当前状态
 
-sva2verilog 是一个开源的 SystemVerilog Assertion (SVA) 到可综合 RTL 监控器编译器。项目已完成 v1.5.2 发布并推送到 GitHub。当前状态：
+sva2verilog 是一个开源的 SystemVerilog Assertion (SVA) 到可综合 RTL 监控器编译器。项目已完成 v1.7.0 发布并推送到 GitHub。当前状态：
 
-- 测试套件：1094 passed, 4 skipped, 1 xfailed, 0 failed
+- 测试套件：1321 collected, fast suite 1146 passed, 31 skipped, 0 failed, 1 xfailed
 - 代码质量：mypy --strict 0 errors, ruff 0 errors
-- 形式化验证：历史基线为 62 个非循环 BMC 等价证明（覆盖所有已支持算子）+ 5 个 Tier-A k-induction 完备证明；Phase 10 本地目标文件当前为 56 个 BMC/契约测试 + 8 个 k-induction 证明目标
-- 生成 RTL 综合/静态检查：Phase 11 本地 Yosys generated-RTL smoke gate 通过；Verilator lint-only gate 已实现并加入 CI，但本机因未安装 Verilator 跳过，不能算作通过证据
+- 形式化验证：历史基线为 62 个非循环 BMC 等价证明（覆盖所有已支持算子）+ 56 个 Phase 10 BMC/契约测试 + 10 个 k-induction 证明目标（+1 xfail liveness 边界）
+- 生成 RTL 综合/静态检查：Phase 11 本地 Yosys generated-RTL smoke gate 54 passed；Verilator lint-only gate 已实现并加入 CI，但本机因未安装 Verilator 跳过，不能算作通过证据
 - 随机差分验证：Phase 12 已加入 bounded source-level Hypothesis/differential harness；本机 Icarus fast differential 通过，Verilator 因本机未安装跳过，不算通过证据
-- 覆盖度：约 95%+ 的实际断言场景
+- 变异测试：4 个关键模块全部 >85% 杀死率（bool_semantics 100%, behavioral_oracle 88.9%, composer 91%, ast_importer 93.3%）
+- 覆盖度：约 95%+ 的实际断言场景；coverage 门控 fail_under=82（实际 82.7%）
 - 支持状态权威：`SUPPORT_MATRIX.md` 记录逐构造支持边界、证据完整度和降级原因；README / SUPPORTED_CONSTRUCTS 只作概览和解释
 - 工业级验证缺口：已记录在 `INDUSTRIAL_VALIDATION_GAPS.md`，包含当前进展、P0/P1/P2 严重度、修复计划和 fully-supported 定义标准
 
-## 当前 main 新增修复（2026-07-07）
+## v1.7.0 语言表面闭合（2026-07-10）
 
-本轮修复了 `[->N]` / `[=N]` 的单拍 `start` 语义缺口：`start` 作为“开始一次 property evaluation”的触发后，RTL 现在会用内部 `running_q` 持续追踪后续非连续 occurrence，直到第 N 次 occurrence 完成并锁定 `pass`。此前模板只在 `start` 为真时计数，单拍启动后会漏掉后续 occurrence；原形式化 reference 也按 RTL timing 编写，存在同构证明风险。
+v1.7.0 关闭了最后已知的行为缺口：
 
-已补强：
+- LANG-01 `##0` fusion：BoolExpr `a ##0 b` 自动重写为 `(a) && (b)`，复杂 `##0` 拒绝报错
+- LANG-02 NFA SeqOr：union construction 通过 `_lift_to_nfa`，`(a or b) intersect c` 现在可编译
+- LANG-03 NFA 范围延迟/重复：`##[M:N]` 非确定性延迟展开 + `[*M:N]` 多接受 NFA 状态
+- LANG-04 NFA goto/nonconsecutive：`[->N]` 自环计数 NFA + `[=N]` relaxed-tail NFA
+- Slang 双约定兼容：slang v11+ 延迟解析 prefix/suffix 约定自动检测
+- Oracle boolean fallback 修复：`_tick_bool_expr_semantic` 默认值修正
 
-- `goto_rep` / `nonconsec_rep` RTL 模板：增加 armed/running 状态，单拍启动后继续计数。
-- behavioral oracle：同步为单拍启动后持续尝试的语义模型。
-- simulation tests：新增 `[->3]`、`[=5]` 单拍 start 后跨 gap 计数的 RTL-vs-oracle 回归。
-- formal miter references：改为独立语义 reference，不再按旧 RTL start gating 复制实现。
-- importer hardening：`[->M:N]` / `[=M:N]` 反向范围、非正/无界范围，以及当前未实现的 ranged count（`M<N`）现在明确报 `SVA-E002`。v1 只支持固定 `[->N]` / `[=N]`。
+NFA 引擎唯一的拒绝路径是 K 状态预算 >32。
 
-## 里程碑历程
+## v1.7 证据链加固（2026-07-11，HEAD ed170cc）
 
-从 2026-05-25 启动至 2026-07-06，约 42 天内完成 13 个里程碑：
+在 v1.7 语言表面闭合后完成了全面证据链加固：
 
-v1.0 MVP（6/1）交付编译器核心。v1.1-v1.2 加固。v1.3（6/22）交付 Tier 2 算子。v1.3.2 引入真正的 SVA↔RTL 形式化等价验证。v1.4（6/30）交付有界活性和多时钟。v1.5.0 关闭 RISK-02。v1.5.1（7/2）交付 NFA 组合引擎。v1.5.2（7/6）扩展形式化验证到全部算子、修复 first_match bug、mypy 清零、推送到 GitHub。
+- P0-1：修复序列前件蕴含断言崩溃（路由层 + 防御层转 UnsupportedConstruct）
+- P0-2：恢复绿色基线（ruff+mypy 0 error，快速套件 0 failed）
+- P1-1：补齐 12 个真实 `.sv` 源 fixture + 13 个 E2E 测试
+- P1-2：新增 Verilator 差分 nightly workflow（`differential-nightly.yml`）
+- P1-3：4 个关键模块变异杀死率全部 >85%（bool_semantics 100%, behavioral_oracle 88.9%, composer 91%, ast_importer 93.3%）
+- P2-1：k-induction 从 8 扩展到 11 个证明目标（10 passed + 1 xfail liveness 边界）
+- P2-2：治理收尾（ROADMAP 修正、tools/audit README、v1.2.0 tag 记录）
+- 遗留-1：4 处裸 assert 全部转为防御性 UnsupportedConstruct
+- 遗留-2：slang v11 `DisableIff` / `AssertionInstance` AST 兼容
+- 遗留-6：coverage 门控 fail_under 从 78 提升到 82
 
-## v1.5.2 完成的工作
+## v1.5.2/v1.6 历史修复回顾
+
+## v1.5.2/v1.6 历史修复回顾
+
+### 里程碑历程
+
+从 2026-05-25 启动至 2026-07-11，约 47 天内完成 v1.0 到 v1.7 全系列里程碑：
+
+v1.0 MVP（6/1）交付编译器核心。v1.1-v1.2 加固。v1.3（6/22）交付 Tier 2 算子。v1.3.2 引入真正的 SVA↔RTL 形式化等价验证。v1.4（6/30）交付有界活性和多时钟。v1.5.0 关闭 RISK-02。v1.5.1（7/2）交付 NFA 组合引擎。v1.5.2（7/6）扩展形式化验证到全部算子、修复 first_match bug、mypy 清零、推送到 GitHub。v1.7.0（7/10）语言表面闭合。7/11 证据链加固完成。
 
 ### Bug 修复
 
@@ -131,44 +150,46 @@ Phase 12 增加的是证据深度，而不是新增 SVA 语法范围。本地目
 
 ## 验证体系
 
-四层验证金字塔：
+六层验证金字塔：
 
-1. 行为预言机（950 单元测试）：纯 Python IEEE 模型，与 RTL 结构独立
-2. iverilog/Verilator 仿真交叉验证（129 测试）：逐周期 pass/fail 比对
-3. SymbiYosys BMC 形式化等价（历史全算子基线 62 证明；Phase 10 目标文件当前 56 个 BMC/契约测试）：独立 IEEE 1800 参考监控器 + sby BMC miter
-4. SymbiYosys k-induction 完备证明（Phase 10 当前 8 个证明目标）：Tier-A 核心监控器加 `##1`、simple `|->`、`[*3]` 代表性小状态模板
-5. Generated RTL 工具接受度（Phase 11）：Yosys synthesis-oriented smoke gate 本地通过；Verilator lint-only gate 已配置在 CI，本机 skip 不算 pass evidence
-6. Source-level differential testing（Phase 12）：bounded SVA source + generated stimulus，对 Python oracle 与 Icarus RTL simulation 做逐周期比较；Verilator differential 本机 skip，slow sweep opt-in
+1. 行为预言机（纯 Python IEEE 模型，与 RTL 结构独立）
+2. iverilog/Verilator 仿真交叉验证（逐周期 pass/fail 比对）
+3. SymbiYosys BMC 形式化等价（历史全算子基线 62 证明；Phase 10 56 个 BMC/契约测试）：独立 IEEE 1800 参考监控器 + sby BMC miter
+4. SymbiYosys k-induction 完备证明（10 个证明目标 + 1 xfail liveness 边界）：Tier-A 核心监控器加 `##1`、simple `|->`、`[*3]`、`##[1:5]`、`[*2:5]`、`s_eventually[1:3]`
+5. Generated RTL 工具接受度（Phase 11）：Yosys synthesis smoke gate 54 passed；Verilator lint gate 已配置 CI，本机 skip
+6. Source-level differential testing（Phase 12）：bounded SVA source + generated stimulus，Python oracle vs Icarus 逐周期比较；Verilator differential 本机 skip
 
 RISK-01 纪律：预言机和参考监控器必须与 RTL 实现结构独立。曾两次发现被循环证明掩盖的真实缺陷（BUG-DELAY-01、BUG-IMPL-01）。
 
 ## 已知限制
 
-- 1 xfail：`bool_expr` 叶子不独立产生 fail 的结构性见证，fail 语义来自蕴含父节点
-- 全算子等价证明仍以 BMC 有界为主（历史 depth=15-30）；k-induction 当前覆盖 8 个小状态目标，尚未扩展到全部算子、复杂 NFA、liveness 或 CDC 边界
+- 1 xfail：`s_eventually[1:3]` k-induction induction step 不收敛（liveness 边界，诚实记录）
+- SUPPORT_MATRIX 中 0 个构造行达到 Fully supported，全部为 Bounded evidence（缺 current-HEAD Verilator 证据或全契约 formal proof）
+- 全算子等价证明仍以 BMC 有界为主；k-induction 当前覆盖 10 个小状态目标，尚未扩展到全部算子、复杂 NFA、liveness 或 CDC 边界
 - 多时钟形式化等价永久排除（行业通用限制）
 - K-state budget (>32) 和 CDC 边界是 NFA 引擎仅存的拒绝路径
+- 本机无 Verilator，Verilator 相关证据均为本地 skip；需远端 CI 或 Verilator 宿主提供 pass evidence
 
 ## 未来规划
 
-### 短期（1-2 周）
+### 短期（Phase 1：发布治理与版本收敛，1 周内）
 
-1. 继续维护远端 CI baseline ledger，必要时单独运行 manual/scheduled `Full Formal`
-2. 代码覆盖率提升到 95%+（ast_importer 81.4%、composer 87.7%、behavioral_oracle 86.6%）
-3. 嵌套 NFA BMC 深度从 15 增加到 25-30
+1. 同步版本号：pyproject.toml、`__version__`、tag、release notes、状态文档一致为 v1.7.0
+2. 推送当前 HEAD 到远端，触发完整 CI（lint + Icarus/Verilator 双矩阵 + formal smoke + generated RTL + differential nightly）
+3. 记录远端 CI run ID 作为 current-HEAD 证据
 
-### 中期（1-2 月）
+### 中期（Phase 2：证据链闭合，2-3 周）
 
-4. 变异测试（mutmut）：验证测试套件区分力，目标变异杀死率 >85%
-5. 差分测试框架：随机生成 SVA → 编译 → 仿真 → 比对，发现未知组合 bug
-6. 继续扩展 k-induction：Phase 10 已从 5 个 Tier-A 核心证明扩大到 8 个小状态目标；下一步需要为更多 BMC-only 家族补 invariants/cutpoints 或明确保留 bounded 边界
-7. v1.6 决策：单线程局部变量 / 多时钟×NFA / FPGA 原型（需求拉动）
+4. 选择 5-8 个核心构造（bool、$rose/$fell/$stable/$changed、##1、simple |->、[*3]、first_match、disable iff），补齐 current-HEAD 证据链，逐行升级为 Fully supported
+5. wheel 构建和 clean-install smoke 验证
+6. SUPPORT_MATRIX 中核心 rows 证据从 missing/pending 升级为 present
 
-### 长期
+### 长期（按需求拉动）
 
-8. 社区采用：文档、示例、教程
-9. 学术发表：DVCon 或会议论文（三层验证方法）
-10. C++ 重写（v2）：大规模设计性能优化
+7. FPGA 原型（FUT-03）：与 OSS CAD Suite 集成，记录面积/时序/资源基线
+8. 真实设计 corpus：至少 2 个非玩具设计端到端流程
+9. C++ 重写 v2（FUT-04）：仅在 Python 性能基线明确成为瓶颈后启动
+10. 社区采用与学术发表：DVCon 投稿（多层验证方法论 + k-induction + NFA 组合引擎）
 
 ## 风险登记册
 

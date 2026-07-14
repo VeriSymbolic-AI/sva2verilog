@@ -1,6 +1,6 @@
 # sva2rtl Support Matrix
 
-This file is the authoritative support evidence ledger for v1.6. `README.md`
+This file is the authoritative support evidence ledger for v1.7. `README.md`
 and `SUPPORTED_CONSTRUCTS.md` provide explanations and examples; this matrix
 governs exact support status, subset boundaries, and verification evidence.
 
@@ -22,11 +22,11 @@ or `sby` are not evidence pass.
 | Status | Meaning |
 |--------|---------|
 | Fully supported | Complete applicable evidence chain: real `.sv` source, compiler pipeline, Icarus, Verilator, independent oracle/reference, formal or justified N/A, synthesis/lint evidence where applicable, and rejection tests for unsupported variants. |
-| Bounded evidence | Implemented and useful, but one or more industrial evidence links are missing, bounded, pending remote CI, or deferred to a later v1.6 phase. |
+| Bounded evidence | Implemented and useful, but one or more industrial evidence links are missing, bounded, pending remote CI, or deferred to a later phase. |
 | Trusted boundary | Intentionally trusted component or excluded proof domain, such as the multi-clock 2-DFF synchronizer and CDC/metastability proof boundary. |
 | Unsupported / rejected | Deliberately unsupported variant that should fail with explicit, actionable diagnostics and negative-test evidence where available. |
 
-Current v1.6 evidence still assigns no construct row to `Fully supported`; the
+Current v1.7 evidence still assigns no construct row to `Fully supported`; the
 remote push/PR CI baseline is published, Phase 9 adds structured boolean
 semantic evidence, Phase 10 adds focused formal harness depth, and Phase 11
 adds local Yosys generated-RTL smoke evidence plus CI wiring for generated RTL
@@ -149,7 +149,7 @@ added in `tests/test_behavioral_oracle.py`.
 | Bounded liveness `s_eventually [m:n]`, `eventually [m:n]`, `always [m:n]`, `s_always [m:n]`, weak `until`, `until_with` | Boolean operand, finite window or safety form | Bounded evidence | missing: JSON/direct-IR fixtures `tests/fixtures/s_eventually_1_3.json`, `always_1_3.json`, `until_ab.json` only | present: `tests/test_liveness.py` | present: `tests/simulation/test_sim_liveness.py` | present: CI run `28931676000` Verilator matrix | present: simulator oracle and independent formal references | present: `tests/test_formal_sva_equiv.py#TestBoundedLivenessSvaEquiv` | present: local Yosys smoke `tests/test_synthesis_gates.py`; pending-remote: generated Verilator lint gate `tests/test_generated_lint.py` is configured in CI | present: unbounded/strong rejection tests in `tests/test_liveness.py` | Bounded finite-state subset only; Phase 10 did not promote liveness to k-induction proof. |
 | Unbounded liveness / infinite-state forms | `s_eventually a`, unbounded `always`, strong `s_until`, unbounded repetition/delay | Unsupported / rejected | N/A: rejected variant | present: `tests/test_liveness.py`; `tests/test_repetition.py` | N/A: rejection occurs before simulation | N/A: rejection occurs before simulation | N/A: rejection path | N/A: rejection path | N/A: rejection path | present: `tests/test_liveness.py#test_unbounded_s_eventually_rejected`; `tests/test_repetition.py#test_import_unbounded_rejects` | Not synthesizable as finite hardware monitor semantics. |
 | Multi-clock path-one split/synchronize forms | Allowed `##1` clock changes and non-overlap cross-clock implication through trusted 2-DFF synchronizer | Trusted boundary | missing: no public real `.sv` fixture in root fixture corpus | present: `tests/test_multiclock.py` | missing: no dynamic multi-clock simulator ratio evidence yet | pending-remote: CI if dynamic tests are added later | trusted-boundary: per-domain semantics; CDC/metastability excluded | trusted-boundary: full CDC/metastability proof excluded | trusted-boundary: local Yosys smoke `tests/test_synthesis_gates.py` accepts generated synchronizer structure; pending-remote: generated Verilator lint gate is configured in CI; future FPGA/prototype evidence remains planned | present: `tests/test_multiclock.py#test_overlapping_implication_cross_clock_rejected`; `#test_cross_clock_delay_n_neq_1_rejected_by_slang` | Trusted 2-DFF synchronizer boundary, not full CDC proof. |
-| Local variables and unsupported system functions | Sequence local variables; `$countones`, `$onehot`, arrays/multi-dimensional sampled values | Unsupported / rejected | N/A: rejected or unsupported variant | present: generic unsupported paths in `tests/test_ast_importer.py`; `tests/test_errors.py` | N/A: rejection occurs before simulation | N/A: rejection occurs before simulation | N/A: rejection path | N/A: rejection path | N/A: rejection path | present: `tests/test_errors.py`; unsupported construct tests | Demand-pulled future work only; not part of v1.6 language closure. |
+| Local variables and unsupported system functions | Sequence local variables; `$countones`, `$onehot`, arrays/multi-dimensional sampled values | Unsupported / rejected | N/A: rejected or unsupported variant | present: generic unsupported paths in `tests/test_ast_importer.py`; `tests/test_errors.py` | N/A: rejection occurs before simulation | N/A: rejection occurs before simulation | N/A: rejection path | N/A: rejection path | N/A: rejection path | present: `tests/test_errors.py`; unsupported construct tests | Demand-pulled future work only; not part of v1.x language closure. |
 
 ## Real Source Fixture Inventory
 

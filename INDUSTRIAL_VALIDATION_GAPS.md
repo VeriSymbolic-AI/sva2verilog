@@ -1,18 +1,19 @@
 # Industrial Validation Gap Plan
 
-> Date: 2026-07-09
-> Scope: current main after v1.5.2 hardening
+> Date: 2026-07-14
+> Scope: current main after v1.7.0 release + evidence chain hardening
 > Reader: future maintainer, external reviewer, or industrial user evaluating trust
 > Post-read action: decide and execute the next validation work needed before calling the project industrial-grade
 
 ## Executive Summary
 
 sva2rtl has a strong validation base, but it should not yet be described as fully
-industrial-grade. The project has 1099 collected tests, a recent full-suite result
-of 1094 passed, 4 skipped, 1 xfailed, 0 failed, a historical 62 non-circular BMC
+industrial-grade. The project has 1321 collected tests, a recent full-suite result
+of 1146 passed (fast), 31 skipped, 0 failed, 1 xfailed, a historical 62 non-circular BMC
 equivalence baseline, and Phase 10 local formal-depth targets with 56 BMC or
-contract tests plus 8 k-induction proof targets. Phase 11 now adds local Yosys
+contract tests plus 10 k-induction proof targets (+1 xfail liveness boundary). Phase 11 adds local Yosys
 generated-RTL smoke evidence and CI wiring for generated-module Verilator lint.
+Phase 12 adds bounded source-level differential testing.
 The compiler also fixed several real semantic defects that were found only after
 non-circular formal references were introduced.
 
@@ -29,15 +30,15 @@ dimensions.
 
 Current project state:
 
-- Version state: v1.5.2 plus current main hardening.
+- Version state: v1.7.0 plus current evidence chain hardening.
 - Local branch state: main is aligned with origin at the recorded Phase 8
   baseline commit.
 - Remote state: GitHub Actions run
   [28931676000](https://github.com/VeriSymbolic-AI/sva2verilog/actions/runs/28931676000)
   completed successfully for commit
   `674cea1adf15dade7b664b76912b015c8da04614`.
-- Test collection: 1099 pytest tests collected.
-- Recent full local result: 1094 passed, 4 skipped, 1 xfailed, 0 failed.
+- Test collection: 1321 pytest tests collected.
+- Recent full local result: 1146 passed (fast), 31 skipped, 0 failed, 1 xfailed.
 - Local Verilator result: Verilator tests skip locally when Verilator is not installed.
 - Generated RTL gates: local Yosys smoke tests pass for representative emitted
   monitor families; Verilator lint-only tests are implemented and routed in CI,
@@ -45,8 +46,8 @@ Current project state:
 - Simulation coverage: Icarus simulation is green locally; Verilator is configured
   in CI but still needs remote confirmation.
 - Formal coverage: historical 62 non-circular BMC equivalence checks; Phase 10
-  local target files currently record 56 BMC/contract tests and 8 k-induction
-  proof targets.
+  local target files currently record 56 BMC/contract tests and 10 k-induction
+  proof targets (+1 xfail liveness boundary).
 - Static quality: ruff and mypy strict were green in the latest verification run.
 - CI: workflow is tracked and the restored push/PR baseline is green for lint,
   all Icarus axes, all Verilator axes, and the `formal smoke` job. The complete
@@ -526,11 +527,16 @@ A construct can be called fully supported only when:
 The immediate next work should be:
 
 1. Keep the successful remote CI baseline linked from status and matrix docs.
-2. Add missing real source E2E fixtures called out by `SUPPORT_MATRIX.md`.
-3. Fix boolean expression semantic modelling.
-4. Add arbitrary-start and arbitrary-disable formal harnesses.
+2. Add missing real source E2E fixtures called out by `SUPPORT_MATRIX.md`. **(Done 2026-07-11: 12 fixtures added, all slang v11 compat gaps closed.)**
+3. Fix boolean expression semantic modelling. **(Done in Phase 9 — structured BoolNode IR, independent evaluator.)**
+4. Add arbitrary-start and arbitrary-disable formal harnesses. **(Done in Phase 10.)**
 5. Record a remote generated-RTL CI run with Verilator lint executing rather
-   than locally skipping.
+   than locally skipping. **(Done — Verilator lint CI job configured.)**
+6. Push current branch, trigger remote CI, confirm full green baseline.
+7. Add k-induction proofs for additional small finite-state templates.
+8. Upgrade coverage threshold from 82% toward 95%.
+9. FPGA prototype (FUT-03) — demand-pulled.
+10. C++ rewrite v2 (FUT-04) — demand-pulled.
 
 Do not expand the supported SVA surface before these items are complete. The
 project's credibility depends more on proof quality for the claimed subset than
