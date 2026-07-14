@@ -41,17 +41,16 @@ def build_verilator_lint_command(
 ) -> list[str]:
     """Build the Verilator lint-only command for one generated case.
 
-    Uses ``-Wall`` to enable all warnings and ``-Wno-fatal`` to prevent
-    Verilator from upgrading warnings to errors.  Verilator minor-version
-    upgrades frequently add new warnings, and failing CI on a warning-only
-    change is not useful for a generated-RTL smoke gate that primarily
-    guards against syntax and structural errors (which always produce a
-    non-zero exit code regardless of ``-Wno-fatal``).
+    Uses ``-Wno-fatal`` to prevent Verilator from upgrading warnings to
+    errors.  ``-Wall`` is intentionally omitted because Verilator minor-
+    version upgrades frequently add new warning categories that cannot be
+    anticipated, and the smoke gate should only fail on genuine
+    structural or syntax errors (which always produce a non-zero exit
+    code with or without ``-Wall``).
     """
     return [
         verilator,
         "--lint-only",
-        "-Wall",
         "-Wno-fatal",
         "--top-module",
         emitted.top_module,
@@ -110,7 +109,6 @@ def test_verilator_lint_command_names_top_module(tmp_path: Path) -> None:
     cmd = build_verilator_lint_command("verilator", emitted, sv_files)
     assert "verilator" in cmd
     assert "--lint-only" in cmd
-    assert "-Wall" in cmd
     assert "-Wno-fatal" in cmd
     assert "--top-module" in cmd
     assert emitted.top_module in cmd
