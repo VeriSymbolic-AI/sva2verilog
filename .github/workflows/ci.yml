@@ -46,6 +46,7 @@ jobs:
       - name: Install Verilator (Linux, pinned v5.028)
         if: matrix.simulator == 'verilator' && runner.os == 'Linux'
         run: |
+          sudo apt-get update && sudo apt-get install -y autoconf build-essential
           VERILATOR_VERSION="v5.028"
           wget -q "https://github.com/verilator/verilator/archive/refs/tags/${VERILATOR_VERSION}.tar.gz"
           tar xzf ${VERILATOR_VERSION}.tar.gz
@@ -56,6 +57,7 @@ jobs:
       - name: Install Verilator (macOS, pinned v5.028)
         if: matrix.simulator == 'verilator' && runner.os == 'macOS'
         run: |
+          brew install autoconf
           VERILATOR_VERSION="v5.028"
           wget -q "https://github.com/verilator/verilator/archive/refs/tags/${VERILATOR_VERSION}.tar.gz"
           tar xzf ${VERILATOR_VERSION}.tar.gz
@@ -109,7 +111,7 @@ jobs:
 
       - name: Install generated RTL tools
         run: |
-          sudo apt-get update && sudo apt-get install -y yosys
+          sudo apt-get update && sudo apt-get install -y yosys autoconf build-essential
           VERILATOR_VERSION="v5.028"
           wget -q "https://github.com/verilator/verilator/archive/refs/tags/${VERILATOR_VERSION}.tar.gz"
           tar xzf ${VERILATOR_VERSION}.tar.gz
