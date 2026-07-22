@@ -239,15 +239,14 @@ class SVABehavioralSim:
         old_running = self._rep_running
         old_count = self._rep_count
 
-        # State update — mirrors RTL always_ff: only (start && sig) starts run
+        # State update — mirrors RTL always_ff.  A false expression cannot
+        # start a new run, but it must still terminate an already-running
+        # attempt even when a new ``start`` pulse arrives on the same cycle.
+        if start:
+            self._attempt_fired = True
         if start and sig:
             self._rep_running = True
             self._rep_count = 1
-            self._attempt_fired = True
-        elif start and not sig:
-            # Attempt fires but sequence immediately broken; RTL does NOT set
-            # running_q=1 when start fires without sig.
-            self._attempt_fired = True
         elif old_running and sig:
             if old_count < rep_max:
                 self._rep_count = old_count + 1
@@ -835,14 +834,45 @@ class _HierarchicalSim:
     # ── Phase 3: Complex sequence operator oracles (v1.3) ────────────────
 
     def _tick_prop_or(self, node: CheckerNode, signals: dict[str, bool]) -> dict[str, bool]:
-        """prop_or: OR two sub-checkers."""
+        """prop_or: pass on either match; fail only after both alternatives fail."""
         if len(node.children) < 2:
             return {"pass": False, "fail": False, "active": False, "overflow": False}
         lhs = self._tick_node(node.children[0], signals)
         rhs = self._tick_node(node.children[1], signals)
+
+        key = node.module_name
+        if not hasattr(self, "_or_state"):
+            self._or_state: dict[str, dict[str, bool]] = {}
+        if key not in self._or_state:
+            self._or_state[key] = {"left_f": False, "right_f": False}
+        st = self._or_state[key]
+
+        if signals.get("disable", False):
+            st["left_f"] = False
+            st["right_f"] = False
+            return {"pass": False, "fail": False, "active": False, "overflow": False}
+
+        if signals.get("start", False) and not lhs["active"] and not rhs["active"]:
+            st["left_f"] = False
+            st["right_f"] = False
+
+        pass_val = lhs["pass"] or rhs["pass"]
+        fail_val = (
+            lhs["fail"] and (rhs["fail"] or st["right_f"])
+        ) or (
+            rhs["fail"] and (lhs["fail"] or st["left_f"])
+        )
+
+        if pass_val or fail_val:
+            st["left_f"] = False
+            st["right_f"] = False
+        else:
+            st["left_f"] = st["left_f"] or lhs["fail"]
+            st["right_f"] = st["right_f"] or rhs["fail"]
+
         return {
-            "pass": lhs["pass"] or rhs["pass"],
-            "fail": lhs["fail"] or rhs["fail"],
+            "pass": pass_val,
+            "fail": fail_val,
             "active": lhs["active"] or rhs["active"],
             "overflow": lhs.get("overflow", False) or rhs.get("overflow", False),
         }

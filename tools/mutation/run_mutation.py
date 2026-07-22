@@ -35,6 +35,11 @@ MUTATION_TARGETS: dict[str, list[str]] = {
     "behavioral_oracle.py": [
         "tests/test_behavioral_oracle.py",
         "tests/test_coverage_oracle_gaps.py",
+        "tests/test_signal_functions.py",
+        "tests/test_repetition.py",
+        "tests/test_v13_operators.py",
+        "tests/test_v13_independent_baseline.py",
+        "tests/test_v15_risk02_gate.py",
     ],
     "composer.py": [
         "tests/test_composer.py",

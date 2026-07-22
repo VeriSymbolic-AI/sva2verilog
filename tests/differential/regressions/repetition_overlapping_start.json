@@ -1,0 +1,56 @@
+{
+  "backend_trace": [
+    {"active": false, "backend": "iverilog", "cycle": 0, "fail": false, "overflow": null, "pass": false},
+    {"active": true, "backend": "iverilog", "cycle": 1, "fail": true, "overflow": null, "pass": false},
+    {"active": false, "backend": "iverilog", "cycle": 2, "fail": false, "overflow": null, "pass": false}
+  ],
+  "case": {
+    "budget": "regression",
+    "case_id": "diff_reg_rep_overlap",
+    "expects_overflow": false,
+    "families": ["rep_consecutive_fixed"],
+    "module_name": "diff_reg_rep_overlap_mod",
+    "property_label": "p_reg_rep_overlap",
+    "reference_kind": "repetition",
+    "signals": ["a"],
+    "source_reference": {
+      "depth": 1,
+      "disable": null,
+      "kind": "repetition",
+      "left": {"kind": "signal", "left": null, "name": "a", "right": null, "value": null},
+      "maximum": 2,
+      "minimum": 2,
+      "right": null
+    },
+    "trace_length": 3
+  },
+  "mismatch": {
+    "actual": false,
+    "actual_observation": {"active": false, "backend": "iverilog", "cycle": 2, "fail": false, "overflow": null, "pass": false},
+    "backend": "iverilog",
+    "case_id": "diff_reg_rep_overlap",
+    "cycle": 2,
+    "expected": true,
+    "family_tags": ["rep_consecutive_fixed"],
+    "oracle_observation": {"active": true, "backend": "oracle-old", "cycle": 2, "fail": true, "overflow": false, "pass": false},
+    "reason": "historical oracle retained an attempt after a false overlapping start",
+    "signal": "active",
+    "source_text": "module diff_reg_rep_overlap_mod(\n    input logic clk,\n    input logic rst_n,\n    input logic a\n);\n  p_reg_rep_overlap: assert property (@(posedge clk) a [*2]);\nendmodule\n",
+    "stimulus_slice": [
+      {"a": true, "start": true},
+      {"a": false, "start": true},
+      {"a": false, "start": false}
+    ]
+  },
+  "oracle_trace": [
+    {"active": false, "backend": "oracle-old", "cycle": 0, "fail": false, "overflow": false, "pass": false},
+    {"active": true, "backend": "oracle-old", "cycle": 1, "fail": true, "overflow": false, "pass": false},
+    {"active": true, "backend": "oracle-old", "cycle": 2, "fail": true, "overflow": false, "pass": false}
+  ],
+  "schema_version": 1,
+  "stimulus": [
+    {"a": true, "start": true},
+    {"a": false, "start": true},
+    {"a": false, "start": false}
+  ]
+}

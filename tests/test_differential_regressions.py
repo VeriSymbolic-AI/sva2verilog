@@ -11,10 +11,15 @@ from tests.differential_cases import (
     FAILURE_ARTIFACT_SCHEMA_VERSION,
     CycleObservation,
     DifferentialMismatch,
+    GeneratedSvaCase,
     assert_traces_match,
     build_failure_artifact,
     deterministic_stimulus,
+    find_trace_mismatch,
+    load_regression_case,
     make_generated_case,
+    normalize_observation,
+    run_oracle_trace,
     write_failure_artifact,
 )
 
@@ -22,7 +27,7 @@ _REGRESSION_DIR = Path(__file__).parent / "differential" / "regressions"
 
 
 def _mismatch() -> tuple[
-    object,
+    GeneratedSvaCase,
     list[dict[str, bool]],
     list[CycleObservation],
     list[CycleObservation],
@@ -64,13 +69,14 @@ def test_failure_artifact_schema_is_stable_and_deterministic() -> None:
         actual=actual,
     )
     encoded = artifact.to_json()
+    decoded = json.loads(encoded)
 
     assert artifact.schema_version == FAILURE_ARTIFACT_SCHEMA_VERSION
     assert artifact.as_dict()["schema_version"] == FAILURE_ARTIFACT_SCHEMA_VERSION
-    assert artifact.as_dict()["case"]["case_id"] == case.case_id
+    assert decoded["case"]["case_id"] == case.case_id
     assert artifact.as_dict()["stimulus"] == stimulus
-    assert artifact.as_dict()["oracle_trace"][0]["backend"] == "oracle"
-    assert artifact.as_dict()["backend_trace"][0]["backend"] == "unit"
+    assert decoded["oracle_trace"][0]["backend"] == "oracle"
+    assert decoded["backend_trace"][0]["backend"] == "unit"
     assert encoded == artifact.to_json()
 
 
@@ -155,9 +161,26 @@ def test_committed_regression_fixture_replay_entrypoint() -> None:
         pytest.skip("no promoted differential failure fixtures yet")
 
     for fixture in fixtures:
-        payload = json.loads(fixture.read_text(encoding="utf-8"))
+        case, stimulus, payload = load_regression_case(fixture)
         assert payload["schema_version"] == FAILURE_ARTIFACT_SCHEMA_VERSION
         assert "source_text" in payload["mismatch"]
         assert payload["stimulus"]
         assert payload["oracle_trace"]
         assert payload["backend_trace"]
+
+        current = run_oracle_trace(case, stimulus)
+        backend = [
+            normalize_observation(raw, cycle=index, backend="recorded-backend")
+            for index, raw in enumerate(payload["backend_trace"])
+        ]
+        historical = [
+            normalize_observation(raw, cycle=index, backend="historical-oracle")
+            for index, raw in enumerate(payload["oracle_trace"])
+        ]
+
+        assert find_trace_mismatch(
+            case, stimulus, current, backend, backend="recorded-backend"
+        ) is None
+        assert find_trace_mismatch(
+            case, stimulus, historical, backend, backend="historical-oracle"
+        ) is not None

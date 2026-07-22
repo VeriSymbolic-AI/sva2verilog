@@ -720,6 +720,113 @@ class TestPropIfElseSvaEquiv:
         assert passed, f"if/else SVA↔RTL equivalence FAILED:\n{output[-2500:]}"
 
 
+# ── Named sequence and simple sequence and/or ─────────────────────────────
+# These reference modules are intentionally authored directly from source SVA
+# semantics.  They do not instantiate generated children or reproduce the
+# token-passing hierarchy, which makes the miters non-circular.
+
+
+def _named_seq_ref_module(name: str) -> str:
+    """Independent reference for ``sequence req_ack; a ##1 b; endsequence``."""
+    return f"""\
+module {name} (
+    input  logic clk,
+    input  logic rst_n,
+    input  logic start,
+    input  logic a,
+    input  logic b,
+    output logic pass,
+    output logic fail
+);
+    // a is sampled with start.  Exactly one cycle later b decides the
+    // sequence; an initial a miss is terminal immediately.
+    logic pending_q, a_fail_q, pass_q, b_fail_q;
+    always_ff @(posedge clk) begin
+        if (!rst_n) begin
+            pending_q <= 1'b0;
+            a_fail_q  <= 1'b0;
+            pass_q    <= 1'b0;
+            b_fail_q  <= 1'b0;
+        end else begin
+            pending_q <= start && a;
+            a_fail_q  <= start && !a;
+            pass_q    <= pending_q && b;
+            b_fail_q  <= pending_q && !b;
+        end
+    end
+    assign pass = pass_q;
+    assign fail = a_fail_q || b_fail_q;
+endmodule
+"""
+
+
+def _simple_binary_seq_ref_module(name: str, *, op: str) -> str:
+    """Independent reference for one-cycle boolean ``a and/or b`` sequences."""
+    assert op in {"and", "or"}
+    pass_expr = "left_pass_q && right_pass_q" if op == "and" else "left_pass_q || right_pass_q"
+    fail_expr = "left_fail_q || right_fail_q" if op == "and" else "left_fail_q && right_fail_q"
+    return f"""\
+module {name} (
+    input  logic clk,
+    input  logic rst_n,
+    input  logic start,
+    input  logic a,
+    input  logic b,
+    output logic pass,
+    output logic fail
+);
+    // Stage one evaluates the two source alternatives independently.  Stage
+    // two applies the IEEE sequence-composition truth table.
+    logic left_pass_q, left_fail_q, right_pass_q, right_fail_q;
+    logic pass_q, fail_q;
+    always_ff @(posedge clk) begin
+        if (!rst_n) begin
+            left_pass_q  <= 1'b0;
+            left_fail_q  <= 1'b0;
+            right_pass_q <= 1'b0;
+            right_fail_q <= 1'b0;
+            pass_q       <= 1'b0;
+            fail_q       <= 1'b0;
+        end else begin
+            left_pass_q  <= start && a;
+            left_fail_q  <= start && !a;
+            right_pass_q <= start && b;
+            right_fail_q <= start && !b;
+            pass_q       <= {pass_expr};
+            fail_q       <= {fail_expr};
+        end
+    end
+    assign pass = pass_q;
+    assign fail = fail_q;
+endmodule
+"""
+
+
+class TestNamedSequenceSvaEquiv:
+    """Named ``a ##1 b`` expansion matches an independent source reference."""
+
+    @pytest.mark.parametrize("compare", ["pass", "fail"])
+    def test_named_sequence_equiv(self, compare: str) -> None:
+        checker = _build("named_seq")
+        ref_name = "ref_named_a_gap1_b"
+        ref = _named_seq_ref_module(ref_name)
+        passed, output = run_sva_miter_check(checker, ref, ref_name, compare=compare, depth=18)
+        assert passed, f"named a ##1 b {compare} equivalence FAILED:\n{output[-2500:]}"
+
+
+class TestSimpleBinarySequenceSvaEquiv:
+    """Simple sequence ``and``/``or`` match independent source truth tables."""
+
+    @pytest.mark.parametrize("op", ["and", "or"])
+    @pytest.mark.parametrize("compare", ["pass", "fail"])
+    def test_simple_binary_sequence_equiv(self, op: str, compare: str) -> None:
+        checker = _build(f"v13_{op}_seq")
+        ref_name = f"ref_simple_seq_{op}"
+        ref = _simple_binary_seq_ref_module(ref_name, op=op)
+        passed, output = run_sva_miter_check(checker, ref, ref_name, compare=compare, depth=15)
+        assert passed, f"sequence {op} {compare} equivalence FAILED:\n{output[-2500:]}"
+
+
 # ── Bounded eventually s_eventually [lo:hi] p (v1.4 Part A) ────────────────────
 # The generated monitor (templates/s_eventually.sv.j2) is proven against an
 # INDEPENDENT reference monitor authored from IEEE-1800 semantics

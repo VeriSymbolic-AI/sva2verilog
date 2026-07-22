@@ -320,11 +320,12 @@ Done when:
 
 #### No property-based differential test suite
 
-Status: partially closed by Phase 12. The project now has a bounded
-source-level differential harness for the supported finite-state subset, plus a
-failure-artifact path. Local slow/nightly execution and Verilator differential
-now pass; the remaining gap is current-commit scheduled remote evidence and
-broader generated coverage.
+Status: substantially closed locally by the 2026-07-22 P1 credibility pass.
+The bounded source generator now emits both compilable SVA and a typed source
+reference specification. Expected traces are evaluated from that source model,
+not from the compiler's normalized IR or composed `CheckerNode`, removing the
+previous circular-proof path. The remaining gap is current-commit scheduled
+remote evidence and broader language/parameter coverage, not local execution.
 
 The project depends on Hypothesis, and Phase 12 now uses it for bounded source
 and stimulus generation. Handwritten tests cover known bugs well; generators
@@ -341,16 +342,22 @@ Fix:
 
 Current Phase 12 evidence:
 
-- `tests/differential_cases.py` generates bounded SVA source modules and
-  compiles them through the normal slang/import/compose pipeline.
-- `tests/test_differential.py` compares Python oracle and Icarus simulation in
-  the fast local path.
-- Verilator smoke/fast differential records 2 passed locally; Icarus slow sweep
-  records 1 passed locally.
-- `tests/test_differential_regressions.py` writes sanitized failure artifacts
-  and provides a fixed-fixture replay entry point.
-- The first run found and fixed a Python oracle routing bug for implication
-  false-antecedent behavior.
+- `tests/differential_reference.py` owns the source-level semantic model;
+  `tests/differential_cases.py` independently compiles its rendered source
+  through slang/import/normalize/compose/optimize.
+- The deterministic catalog has 10 operator families, the fast Hypothesis path
+  has 10 examples, and each seeded slow backend sweep has 64 examples over
+  8-24 cycles, delay up to 8, repetition up to 6, and boolean depth up to 5.
+- Local current-worktree evidence: Icarus fast 12 passed and slow 1 passed;
+  Verilator fast 12 passed and slow 1 passed, with no mismatches.
+- `tests/differential/regressions/repetition_overlapping_start.json` is a
+  sanitized promoted replay from a real discovered mismatch, not an empty
+  placeholder path.
+- The independent campaign found and fixed two additional defects: slang v11
+  top-level consecutive repetition silently reduced to a boolean leaf, and the
+  repetition oracle mishandled a false overlapping start.
+- Nightly now runs deterministic, fast, and 64-example slow campaigns on both
+  simulators with fixed seed `20260722`.
 
 Done when:
 
@@ -359,7 +366,10 @@ Done when:
   Verilator-equipped host.
 - Any discovered counterexample is minimized and committed as a regression.
 
-#### Mutation and coverage gates are missing
+#### Mutation and coverage gates
+
+Status: closed for the selected P1 semantic surfaces; expansion remains an
+ongoing quality activity.
 
 Passing tests do not prove the tests are sensitive to semantic regressions. The
 project already has examples where bugs survived because the oracle was too close
@@ -376,6 +386,19 @@ Done when:
 
 - Critical modules have explicit coverage targets.
 - Mutation score is high enough to catch common timing, gating, and polarity bugs.
+
+Current local evidence (2026-07-22):
+
+- `bool_semantics.py`: 15/15 killed (100%).
+- `behavioral_oracle.py`: 131/150 killed (87.3%).
+- `composer.py`: 53/55 killed (96.4%); the two survivors are equivalent
+  `hi > 0` guard mutations over the accepted bounded input domain.
+- `ast_importer.py`: 116/116 killed (100%).
+- Reviewed RTL template mutations: 5/5 killed, covering delay upper bounds,
+  repetition counter state, counter width, non-overlap consequent wiring, and
+  sequence-OR failure polarity.
+- The scheduled mutation job runs all four Python modules separately at the
+  85% threshold and the RTL template suite at a strict 100% threshold.
 
 #### Width, type, and bit-select support is weak
 

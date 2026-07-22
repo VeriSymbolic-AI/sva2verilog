@@ -16,6 +16,7 @@ FORMAL_WORKFLOW = ROOT / ".github" / "workflows" / "formal-full.yml"
 SUPPORT_MATRIX = ROOT / "SUPPORT_MATRIX.md"
 PROJECT_STATUS = ROOT / "PROJECT_STATUS.md"
 README = ROOT / "README.md"
+NIGHTLY_WORKFLOW = ROOT / ".github" / "workflows" / "differential-nightly.yml"
 
 
 def test_verilator_installer_has_all_source_build_dependencies() -> None:
@@ -75,6 +76,22 @@ def test_full_formal_isolates_expensive_implication_miters() -> None:
     assert "tests/test_v151_nfa_bmc.py tests/test_v151_p2_bmc.py" not in workflow
     assert "tests/test_v151_p2_bmc.py::TestOverlapImplNfaMiter" in workflow
     assert "tests/test_v151_p2_bmc.py::TestNonoverlapImplNfaMiter" in workflow
+
+
+def test_nightly_runs_both_differential_backends_and_all_mutation_surfaces() -> None:
+    workflow = NIGHTLY_WORKFLOW.read_text(encoding="utf-8")
+    for simulator in ("iverilog", "verilator"):
+        assert f"--simulator={simulator}" in workflow
+    assert workflow.count("differential_slow") >= 2
+    assert workflow.count("--hypothesis-seed=20260722") == 4
+    for module in (
+        "bool_semantics.py",
+        "behavioral_oracle.py",
+        "composer.py",
+        "ast_importer.py",
+    ):
+        assert f"--module {module}" in workflow
+    assert "tools/mutation/run_template_mutation.py" in workflow
 
 
 def test_support_claims_do_not_reuse_historical_remote_evidence() -> None:

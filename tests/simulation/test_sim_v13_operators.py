@@ -104,6 +104,7 @@ class TestSeqOrRTL:
         stimulus = _pad([{"start": True, "a": True, "b": False}], 6)
         rtl_out = _run_stimulus(checker, stimulus, tmp_path, simulator)
         assert _count_events(rtl_out)["pass"] > 0
+        assert _count_events(rtl_out)["fail"] == 0
 
     def test_both_fail_rtl(self, tmp_path: Path, simulator: str) -> None:
         checker = _build_checker("or_seq")

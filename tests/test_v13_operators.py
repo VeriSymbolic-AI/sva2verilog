@@ -20,6 +20,7 @@ from sva2rtl.composer import compose
 from sva2rtl.emitter import emit_all
 from sva2rtl.ir import (
     BoolExpr,
+    BoolIdent,
     ClockSpec,
     PropIfElse,
     PropNot,
@@ -151,15 +152,35 @@ def test_oracle_seq_or_left_pass() -> None:
     loc = SourceLoc("t.sv", 1, 1)
     clock = ClockSpec(edge="posedge", signal="clk", source_loc=loc)
     node = SeqOr(
-        left=BoolExpr(text="a", source_loc=loc),
-        right=BoolExpr(text="b", source_loc=loc),
+        left=BoolExpr(text="a", expr=BoolIdent(source_loc=loc, name="a"), source_loc=loc),
+        right=BoolExpr(text="b", expr=BoolIdent(source_loc=loc, name="b"), source_loc=loc),
         source_loc=loc,
     )
     checker = compose(node, clock, None, "a or b")
     results = simulate_checker_hierarchy(checker, [
         {"start": True, "a": True, "b": False},
+        {"start": False, "a": False, "b": False},
     ])
-    assert results[0]["pass"]
+    assert results[1]["pass"]
+    assert not results[1]["fail"]
+
+
+def test_oracle_seq_or_both_fail() -> None:
+    """seq or: both alternatives fail → one terminal failure."""
+    loc = SourceLoc("t.sv", 1, 1)
+    clock = ClockSpec(edge="posedge", signal="clk", source_loc=loc)
+    node = SeqOr(
+        left=BoolExpr(text="a", expr=BoolIdent(source_loc=loc, name="a"), source_loc=loc),
+        right=BoolExpr(text="b", expr=BoolIdent(source_loc=loc, name="b"), source_loc=loc),
+        source_loc=loc,
+    )
+    checker = compose(node, clock, None, "a or b")
+    results = simulate_checker_hierarchy(checker, [
+        {"start": True, "a": False, "b": False},
+        {"start": False, "a": False, "b": False},
+    ])
+    assert results[1]["fail"]
+    assert not results[1]["pass"]
 
 
 # Note: bool_expr children modeled as ##0 always pass when started in the

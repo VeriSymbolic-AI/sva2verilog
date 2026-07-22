@@ -24,6 +24,7 @@ from tests.differential_cases import (
     stimulus_input_names,
     stimulus_traces,
 )
+from tests.differential_reference import SourceBoolExpr, SourceReferenceSpec
 
 
 def test_deterministic_stimulus_drives_start_and_signals() -> None:
@@ -63,13 +64,42 @@ def test_normalize_observation_reports_missing_keys() -> None:
         normalize_observation({"active": True, "pass": False}, cycle=3, backend="unit")
 
 
+def test_run_oracle_trace_rejects_cases_without_source_reference() -> None:
+    case = make_generated_case("a", ("bool",), ("a",))
+
+    with pytest.raises(ValueError, match="independent source reference"):
+        run_oracle_trace(case, deterministic_stimulus(case))
+
+
+def test_source_reference_models_boolean_or_without_checker_ir() -> None:
+    a = SourceBoolExpr.signal("a")
+    b = SourceBoolExpr.signal("b")
+    spec = SourceReferenceSpec("bool", SourceBoolExpr.disjunction(a, b))
+    case = make_generated_case(
+        spec.render(),
+        ("bool", "structured_bool"),
+        spec.signal_names(),
+        source_reference=spec,
+    )
+    stimulus = [
+        {"start": True, "a": False, "b": True},
+        {"start": False, "a": False, "b": False},
+    ]
+
+    trace = run_oracle_trace(case, stimulus)
+
+    assert trace[0].pass_value is False
+    assert trace[1].pass_value is True
+    assert trace[1].fail is False
+
+
 @requires_slang
 def test_run_oracle_trace_preserves_cycle_order(tmp_path: Path) -> None:
     case = example_generated_cases()[0]
     compiled = compile_generated_case(case, tmp_path)
     stimulus = deterministic_stimulus(case, compiled.checker)
 
-    trace = run_oracle_trace(compiled.checker, stimulus)
+    trace = run_oracle_trace(case, stimulus)
 
     assert [obs.cycle for obs in trace] == list(range(len(stimulus)))
     assert all(obs.backend == "oracle" for obs in trace)

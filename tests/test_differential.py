@@ -17,6 +17,7 @@ from tests.differential_cases import (
     deterministic_stimulus,
     example_generated_cases,
     generated_sva_cases,
+    load_regression_case,
     run_oracle_trace,
     run_simulator_trace,
     stimulus_input_names_from_checker,
@@ -24,6 +25,10 @@ from tests.differential_cases import (
 )
 
 pytestmark = [pytest.mark.simulation, pytest.mark.differential]
+
+_REGRESSION_FIXTURES = tuple(
+    sorted((Path(__file__).parent / "differential" / "regressions").glob("*.json"))
+)
 
 
 def _require_simulator(simulator: str) -> None:
@@ -39,7 +44,7 @@ def _compare_case(
     tmp_path: Path,
 ) -> None:
     compiled = compile_generated_case(case, tmp_path)
-    oracle = run_oracle_trace(compiled.checker, stimulus)
+    oracle = run_oracle_trace(case, stimulus)
     actual = run_simulator_trace(
         compiled.checker,
         stimulus,
@@ -57,15 +62,29 @@ def _compare_case(
 
 
 @requires_slang
+@pytest.mark.parametrize("fixture", _REGRESSION_FIXTURES, ids=lambda path: path.stem)
+def test_promoted_differential_regressions(
+    fixture: Path,
+    simulator: str,
+    tmp_path: Path,
+) -> None:
+    """Replay every minimized historical mismatch against the live backend."""
+    _require_simulator(simulator)
+    case, stimulus, _payload = load_regression_case(fixture)
+    _compare_case(case, stimulus, simulator=simulator, tmp_path=tmp_path)
+
+
+@requires_slang
+@pytest.mark.parametrize("case", example_generated_cases(), ids=lambda case: case.case_id)
 def test_differential_smoke_oracle_matches_simulator(
+    case: GeneratedSvaCase,
     simulator: str,
     tmp_path: Path,
 ) -> None:
     _require_simulator(simulator)
-    case = example_generated_cases()[0]
     compiled = compile_generated_case(case, tmp_path)
     stimulus = deterministic_stimulus(case, compiled.checker)
-    oracle = run_oracle_trace(compiled.checker, stimulus)
+    oracle = run_oracle_trace(case, stimulus)
     actual = run_simulator_trace(
         compiled.checker,
         stimulus,
@@ -84,9 +103,12 @@ def test_differential_smoke_oracle_matches_simulator(
 
 
 @requires_slang
-@given(case_index=st.integers(min_value=0, max_value=6), data=st.data())
+@given(
+    case_index=st.integers(min_value=0, max_value=len(example_generated_cases()) - 1),
+    data=st.data(),
+)
 @settings(
-    max_examples=5,
+    max_examples=10,
     deadline=None,
     suppress_health_check=[HealthCheck.function_scoped_fixture],
 )
@@ -101,7 +123,7 @@ def test_generated_differential_fast(
     compiled = compile_generated_case(case, tmp_path)
     input_names = stimulus_input_names_from_checker(compiled.checker)
     stimulus = data.draw(stimulus_traces(case, input_names=input_names))
-    oracle = run_oracle_trace(compiled.checker, stimulus)
+    oracle = run_oracle_trace(case, stimulus)
     actual = run_simulator_trace(
         compiled.checker,
         stimulus,
@@ -123,7 +145,7 @@ def test_generated_differential_fast(
 @pytest.mark.differential_slow
 @given(case=generated_sva_cases(), data=st.data())
 @settings(
-    max_examples=12,
+    max_examples=64,
     deadline=None,
     suppress_health_check=[HealthCheck.function_scoped_fixture],
 )

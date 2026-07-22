@@ -17,13 +17,17 @@ from typing import Any
 from hypothesis import strategies as st
 
 from sva2rtl.ast_importer import import_all_assertions
-from sva2rtl.behavioral_oracle import simulate_checker_hierarchy
 from sva2rtl.composer import compose
 from sva2rtl.emitter import emit_all
 from sva2rtl.frontend import invoke_slang
 from sva2rtl.ir import CheckerNode, ClockSpec, SVANode
 from sva2rtl.normalizer import normalize
 from sva2rtl.optimizer import optimize
+from tests.differential_reference import (
+    SourceBoolExpr,
+    SourceReferenceSpec,
+    simulate_source_reference,
+)
 from tests.simulation.tb_generator import (
     TEMPLATES_WITH_OVERFLOW,
     extra_inputs_from_checker,
@@ -69,13 +73,13 @@ class DifferentialBudget:
     """Generation limits for a bounded differential profile."""
 
     name: str = "fast"
-    min_trace_length: int = 6
-    max_trace_length: int = 12
-    max_expr_depth: int = 3
-    max_temporal_depth: int = 2
-    max_delay: int = 3
-    max_range_width: int = 2
-    max_repeat: int = 3
+    min_trace_length: int = 8
+    max_trace_length: int = 24
+    max_expr_depth: int = 5
+    max_temporal_depth: int = 3
+    max_delay: int = 8
+    max_range_width: int = 4
+    max_repeat: int = 6
     include_disable: bool = True
 
     def __post_init__(self) -> None:
@@ -111,6 +115,7 @@ class GeneratedSvaCase:
     signal_names: tuple[str, ...]
     family_tags: tuple[str, ...]
     trace_length: int
+    source_reference: SourceReferenceSpec | None = None
     expects_overflow: bool = False
     budget_name: str = "fast"
 
@@ -133,6 +138,15 @@ class GeneratedSvaCase:
             raise ValueError("deferred families must not be generated")
         if self.trace_length < 1:
             raise ValueError("trace_length must be positive")
+        if (
+            self.source_reference is not None
+            and self.source_reference.render() != self.assertion_expr
+        ):
+            raise ValueError("source reference must render the exact assertion expression")
+        if self.source_reference is not None and not set(
+            self.source_reference.signal_names()
+        ).issubset(self.signal_names):
+            raise ValueError("source reference signals must be declared by the generated case")
 
     def metadata(self) -> dict[str, object]:
         """Return stable, sanitized metadata used in diagnostics."""
@@ -146,6 +160,12 @@ class GeneratedSvaCase:
             "trace_length": self.trace_length,
             "expects_overflow": self.expects_overflow,
             "budget": self.budget_name,
+            "reference_kind": (
+                self.source_reference.kind if self.source_reference is not None else None
+            ),
+            "source_reference": (
+                self.source_reference.as_dict() if self.source_reference is not None else None
+            ),
         }
 
 
@@ -316,10 +336,20 @@ def make_generated_case(
     expects_overflow: bool = False,
     budget_name: str = DEFAULT_BUDGET.name,
     disable_condition: str | None = None,
+    source_reference: SourceReferenceSpec | None = None,
 ) -> GeneratedSvaCase:
     """Construct a generated case with deterministic names and source text."""
 
     ordered_signals = tuple(dict.fromkeys(signal_names))
+    if source_reference is not None:
+        if source_reference.render() != assertion_expr:
+            raise ValueError("source reference must render the exact assertion expression")
+        if source_reference.disable is not None:
+            rendered_disable = source_reference.disable.render()
+            if disable_condition is None:
+                disable_condition = rendered_disable
+            elif disable_condition != rendered_disable:
+                raise ValueError("disable condition must match the source reference")
     if disable_condition is not None and disable_condition not in ordered_signals:
         ordered_signals = (*ordered_signals, disable_condition)
     case_id = stable_case_id(assertion_expr, family_tags, ordered_signals)
@@ -341,6 +371,7 @@ def make_generated_case(
         signal_names=ordered_signals,
         family_tags=tuple(dict.fromkeys(family_tags)),
         trace_length=trace_length,
+        source_reference=source_reference,
         expects_overflow=expects_overflow,
         budget_name=budget_name,
     )
@@ -349,40 +380,71 @@ def make_generated_case(
 def example_generated_cases() -> tuple[GeneratedSvaCase, ...]:
     """Small deterministic smoke catalog for source-level differential tests."""
 
-    return (
-        make_generated_case("(a && b)", ("bool", "structured_bool"), ("a", "b")),
-        make_generated_case("$rose(a)", ("sampled",), ("a",)),
-        make_generated_case("$past(a, 1)", ("past",), ("a",)),
-        make_generated_case("a ##1 b", ("delay_fixed",), ("a", "b")),
-        make_generated_case("a ##[1:2] b", ("delay_range",), ("a", "b")),
-        make_generated_case("a |-> b", ("implication_overlap",), ("a", "b")),
-        make_generated_case("a |=> b", ("implication_nonoverlap",), ("a", "b")),
-        make_generated_case("a[*2]", ("rep_consecutive_fixed",), ("a",)),
-        make_generated_case("a[*1:2]", ("rep_consecutive_range",), ("a",)),
-        make_generated_case(
-            "a",
-            ("disable_iff", "bool"),
-            ("a",),
-            disable_condition="dis",
+    a = SourceBoolExpr.signal("a")
+    b = SourceBoolExpr.signal("b")
+    dis = SourceBoolExpr.signal("dis")
+    specs = (
+        (
+            SourceReferenceSpec("bool", SourceBoolExpr.conjunction(a, b)),
+            ("bool", "structured_bool"),
         ),
+        (SourceReferenceSpec("rose", a), ("sampled",)),
+        (SourceReferenceSpec("past", a, depth=1), ("past",)),
+        (SourceReferenceSpec("delay", a, b, minimum=1, maximum=1), ("delay_fixed",)),
+        (SourceReferenceSpec("delay", a, b, minimum=1, maximum=2), ("delay_range",)),
+        (SourceReferenceSpec("implication_overlap", a, b), ("implication_overlap",)),
+        (
+            SourceReferenceSpec("implication_nonoverlap", a, b),
+            ("implication_nonoverlap",),
+        ),
+        (
+            SourceReferenceSpec("repetition", a, minimum=2, maximum=2),
+            ("rep_consecutive_fixed",),
+        ),
+        (
+            SourceReferenceSpec("repetition", a, minimum=1, maximum=2),
+            ("rep_consecutive_range",),
+        ),
+        (SourceReferenceSpec("bool", a, disable=dis), ("disable_iff", "bool")),
+    )
+    return tuple(
+        make_generated_case(
+            spec.render(),
+            tags,
+            spec.signal_names(),
+            disable_condition=spec.disable.render() if spec.disable is not None else None,
+            source_reference=spec,
+        )
+        for spec, tags in specs
     )
 
 
-def _leaf_exprs(signals: tuple[str, ...]) -> st.SearchStrategy[str]:
-    leaves = [*signals, "1'b1", "1'b0"]
+def _leaf_exprs(signals: tuple[str, ...]) -> st.SearchStrategy[SourceBoolExpr]:
+    leaves = [
+        *(SourceBoolExpr.signal(signal) for signal in signals),
+        SourceBoolExpr.constant(True),
+        SourceBoolExpr.constant(False),
+    ]
     return st.sampled_from(leaves)
 
 
-def _bool_exprs(signals: tuple[str, ...], max_depth: int) -> st.SearchStrategy[str]:
+def _bool_exprs(
+    signals: tuple[str, ...],
+    max_depth: int,
+) -> st.SearchStrategy[SourceBoolExpr]:
     if max_depth <= 0:
         return _leaf_exprs(signals)
 
     return st.recursive(
         _leaf_exprs(signals),
         lambda children: st.one_of(
-            children.map(lambda expr: f"!({expr})"),
-            st.tuples(children, children).map(lambda pair: f"({pair[0]} && {pair[1]})"),
-            st.tuples(children, children).map(lambda pair: f"({pair[0]} || {pair[1]})"),
+            children.map(SourceBoolExpr.negate),
+            st.tuples(children, children).map(
+                lambda pair: SourceBoolExpr.conjunction(pair[0], pair[1])
+            ),
+            st.tuples(children, children).map(
+                lambda pair: SourceBoolExpr.disjunction(pair[0], pair[1])
+            ),
         ),
         max_leaves=max(2, max_depth + 1),
     )
@@ -401,56 +463,92 @@ def generated_sva_cases(
         st.integers(min_value=budget.min_trace_length, max_value=budget.max_trace_length)
     )
     bool_expr = draw(_bool_exprs(signals, budget.max_expr_depth))
-    second = signals[1] if len(signals) > 1 else signals[0]
+    first = SourceBoolExpr.signal(signals[0])
+    second = SourceBoolExpr.signal(signals[1] if len(signals) > 1 else signals[0])
     delay_hi = max(1, min(budget.max_delay, 3))
     range_hi = max(1, min(delay_hi, budget.max_range_width + 1))
-    repeat_hi = max(1, min(budget.max_repeat, 3))
+    repeat_hi = max(2, min(budget.max_repeat, 6))
 
     families = [
-        ("bool", bool_expr, ("bool", "structured_bool"), None),
-        ("sampled", f"$rose({signals[0]})", ("sampled",), None),
-        ("past", f"$past({signals[0]}, 1)", ("past",), None),
+        ("bool", SourceReferenceSpec("bool", bool_expr), ("bool", "structured_bool")),
+        ("sampled", SourceReferenceSpec("rose", first), ("sampled",)),
+        (
+            "past",
+            SourceReferenceSpec(
+                "past",
+                first,
+                depth=draw(
+                    st.integers(min_value=1, max_value=max(1, min(4, budget.max_delay)))
+                ),
+            ),
+            ("past",),
+        ),
         (
             "delay_fixed",
-            f"{signals[0]} ##{draw(st.integers(min_value=1, max_value=delay_hi))} {second}",
+            SourceReferenceSpec(
+                "delay",
+                first,
+                second,
+                minimum=(delay := draw(st.integers(min_value=1, max_value=delay_hi))),
+                maximum=delay,
+            ),
             ("delay_fixed",),
-            None,
         ),
         (
             "delay_range",
-            f"{signals[0]} ##[1:{range_hi}] {second}",
+            SourceReferenceSpec("delay", first, second, minimum=1, maximum=range_hi),
             ("delay_range",),
-            None,
         ),
-        ("overlap", f"{signals[0]} |-> {second}", ("implication_overlap",), None),
-        ("nonoverlap", f"{signals[0]} |=> {second}", ("implication_nonoverlap",), None),
+        (
+            "overlap",
+            SourceReferenceSpec("implication_overlap", first, second),
+            ("implication_overlap",),
+        ),
+        (
+            "nonoverlap",
+            SourceReferenceSpec("implication_nonoverlap", first, second),
+            ("implication_nonoverlap",),
+        ),
         (
             "rep_fixed",
-            f"{signals[0]}[*{draw(st.integers(min_value=1, max_value=repeat_hi))}]",
+            SourceReferenceSpec(
+                "repetition",
+                first,
+                minimum=(repeat := draw(st.integers(min_value=2, max_value=repeat_hi))),
+                maximum=repeat,
+            ),
             ("rep_consecutive_fixed",),
-            None,
         ),
         (
             "rep_range",
-            f"{signals[0]}[*1:{repeat_hi}]",
+            SourceReferenceSpec("repetition", first, minimum=1, maximum=repeat_hi),
             ("rep_consecutive_range",),
-            None,
         ),
     ]
     if budget.include_disable:
-        families.append(("disable", bool_expr, ("disable_iff", "bool"), "dis"))
+        families.append(
+            (
+                "disable",
+                SourceReferenceSpec(
+                    "bool", bool_expr, disable=SourceBoolExpr.signal("dis")
+                ),
+                ("disable_iff", "bool"),
+            )
+        )
 
-    _name, expr, tags, disable_condition = draw(st.sampled_from(families))
+    _name, spec, tags = draw(st.sampled_from(families))
+    disable_condition = spec.disable.render() if spec.disable is not None else None
     case_signals = signals
-    if disable_condition is not None:
-        case_signals = (*signals, disable_condition)
+    if disable_condition is not None and disable_condition not in case_signals:
+        case_signals = (*case_signals, disable_condition)
     return make_generated_case(
-        expr,
+        spec.render(),
         tags,
         case_signals,
         trace_length=trace_length,
         budget_name=budget.name,
         disable_condition=disable_condition,
+        source_reference=spec,
     )
 
 
@@ -499,10 +597,7 @@ def stimulus_traces(
     for _cycle in range(case.trace_length):
         cycle_values: dict[str, bool] = {}
         for name in names:
-            if name == "dis":
-                cycle_values[name] = False
-            else:
-                cycle_values[name] = draw(st.booleans())
+            cycle_values[name] = draw(st.booleans())
         trace.append(cycle_values)
     return trace
 
@@ -530,12 +625,14 @@ def normalize_observation(
 
 
 def run_oracle_trace(
-    checker: CheckerNode,
+    case: GeneratedSvaCase,
     stimulus: list[dict[str, bool]],
 ) -> list[CycleObservation]:
-    """Run the independent Python oracle and return normalized observations."""
+    """Run the source-semantic oracle and return normalized observations."""
 
-    raw_trace = simulate_checker_hierarchy(checker, stimulus)
+    if case.source_reference is None:
+        raise ValueError(f"{case.case_id} does not carry an independent source reference")
+    raw_trace = simulate_source_reference(case.source_reference, stimulus)
     return [
         normalize_observation(raw, cycle=cycle, backend="oracle")
         for cycle, raw in enumerate(raw_trace)
@@ -791,6 +888,23 @@ def compile_generated_case(
 
         node, clock, original_text, label = selected
         normalized = normalize(node)
+        if case.source_reference is not None:
+            expected_ir_kind = "DisableIff" if case.source_reference.disable else {
+                "bool": "BoolExpr",
+                "rose": "SignalFunc",
+                "past": "SignalFunc",
+                "delay": "SeqConcat",
+                "implication_overlap": "PropImplication",
+                "implication_nonoverlap": "PropImplication",
+                "repetition": "SeqRepetition",
+            }[case.source_reference.kind]
+            actual_ir_kind = type(normalized).__name__
+            if actual_ir_kind != expected_ir_kind:
+                raise AssertionError(
+                    f"source reference {case.source_reference.kind!r} expected "
+                    f"{expected_ir_kind}, slang/import produced {actual_ir_kind}; "
+                    "generated source may have been silently reduced"
+                )
         checker = compose(normalized, clock, label, original_text)
         if optimize_flag:
             checker = optimize(checker)
@@ -815,3 +929,43 @@ def metadata_is_sanitized(metadata: dict[str, object]) -> bool:
 
     encoded = json.dumps(metadata, sort_keys=True)
     return _UNSAFE_METADATA_RE.search(encoded) is None
+
+
+def load_regression_case(
+    path: Path,
+) -> tuple[GeneratedSvaCase, list[dict[str, bool]], dict[str, Any]]:
+    """Load a reviewed differential failure artifact as an executable case."""
+    payload: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
+    if payload.get("schema_version") != FAILURE_ARTIFACT_SCHEMA_VERSION:
+        raise ValueError(f"unsupported regression schema in {path.name}")
+    case_data = payload.get("case")
+    mismatch = payload.get("mismatch")
+    if not isinstance(case_data, dict) or not isinstance(mismatch, dict):
+        raise ValueError(f"malformed regression case in {path.name}")
+    reference_data = case_data.get("source_reference")
+    if not isinstance(reference_data, dict):
+        raise ValueError(f"regression {path.name} lacks source_reference")
+    reference = SourceReferenceSpec.from_dict(reference_data)
+    source_text = mismatch.get("source_text")
+    if not isinstance(source_text, str) or _UNSAFE_METADATA_RE.search(source_text):
+        raise ValueError(f"regression {path.name} has unsafe or missing source text")
+    stimulus = payload.get("stimulus")
+    if not isinstance(stimulus, list) or not all(isinstance(cycle, dict) for cycle in stimulus):
+        raise ValueError(f"regression {path.name} has invalid stimulus")
+    case = GeneratedSvaCase(
+        case_id=str(case_data["case_id"]),
+        module_name=str(case_data["module_name"]),
+        property_label=str(case_data["property_label"]),
+        assertion_expr=reference.render(),
+        source_text=source_text,
+        signal_names=tuple(str(name) for name in case_data["signals"]),
+        family_tags=tuple(str(name) for name in case_data["families"]),
+        trace_length=int(case_data["trace_length"]),
+        source_reference=reference,
+        expects_overflow=bool(case_data.get("expects_overflow", False)),
+        budget_name=str(case_data.get("budget", "regression")),
+    )
+    normalized_stimulus = [
+        {str(name): bool(value) for name, value in cycle.items()} for cycle in stimulus
+    ]
+    return case, normalized_stimulus, payload

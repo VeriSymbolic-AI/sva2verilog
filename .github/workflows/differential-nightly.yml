@@ -35,13 +35,24 @@ jobs:
           sudo mv slang /usr/local/bin/slang
           slang --version
 
+      - name: Run deterministic catalog + fast differential (iverilog)
+        run: >
+          uv run pytest tests/test_differential.py
+          -m "not differential_slow" --simulator=iverilog
+          --hypothesis-seed=20260722 -v --timeout=600
+        env:
+          SLANG_PATH: /usr/local/bin/slang
+
       - name: Run slow differential sweep (iverilog)
-        run: uv run pytest tests/test_differential.py -m "differential_slow" --simulator=iverilog -v --timeout=600
+        run: >
+          uv run pytest tests/test_differential.py
+          -m "differential_slow" --simulator=iverilog
+          --hypothesis-seed=20260722 -v --timeout=600
         env:
           SLANG_PATH: /usr/local/bin/slang
 
   differential-verilator:
-    name: differential smoke + fast (Verilator)
+    name: differential catalog + fast + slow (Verilator)
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -65,13 +76,24 @@ jobs:
           sudo mv slang /usr/local/bin/slang
           slang --version
 
-      - name: Run differential smoke + fast (Verilator)
-        run: uv run pytest tests/test_differential.py -m "not differential_slow" --simulator=verilator -v --timeout=300
+      - name: Run deterministic catalog + fast differential (Verilator)
+        run: >
+          uv run pytest tests/test_differential.py
+          -m "not differential_slow" --simulator=verilator
+          --hypothesis-seed=20260722 -v --timeout=600
+        env:
+          SLANG_PATH: /usr/local/bin/slang
+
+      - name: Run slow differential sweep (Verilator)
+        run: >
+          uv run pytest tests/test_differential.py
+          -m "differential_slow" --simulator=verilator
+          --hypothesis-seed=20260722 -v --timeout=600
         env:
           SLANG_PATH: /usr/local/bin/slang
 
   mutation-full-sweep:
-    name: mutation full sweep (composer + ast_importer)
+    name: mutation full sweep (semantic Python + RTL templates)
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
@@ -92,6 +114,19 @@ jobs:
           sudo mv slang /usr/local/bin/slang
           slang --version
 
+      - name: Install iverilog for RTL-template mutants
+        run: sudo apt-get update && sudo apt-get install -y iverilog
+
+      - name: Run full mutation sweep on bool_semantics.py
+        run: uv run python tools/mutation/run_mutation.py --module bool_semantics.py
+        env:
+          SLANG_PATH: /usr/local/bin/slang
+
+      - name: Run full mutation sweep on behavioral_oracle.py
+        run: uv run python tools/mutation/run_mutation.py --module behavioral_oracle.py
+        env:
+          SLANG_PATH: /usr/local/bin/slang
+
       - name: Run full mutation sweep on composer.py
         run: uv run python tools/mutation/run_mutation.py --module composer.py
         env:
@@ -99,5 +134,10 @@ jobs:
 
       - name: Run full mutation sweep on ast_importer.py
         run: uv run python tools/mutation/run_mutation.py --module ast_importer.py
+        env:
+          SLANG_PATH: /usr/local/bin/slang
+
+      - name: Kill reviewed RTL boundary, state, width, and wiring mutants
+        run: uv run python tools/mutation/run_template_mutation.py
         env:
           SLANG_PATH: /usr/local/bin/slang

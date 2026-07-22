@@ -103,6 +103,33 @@ def test_import_rep_range() -> None:
     assert node.rep_max == 5
 
 
+def test_import_slang_v11_top_level_consecutive_repetition() -> None:
+    """v11 places a top-level consecutive suffix on the outer Simple node."""
+    ast = _load_fixture("goto_rep.json")
+    expr = ast["design"]["members"][0]["body"]["members"][4]["body"][
+        "propertySpec"
+    ]["expr"]
+    expr["repetition"] = {"kind": "Consecutive", "min": 2, "max": 4}
+
+    node, _clock, text, _label = import_assertion(ast)
+
+    assert isinstance(node, SeqRepetition)
+    assert (node.rep_min, node.rep_max) == (2, 4)
+    assert text == "a [*2:4]"
+
+
+def test_rep_oracle_false_overlapping_start_terminates_old_attempt() -> None:
+    """A false new start must not mask failure/cleanup of the active attempt."""
+    sim = SVABehavioralSim("rep_consecutive", {"rep_min": 2, "rep_max": 2})
+
+    sim.tick({"start": True, "sig": True})
+    failure = sim.tick({"start": True, "sig": False})
+    idle = sim.tick({"start": False, "sig": False})
+
+    assert failure == {"active": True, "pass": False, "fail": True, "overflow": False}
+    assert idle == {"active": False, "pass": False, "fail": False, "overflow": False}
+
+
 def test_import_unbounded_rejects() -> None:
     """Unbounded repetition [*0:$] raises SvaCompileError with SVA-E002."""
     # Build a minimal AST dict with max="$" inline
@@ -224,6 +251,16 @@ def test_emit_rep_fixed() -> None:
     assert "disabled_o" in sv
     assert "count_q" in sv
     assert "running_q" in sv
+
+
+def test_rep_consecutive_counter_width_declaration() -> None:
+    """The state vector uses exactly the composer-provided counter width."""
+    ast = _load_fixture("rep_range.json")
+    node, clock, text, label = import_assertion(ast)
+    checker = compose(node, clock, label, text)
+    sv = emit_all(checker)[checker.module_name]
+    assert "logic [CNT_WIDTH-1:0] count_q;" in sv
+    assert "logic [CNT_WIDTH:0] count_q;" not in sv
 
 
 def test_emit_rep_range() -> None:

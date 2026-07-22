@@ -8,15 +8,16 @@
 
 sva2verilog 是一个开源的 SystemVerilog Assertion (SVA) 到可综合 RTL
 监控器编译器。v1.7.0 已发布；当前工作树处于发布后加固状态，基于
-HEAD `8e7af87`，尚未把本轮修复提交/推送为新的远端证据基线。
+本地发布加固提交 `3f580cd` 与后续 P1 提交均只存在本机、尚未推送，
+不能作为新的远端证据基线。
 
 - 测试套件：本轮最终本地结果见下方“2026-07-22 发布加固”；所有已运行门控 0 failed
 - 代码质量：mypy --strict 0 errors，ruff 0 errors
 - 形式化验证：本地核心/契约/k-induction 集合与 NFA BMC 均通过；已知 1 个 liveness xfail 保留
 - 生成 RTL：本地 Yosys synthesis 与固定 Verilator 5.028 strict lint gate 均通过
 - 随机差分：Icarus slow sweep 与 Verilator smoke/fast differential 均在本机通过；每次 Verilator example 使用独立构建目录
-- 变异测试：门禁会先验证测试基线、隔离 Python bytecode cache，并在低于 85% 时失败；当前 composer 53/55（96.4%，2 个等价变异），ast_importer 115/115（100%）
-- 覆盖度：约 95%+ 的实际断言场景；coverage 门控 fail_under=82（实际 82.7%）
+- 变异测试：门禁会先验证测试基线、隔离 Python bytecode cache，并按模块在低于 85% 时失败；当前 bool semantics 15/15、behavioral oracle 131/150（87.3%）、composer 53/55（96.4%）、ast importer 116/116，另有 RTL 模板定向变异 5/5
+- 覆盖度：约 95%+ 的实际断言场景；coverage 门控 fail_under=82（当前实测 82.82%）
 - 支持状态权威：`SUPPORT_MATRIX.md` 记录逐构造支持边界、证据完整度和降级原因；README / SUPPORTED_CONSTRUCTS 只作概览和解释
 - 工业级验证缺口：已记录在 `INDUSTRIAL_VALIDATION_GAPS.md`，包含当前进展、P0/P1/P2 严重度、修复计划和 fully-supported 定义标准
 
@@ -48,6 +49,34 @@ passed；mutation 为 composer 53/55、ast_importer 115/115。远端 Ubuntu/macO
 矩阵、scheduled nightly 与 Full Formal 仍只有在本轮工作树提交并推送后
 才能形成 current-commit 远端证据，因此当前支持矩阵保持
 0 个 Fully supported。
+
+## 2026-07-22 P1 可信度闭环
+
+本轮在第一笔发布加固提交 `3f580cd` 之后，针对验证独立性、形式化缺口和
+mutation 检出能力继续加固：
+
+- 差分测试不再从 composer `CheckerNode` 计算期望结果；新增 typed
+  source-reference 模型，编译器与参考模型从同一生成规格走两条独立路径。
+- deterministic catalog 扩大到 10 类；fast 为 10 个 Hypothesis example；
+  slow 为每个 backend 64 个固定种子 example，刺激长度扩大到 8-24 cycles。
+- 提交一个真实发现问题的 sanitized replay：overlapping start repetition。
+- 新增 named `a ##1 b` 与 simple sequence `and/or` 的 6 个独立 pass/fail
+  BMC，修正 support matrix 中 property `not`、`if...else`、bounded liveness
+  已有 BMC 却被错误标成 missing 的陈旧记录。
+- 独立证据共发现并修复 3 个真实语义缺陷：slang v11 顶层 consecutive
+  repetition 静默退化、repetition oracle overlapping-start 状态错误、
+  sequence `or` 在单边成功时同时发出 fail。
+- nightly mutation 从两个 Python 模块扩展到四个核心语义模块，并新增
+  RTL template 的边界、状态、宽度和端口连线定向突变门禁。
+
+当前工作树最终本地证据：ruff 全通过；mypy strict 15 个源码文件 0 error；
+coverage 82.82%（门槛 82%）；
+完整默认/Icarus 轴 1371 passed / 1 skipped / 1 xfailed；完整 Verilator
+simulation + fast differential 轴 151 passed / 1 skipped；Icarus 与 Verilator
+fast differential 均 12 passed，两个 seeded slow sweep 均 1 passed（每个含
+64 个生成例）；Full Formal 125 passed / 1 xfailed；Yosys synthesis +
+Verilator strict lint 107 passed；四个 Python mutation 模块均超过 85%，
+RTL 模板定向突变 5/5。所有上述命令 0 failed。
 
 ## v1.7.0 语言表面闭合（2026-07-10）
 

@@ -782,14 +782,18 @@ def _import_concurrent_assertion(
             # the Simple node, not on a nested SimpleAssertionExpr child.
             rep = expr_node.get("repetition", {})
             rep_kind = rep.get("kind", "")
-            if rep_kind == "GoTo":
-                rep_ir: SVANode = _build_goto_rep(expr_node, source_loc)
-                ir_node = rep_ir
-                text = _reconstruct_rep_text(rep_ir)  # type: ignore[arg-type]
+            if rep_kind == "Consecutive":
+                consecutive_ir = _build_seq_repetition(expr_node, source_loc)
+                ir_node = consecutive_ir
+                text = _reconstruct_rep_text(consecutive_ir)
+            elif rep_kind == "GoTo":
+                goto_ir = _build_goto_rep(expr_node, source_loc)
+                ir_node = goto_ir
+                text = _reconstruct_rep_text(goto_ir)
             elif rep_kind == "Nonconsecutive":
-                rep_ir = _build_nonconsec_rep(expr_node, source_loc)
-                ir_node = rep_ir
-                text = _reconstruct_rep_text(rep_ir)
+                nonconsec_ir = _build_nonconsec_rep(expr_node, source_loc)
+                ir_node = nonconsec_ir
+                text = _reconstruct_rep_text(nonconsec_ir)
             elif inner_kind in ("CallExpression", "Call"):
                 # Signal functions can appear as "CallExpression" (v7.0)
                 # or "Call" (v11.0) inside Simple wrappers
@@ -807,11 +811,13 @@ def _import_concurrent_assertion(
                 rep_kind2 = inner.get("repetition", {}).get("kind", "")
                 if rep_kind2 in ("GoTo", "Nonconsecutive"):
                     if rep_kind2 == "GoTo":
-                        rep_ir = _build_goto_rep(inner, source_loc)
+                        legacy_rep_ir: SeqGotoRep | SeqNonconsecRep = _build_goto_rep(
+                            inner, source_loc
+                        )
                     else:
-                        rep_ir = _build_nonconsec_rep(inner, source_loc)
-                    ir_node = rep_ir
-                    text = _reconstruct_rep_text(rep_ir)
+                        legacy_rep_ir = _build_nonconsec_rep(inner, source_loc)
+                    ir_node = legacy_rep_ir
+                    text = _reconstruct_rep_text(legacy_rep_ir)
                 else:
                     bool_ir = _build_bool_leaf(inner)
                     ir_node = bool_ir

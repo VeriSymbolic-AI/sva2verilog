@@ -20,13 +20,14 @@ from tests.differential_cases import (
     make_generated_case,
     metadata_is_sanitized,
 )
+from tests.differential_reference import SourceBoolExpr, SourceReferenceSpec
 
 
 def test_default_budget_trace_range() -> None:
-    assert DEFAULT_BUDGET.min_trace_length == 6
-    assert DEFAULT_BUDGET.max_trace_length == 12
-    assert DEFAULT_BUDGET.max_delay <= 3
-    assert DEFAULT_BUDGET.max_repeat <= 3
+    assert DEFAULT_BUDGET.min_trace_length == 8
+    assert DEFAULT_BUDGET.max_trace_length == 24
+    assert DEFAULT_BUDGET.max_delay == 8
+    assert DEFAULT_BUDGET.max_repeat == 6
 
 
 def test_budget_rejects_invalid_trace_range() -> None:
@@ -70,6 +71,13 @@ def test_generated_case_rejects_deferred_family() -> None:
         )
 
 
+def test_generated_case_rejects_source_reference_text_drift() -> None:
+    spec = SourceReferenceSpec("bool", SourceBoolExpr.signal("a"))
+
+    with pytest.raises(ValueError, match="exact assertion expression"):
+        make_generated_case("!a", ("bool",), ("a",), source_reference=spec)
+
+
 @given(generated_sva_cases())
 @settings(max_examples=12, deadline=None)
 def test_strategy_produces_bounded_supported_families(case: GeneratedSvaCase) -> None:
@@ -94,6 +102,7 @@ def test_example_catalog_covers_expected_families() -> None:
     assert "rep_consecutive_range" in families
     assert "disable_iff" in families
     assert not (families & DEFERRED_FAMILIES)
+    assert all(case.source_reference is not None for case in example_generated_cases())
 
 
 @requires_slang
