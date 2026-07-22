@@ -169,6 +169,15 @@ def test_emit_disable_iff_body_receives_effective_disable() -> None:
     assert ".disable_i" in top_sv
 
 
+def test_emit_disable_iff_propagates_body_overflow_flag() -> None:
+    """An implication body cannot lose its explicit overflow diagnostic."""
+    checker = _load_disable_iff_checker()
+    modules = emit_all(checker)
+    top_sv = modules[checker.module_name]
+    assert "output  logic overflow_flag" in top_sv
+    assert ".overflow_flag (overflow_flag)" in top_sv
+
+
 def test_emit_disable_iff_all_modules_contain_endmodule() -> None:
     """All modules emitted for a disable iff property end with 'endmodule'."""
     checker = _load_disable_iff_checker()

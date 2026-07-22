@@ -17,6 +17,7 @@ from tests.generated_rtl_cases import (
     lint_generated_monitor_cases,
     write_generated_modules,
 )
+from tests.verilator_lint import build_verilator_lint_command
 
 
 @dataclass(frozen=True)
@@ -34,31 +35,6 @@ def verilator_is_available() -> bool:
     return shutil.which("verilator") is not None
 
 
-def build_verilator_lint_command(
-    verilator: str,
-    emitted: EmittedMonitorCase,
-    sv_files: list[Path],
-) -> list[str]:
-    """Build the Verilator lint-only command for one generated case.
-
-    Uses ``-Wno-fatal`` to prevent Verilator from upgrading warnings to
-    errors.  ``-Wall`` is intentionally omitted because Verilator minor-
-    version upgrades frequently add new warning categories that cannot be
-    anticipated.  ``-Wno-UNOPTFLAT`` suppresses the common false positive
-    on generated RTL with unused flattened signals; this does not mask
-    genuine structural or syntax errors.
-    """
-    return [
-        verilator,
-        "--lint-only",
-        "-Wno-fatal",
-        "-Wno-UNOPTFLAT",
-        "--top-module",
-        emitted.top_module,
-        *[str(path) for path in sv_files],
-    ]
-
-
 def run_verilator_lint(
     emitted: EmittedMonitorCase,
     sv_files: list[Path],
@@ -70,7 +46,7 @@ def run_verilator_lint(
     if verilator is None:
         pytest.skip("verilator not found on PATH - install Verilator to run generated lint")
 
-    cmd = build_verilator_lint_command(verilator, emitted, sv_files)
+    cmd = build_verilator_lint_command(verilator, emitted.top_module, sv_files)
     try:
         result = subprocess.run(
             cmd,
@@ -107,10 +83,15 @@ def test_verilator_lint_command_names_top_module(tmp_path: Path) -> None:
     """The lint helper routes the generated top explicitly."""
     case = lint_generated_monitor_cases()[0]
     emitted, sv_files = write_generated_modules(tmp_path, case)
-    cmd = build_verilator_lint_command("verilator", emitted, sv_files)
+    cmd = build_verilator_lint_command("verilator", emitted.top_module, sv_files)
     assert "verilator" in cmd
     assert "--lint-only" in cmd
-    assert "-Wno-fatal" in cmd
+    assert "-Wall" in cmd
+    assert "-Wno-fatal" not in cmd
+    assert "-Wno-PINCONNECTEMPTY" in cmd
+    assert "-Wno-UNUSEDSIGNAL" in cmd
+    assert "-Wno-UNUSEDPARAM" in cmd
+    assert "-Wno-DECLFILENAME" in cmd
     assert "-Wno-UNOPTFLAT" in cmd
     assert "--top-module" in cmd
     assert emitted.top_module in cmd

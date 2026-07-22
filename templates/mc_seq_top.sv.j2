@@ -26,9 +26,8 @@ module {{ module_name }} (
 {% for i in range(nc + 1) %}
     {{ wire_type(verilog_mode) }} t{{ i }}_pass, t{{ i }}_fail;
 {% endfor %}
-    // ── Active wires: one per non-sync child + one final ───────────────
-    {% set n_active = nc + 1 %}
-{% for i in range(n_active) %}
+    // ── Active wires: one per child; synchronizers are never active ──────────
+{% for i in range(nc) %}
     {{ wire_type(verilog_mode) }} t{{ i }}_active;
 {% endfor %}
     assign t0_pass = 1'b1;   // top-level "start" is always asserted
@@ -46,6 +45,7 @@ module {{ module_name }} (
         .token_o(t{{ i+1 }}_pass)
     );
     assign t{{ i+1 }}_fail = t{{ i }}_fail;
+    assign t{{ i }}_active = 1'b0;
 {% else %}
 {% set child_clk = c.params.get("clock_signal", clock_list[0]) %}
     // ── {{ i }} {{ c.module_name }} ({{ child_clk }} domain)
@@ -65,7 +65,7 @@ module {{ module_name }} (
     );
 {% endif %}
 {% endfor %}
-    assign active = t{{ nc }}_active;
+    assign active = {% for i in range(nc) %}t{{ i }}_active{% if not loop.last %} | {% endif %}{% endfor %};
     assign pass   = t{{ nc }}_pass;
     assign fail   = t{{ nc }}_fail;
 endmodule

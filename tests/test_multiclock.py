@@ -208,6 +208,9 @@ def test_sync_2dff_instantiated_in_multi_clock_output() -> None:
     # The top module MUST wire token_i / token_o correctly.
     top_sv = modules[ck.module_name]
     assert "token_i" in top_sv and "token_o" in top_sv, "top must wire sync token"
+    assert "assign active = t0_active | t1_active | t2_active | t3_active;" in top_sv
+    assert "assign t2_active = 1'b0;" in top_sv
+    assert "t4_active" not in top_sv
 
 
 def test_sync_latency_2_dst_cycles() -> None:

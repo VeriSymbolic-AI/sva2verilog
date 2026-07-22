@@ -64,7 +64,7 @@ module {{ module_name }} #(
     // When META_ENABLE=1, an 8-bit Galois LFSR is instantiated and its LSB
     // inverts the synchronizer output with ~1/256 probability per dst-clock
     // cycle. The LFSR is pure RTL (no $random) → identical across iverilog /
-    // Verilator for the same LFSR_SEED.
+    // The result is identical in Verilator for the same LFSR_SEED.
     generate
         if (META_ENABLE) begin : gen_meta_inject
             logic lfsr_bit;

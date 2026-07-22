@@ -15,9 +15,11 @@ from __future__ import annotations
 import argparse
 import ast
 import copy
+import os
 import random
 import subprocess
 import sys
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -45,8 +47,13 @@ MUTATION_TARGETS: dict[str, list[str]] = {
         "tests/test_ast_importer.py",
         "tests/test_errors.py",
         "tests/test_nyquist_gaps.py",
+        "tests/test_liveness.py",
+        "tests/test_repetition.py",
+        "tests/test_v13_operators.py",
     ],
 }
+
+TARGET_KILL_RATE = 0.85
 
 # ── Mutation operators ────────────────────────────────────────────────────
 
@@ -183,8 +190,22 @@ def run_tests(test_files: list[str]) -> bool:
         "-m", "not simulation and not differential and not differential_slow",
     ] + test_files
     try:
-        result = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True, timeout=120)
-        return result.returncode == 0
+        # Source mutants can have the same byte length and second-resolution
+        # mtime as the original.  A normal subprocess may then reuse a stale
+        # timestamp-based .pyc and never execute the mutant.  An isolated empty
+        # cache prefix forces every mutation subprocess to compile fresh source.
+        with tempfile.TemporaryDirectory(prefix="sva2rtl-mutation-pycache-") as pycache_dir:
+            env = os.environ.copy()
+            env["PYTHONPYCACHEPREFIX"] = pycache_dir
+            result = subprocess.run(
+                cmd,
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                timeout=120,
+                env=env,
+            )
+            return result.returncode == 0
     except subprocess.TimeoutExpired:
         return True  # treat timeout as "survived" (tests didn't catch the mutant fast enough)
 
@@ -218,6 +239,11 @@ def run_module(filepath: Path, module_name: str, sample_n: int = 0) -> ModuleRep
         print(f"  No test targets configured for {module_name}, skipping.")
         return ModuleReport(module=module_name)
 
+    if not run_tests(test_files):
+        raise RuntimeError(
+            f"baseline tests failed for {module_name}; refusing to score mutants"
+        )
+
     mutations = collect_mutations(filepath, module_name)
     if sample_n > 0 and len(mutations) > sample_n:
         random.seed(42)  # deterministic sampling for reproducibility
@@ -243,7 +269,14 @@ def run_module(filepath: Path, module_name: str, sample_n: int = 0) -> ModuleRep
     return report
 
 
-def main() -> None:
+def mutation_exit_code(total: int, killed: int) -> int:
+    """Return a failing status when a non-empty sweep misses its quality target."""
+    if total == 0:
+        return 0
+    return 0 if killed / total >= TARGET_KILL_RATE else 1
+
+
+def main() -> int:
     parser = argparse.ArgumentParser(description="sva2rtl mutation testing")
     parser.add_argument(
         "--module", default=None,
@@ -300,11 +333,12 @@ def main() -> None:
                 print(f"    [{r.module}:{s.line_no}] {s.operator}")
                 print(f"      {s.original[:80]}")
 
-    print("\n  Target kill rate: 85%")
+    print(f"\n  Target kill rate: {TARGET_KILL_RATE:.0%}")
     if total_mut > 0:
-        status = "PASS" if total_killed/max(total_mut, 1) >= 0.85 else "BELOW TARGET"
+        status = "PASS" if mutation_exit_code(total_mut, total_killed) == 0 else "BELOW TARGET"
         print(f"  Status: {status}")
+    return mutation_exit_code(total_mut, total_killed)
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

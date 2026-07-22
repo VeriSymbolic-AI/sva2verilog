@@ -14,9 +14,8 @@ Rules applied:
 - ``SeqConcat`` flattening: nested ``SeqConcat`` children are spliced into parent
 - ``PropImplication``: children are recursively normalized but the node itself
   is never transformed (D-05: golden file parity)
-- ``##0`` warning: when a zero-delay fusion is detected between two BoolExpr
-  leaves, emit a warning suggesting ``a && b`` for true same-cycle conjunction
-  (the registered-leaf token-passing pipeline retains +1 cycle separation for ##0)
+- ``##0`` fusion: merge two BoolExpr leaves into one same-cycle ``&&`` node;
+  reject complex operands that the registered-leaf pipeline cannot fuse safely
 """
 
 from __future__ import annotations

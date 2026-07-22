@@ -61,8 +61,7 @@ module {{ module_name }} #(
 
     assign active_internal = running_q;
     assign pass_internal   = running_q && sig_eval &&
-                             (count_q >= {{ cnt_width }}'d{{ rep_min }}) &&
-                             (count_q <= {{ cnt_width }}'d{{ rep_max }});
+                             (count_q >= {{ cnt_width }}'d{{ rep_min }});
     assign fail_internal   = running_q && !sig_eval &&
                              (count_q < {{ cnt_width }}'d{{ rep_min }});
 

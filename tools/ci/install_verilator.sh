@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+verilator_version="${VERILATOR_VERSION:-v5.028}"
+verilator_release="${verilator_version#v}"
+verilator_tmp="$(mktemp -d "${RUNNER_TEMP:-/tmp}/sva2rtl-verilator.XXXXXX")"
+
+case "$(uname -s)" in
+  Linux)
+    sudo apt-get update
+    sudo apt-get install -y autoconf bison build-essential flex help2man
+    verilator_jobs="$(nproc)"
+    verilator_prefix="/usr/local"
+    verilator_install=(sudo make install)
+    ;;
+  Darwin)
+    export HOMEBREW_NO_AUTO_UPDATE=1
+    brew install autoconf bison flex help2man
+    flex_prefix="$(brew --prefix flex)"
+    bison_prefix="$(brew --prefix bison)"
+    export PATH="${flex_prefix}/bin:${bison_prefix}/bin:${PATH}"
+    export CPPFLAGS="-I${flex_prefix}/include -I${bison_prefix}/include ${CPPFLAGS:-}"
+    export LDFLAGS="-L${flex_prefix}/lib -L${bison_prefix}/lib ${LDFLAGS:-}"
+    verilator_jobs="$(sysctl -n hw.logicalcpu)"
+    verilator_prefix="$(brew --prefix)"
+    verilator_install=(make install)
+    ;;
+  *)
+    echo "unsupported CI host for Verilator build: $(uname -s)" >&2
+    exit 2
+    ;;
+esac
+
+curl --fail --location --silent --show-error \
+  "https://github.com/verilator/verilator/archive/refs/tags/${verilator_version}.tar.gz" \
+  --output "${verilator_tmp}/verilator.tar.gz"
+tar xzf "${verilator_tmp}/verilator.tar.gz" -C "${verilator_tmp}"
+
+cd "${verilator_tmp}/verilator-${verilator_release}"
+autoconf
+./configure --prefix="${verilator_prefix}"
+make -j"${verilator_jobs}"
+"${verilator_install[@]}"
+
+installed_version="$(verilator --version)"
+case "${installed_version}" in
+  *"${verilator_release}"*) printf '%s\n' "${installed_version}" ;;
+  *)
+    echo "expected Verilator ${verilator_release}, got: ${installed_version}" >&2
+    exit 1
+    ;;
+esac

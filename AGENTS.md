@@ -36,8 +36,8 @@ An open-source SVA (SystemVerilog Assertion) to synthesizable RTL compiler. It t
 | Package manager | uv | latest | High |
 | SVA frontend | slang CLI --ast-json (primary) / pyslang (alternative) | v11.0 / 9.1.0 | High |
 | IR modeling | dataclasses (frozen=True) | stdlib | High |
-| NFA/DFA engine | automata-lib | 9.0.0 | High |
-| Graph algorithms | networkx | 3.6.1 | High |
+| NFA composition | In-project bounded construction | stdlib | High |
+| Checker optimization | In-project fixed pass pipeline | stdlib | High |
 | RTL code generation | Jinja2 | 3.1.6 | High |
 | CLI framework | click | 8.x | High |
 | Test framework | pytest | 9.0.3 | High |
@@ -66,18 +66,16 @@ An open-source SVA (SystemVerilog Assertion) to synthesizable RTL compiler. It t
 - Pydantic adds validation overhead unnecessary for internal IR (slang already validates)
 - Frozen dataclasses are simpler and faster for compiler-internal tree structures
 - Pydantic useful for the JSON import boundary only (ast_importer)
-## 4. NFA/DFA Construction: automata-lib 9.0.0
-- Purpose-built Python library for DFA/NFA with clean API
-- Provides `NFA.to_dfa()` (subset construction) and `DFA.minify()` (Hopcroft minimization)
-- Both are critical for Phase B/C of the pipeline
-- Optional graphviz rendering for debugging
-- Building NFA/DFA from scratch initially (use automata-lib, replace later if perf needed)
-- NLTK's FSA utilities (NLP-focused, wrong abstraction)
-## 5. Graph Algorithms: networkx 3.6.1
-- Needed for: cycle detection, SCC analysis, topological sort of RTL modules
-- Complements automata-lib for structural graph analysis on state graphs
-- Mature, well-documented, excellent Graphviz export
-- igraph-python (overkill for <1000 state DFAs)
+## 4. NFA Composition: In-Project Bounded Construction
+- `composer.py` constructs the supported token/NFA products directly.
+- One-hot state encoding and a compile-time K <= 32 budget keep the v1 scope explicit.
+- No `automata-lib` dependency, DFA conversion, or Hopcroft minimization exists in v1.7.
+- `optimizer.py` runs five CheckerNode passes: constant fold, concat merge, CSE,
+  counter merge, and dead-node pruning.
+## 5. Graph Algorithms
+- Current v1.7 code uses no `networkx` dependency.
+- Add an external graph library only when a measured compiler requirement cannot
+  be handled clearly by the bounded in-project representation.
 ## 6. RTL Code Generation: Jinja2 3.1.6
 - Template inheritance (base monitor skeleton + specialized templates)
 - Whitespace control (critical for readable RTL output)
@@ -103,7 +101,7 @@ An open-source SVA (SystemVerilog Assertion) to synthesizable RTL compiler. It t
 | Black + Flake8 separately | Superseded by ruff |
 | Mako templates | Arbitrary Python in templates → RTL bugs |
 | PyPy | Incompatible with pyslang pybind11 |
-| Custom NFA/DFA from scratch | automata-lib handles edge cases correctly |
+| Unbounded/custom general automata framework | v1 uses a deliberately bounded, operator-specific NFA representation |
 <!-- GSD:stack-end -->
 
 <!-- GSD:conventions-start source:CONVENTIONS.md -->

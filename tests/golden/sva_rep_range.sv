@@ -58,8 +58,7 @@ always_ff @(posedge clk) begin
 
     assign active_internal = running_q;
     assign pass_internal   = running_q && sig_eval &&
-                             (count_q >= 3'd2) &&
-                             (count_q <= 3'd5);
+                             (count_q >= 3'd2);
     assign fail_internal   = running_q && !sig_eval &&
                              (count_q < 3'd2);
 

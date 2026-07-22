@@ -55,14 +55,7 @@ jobs:
         run: uv sync --dev
 
       - name: Install Verilator (pinned v5.028)
-        run: |
-          sudo apt-get update && sudo apt-get install -y autoconf build-essential
-          VERILATOR_VERSION="v5.028"
-          wget -q "https://github.com/verilator/verilator/archive/refs/tags/${VERILATOR_VERSION}.tar.gz"
-          tar xzf ${VERILATOR_VERSION}.tar.gz
-          cd verilator-5.028
-          autoconf && ./configure && make -j$(nproc) && sudo make install
-          verilator --version
+        run: bash tools/ci/install_verilator.sh
 
       - name: Install slang
         run: |

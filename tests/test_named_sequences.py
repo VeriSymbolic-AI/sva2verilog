@@ -3,14 +3,18 @@
 from __future__ import annotations
 
 import json
+import threading
+from concurrent.futures import ThreadPoolExecutor
+from copy import deepcopy
 from pathlib import Path
 
 import pytest
 
+import sva2rtl.ast_importer as ast_importer
 from sva2rtl.ast_importer import import_assertion
 from sva2rtl.composer import compose
 from sva2rtl.errors import SvaCompileError
-from sva2rtl.ir import CheckerNode, SeqConcat, SourceLoc
+from sva2rtl.ir import CheckerNode, ClockSpec, SeqConcat, SourceLoc, SVANode
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
@@ -116,6 +120,36 @@ def test_named_seq_compose_produces_checker() -> None:
     checker = compose(ir_node, clock, label, text)
     assert isinstance(checker, CheckerNode)
     assert checker.module_name.startswith("sva_")
+
+
+def test_concurrent_imports_isolate_named_sequence_declarations(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Concurrent compiler calls must not share declaration lookup state."""
+    first = json.loads((FIXTURES_DIR / "named_seq.json").read_text(encoding="utf-8"))
+    second = deepcopy(first)
+    members = second["design"]["members"][0]["body"]["members"]
+    sequence = next(member for member in members if member.get("kind") == "Sequence")
+    assertion = next(
+        member for member in members if member.get("kind") == "ConcurrentAssertion"
+    )
+    sequence["name"] = "other_sequence"
+    assertion["body"]["expr"]["sequenceName"] = "other_sequence"
+
+    rendezvous = threading.Barrier(2)
+    original_find = ast_importer._find_assertion_in_members
+
+    def synchronized_find(
+        body_members: list[dict[str, object]],
+    ) -> tuple[SVANode, ClockSpec, str, str | None] | None:
+        rendezvous.wait(timeout=5)
+        return original_find(body_members)
+
+    monkeypatch.setattr(ast_importer, "_find_assertion_in_members", synchronized_find)
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(executor.map(import_assertion, (first, second)))
+
+    assert all(isinstance(result[0], SeqConcat) for result in results)
 
 
 # ── Circular reference detection ──────────────────────────────────────────────

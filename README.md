@@ -134,7 +134,7 @@ use [SUPPORT_MATRIX.md](SUPPORT_MATRIX.md).
 | `--dump-ast` | Dump slang AST JSON and exit |
 | `--dump-ir` | Dump internal IR and exit |
 | `--dump-tree` | Dump composition tree and exit |
-| `--no-optimize` | Skip DFA minimization and CSE passes |
+| `--no-optimize` | Skip checker-tree optimization passes |
 | `--version` | Print version and exit |
 
 ## Generated Monitor Interface
@@ -184,8 +184,9 @@ uv run ruff format src/ tests/
 
 ## Project Analysis
 
-See [Project Analysis (2026-07-11)](PROJECT_ANALYSIS_2026-07-11.md) for the
-current project progress, evidence boundaries, risks, and phased roadmap.
+See [Project Status](PROJECT_STATUS.md) for the current verified state and
+[Project Analysis (2026-07-11)](PROJECT_ANALYSIS_2026-07-11.md) for the dated
+architecture/risk snapshot that motivated the hardening work.
 
 ## Architecture
 
@@ -203,7 +204,7 @@ SVA Source → slang --ast-json → IR → Normalize → Compose → Optimize �
 | Import | AST JSON mapped to frozen-dataclass IR nodes |
 | Normalize | Desugar operators, flatten nested sequences |
 | Compose | Build token-passing network via operator templates |
-| Optimize | DFA minimization (Hopcroft), common subexpression elimination |
+| Optimize | Constant folding, boolean simplification, common subexpression elimination, and dead-logic pruning |
 | Emit | Jinja2 templates generate SystemVerilog or Verilog-2001 |
 
 ## License

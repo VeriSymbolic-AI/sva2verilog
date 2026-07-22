@@ -1,15 +1,16 @@
 # Industrial Validation Gap Plan
 
-> Date: 2026-07-14
-> Scope: current main after v1.7.0 release + evidence chain hardening
+> Date: 2026-07-22
+> Scope: v1.7.0 post-release hardening worktree based on `8e7af87`
 > Reader: future maintainer, external reviewer, or industrial user evaluating trust
 > Post-read action: decide and execute the next validation work needed before calling the project industrial-grade
 
 ## Executive Summary
 
 sva2rtl has a strong validation base, but it should not yet be described as fully
-industrial-grade. The project has 1321 collected tests, a recent full-suite result
-of 1146 passed (fast), 31 skipped, 0 failed, 1 xfailed, a historical 62 non-circular BMC
+industrial-grade. The project has 1344 collected tests, a recent full local
+result of 1341 passed, 2 skipped, 0 failed, 1 xfailed on both Python 3.12 and
+3.13, a historical 62 non-circular BMC
 equivalence baseline, and Phase 10 local formal-depth targets with 56 BMC or
 contract tests plus 10 k-induction proof targets (+1 xfail liveness boundary). Phase 11 adds local Yosys
 generated-RTL smoke evidence and CI wiring for generated-module Verilator lint.
@@ -31,28 +32,29 @@ dimensions.
 Current project state:
 
 - Version state: v1.7.0 plus current evidence chain hardening.
-- Local branch state: main is aligned with origin at the recorded Phase 8
-  baseline commit.
-- Remote state: GitHub Actions run
+- Local branch state: release-hardening changes are uncommitted on top of
+  `8e7af87`; they are not yet a remote evidence baseline.
+- Historical remote state: GitHub Actions run
   [28931676000](https://github.com/VeriSymbolic-AI/sva2verilog/actions/runs/28931676000)
   completed successfully for commit
   `674cea1adf15dade7b664b76912b015c8da04614`.
-- Test collection: 1321 pytest tests collected.
-- Recent full local result: 1146 passed (fast), 31 skipped, 0 failed, 1 xfailed.
-- Local Verilator result: Verilator tests skip locally when Verilator is not installed.
-- Generated RTL gates: local Yosys smoke tests pass for representative emitted
-  monitor families; Verilator lint-only tests are implemented and routed in CI,
-  but skip locally because Verilator is absent.
-- Simulation coverage: Icarus simulation is green locally; Verilator is configured
-  in CI but still needs remote confirmation.
+- Test collection: 1344 pytest tests collected.
+- Recent full local result: 1341 passed, 2 skipped, 0 failed, 1 xfailed on both
+  Python 3.12 and 3.13.
+- Local Verilator result: pinned 5.028 executes 141 simulation tests on each
+  Python version; one intentionally non-selected case skips.
+- Generated RTL gates: local Yosys synthesis and strict Verilator lint pass all
+  107 representative cases.
+- Simulation coverage: Icarus and Verilator are green locally; same-commit
+  remote Ubuntu/macOS confirmation remains required.
 - Formal coverage: historical 62 non-circular BMC equivalence checks; Phase 10
   local target files currently record 56 BMC/contract tests and 10 k-induction
   proof targets (+1 xfail liveness boundary).
 - Static quality: ruff and mypy strict were green in the latest verification run.
-- CI: workflow is tracked and the restored push/PR baseline is green for lint,
-  all Icarus axes, all Verilator axes, and the `formal smoke` job. The complete
-  formal proof sweep remains assigned to the manual/scheduled `Full Formal`
-  workflow.
+- CI: historical baseline run `28931676000` is green. Newer runs exposed
+  Verilator source-build dependency drift, a flaky reused-wrapper differential
+  harness, and serialized NFA formal timeouts. All three are fixed locally, but
+  current-commit remote reruns remain required.
 
 Recent hardening already completed:
 
@@ -74,6 +76,11 @@ Recent hardening already completed:
 - Added Phase 11 generated RTL gates: a representative case catalog,
   synthesis-oriented Yosys smoke tests, Verilator lint-only tests, and a focused
   generated-RTL CI job.
+- Packaged all 35 runtime templates in wheel/sdist and verified clean external
+  installs for SystemVerilog, Verilog-2001, NFA fragment rendering, and Icarus.
+- Unified the pinned Verilator installer across CI/nightly, pinned OSS CAD Suite
+  for formal jobs, isolated NFA implication shards, and made each Verilator
+  differential build use a fresh directory.
 
 ## Trust Model
 
@@ -98,7 +105,7 @@ documented as bounded evidence rather than complete industrial proof.
 
 ### P0: Release Trust Blockers
 
-#### Remote CI push/PR baseline is confirmed
+#### Remote CI push/PR baseline is confirmed historically
 
 Status: closed for the Phase 8 push/PR baseline. GitHub Actions run
 [28931676000](https://github.com/VeriSymbolic-AI/sva2verilog/actions/runs/28931676000)
@@ -106,7 +113,8 @@ for commit `674cea1adf15dade7b664b76912b015c8da04614` completed successfully.
 The run records success for lint, all four Icarus matrix axes, all four
 Verilator matrix axes, and the `formal smoke` job.
 
-This closes the external reproducibility blocker for the restored CI workflow.
+This closes the external reproducibility blocker only for that historical commit.
+The 2026-07-22 hardening worktree still requires a new same-commit remote run.
 It does not claim that the complete SymbiYosys proof sweep has been published;
 that evidence remains assigned to the manual/scheduled `Full Formal` workflow.
 
@@ -185,11 +193,10 @@ Done when:
 - Formal references no longer reconstruct boolean semantics by ANDing observed
   signal names.
 
-#### `##0` still generates known non-standard behavior
+#### `##0` same-cycle behavior
 
-The current implementation warns that boolean `##0` keeps a one-cycle separation.
-For industrial use, a supported construct must not silently emit RTL with known
-wrong standard semantics.
+Status: closed for the supported v1.7 subset. Boolean `a ##0 b` is rewritten to
+same-cycle `a && b`; complex forms that cannot be represented safely are rejected.
 
 Fix:
 
@@ -228,7 +235,7 @@ Done when:
 Status: partially closed by Phase 11. The project now has a representative
 generated-RTL case catalog and a Yosys smoke gate that runs generated modules
 through synthesis-oriented commands. Simulation acceptance is still not the same
-thing as synthesis acceptance, and local Verilator absence remains non-evidence.
+thing as synthesis acceptance; both Yosys and local Verilator gates now execute.
 
 Fix:
 
@@ -249,12 +256,12 @@ Phase 11 closure evidence:
 - `tests/test_synthesis_gates.py` writes `emit_all()` output to temporary `.sv`
   files and runs Yosys with `read_verilog -sv`, `hierarchy -check -top`, `proc`,
   `opt`, `check`, `synth -run coarse`, and final `check`.
-- Local generated gate command recorded `81 passed, 26 skipped`; Yosys cases
-  passed, and skips were Verilator lint cases on a host without Verilator.
+- Local generated gate command now records `107 passed`; both Yosys and pinned
+  Verilator 5.028 cases execute.
 - `.github/workflows/ci.yml` now has a focused `generated-rtl` job that installs
   Yosys and Verilator and runs the generated synthesis/lint gates.
-- Remaining boundary: local Verilator lint skips are not pass evidence; remote
-  CI or another Verilator-equipped host must provide lint pass evidence.
+- Remaining boundary: current-worktree local lint is pass evidence, but the same
+  commit still needs a remote CI record before support rows are promoted.
 
 #### k-induction coverage is still narrow
 
@@ -315,8 +322,9 @@ Done when:
 
 Status: partially closed by Phase 12. The project now has a bounded
 source-level differential harness for the supported finite-state subset, plus a
-failure-artifact path. The remaining gap is broader slow/nightly execution and
-Verilator differential evidence from a Verilator-equipped host or CI run.
+failure-artifact path. Local slow/nightly execution and Verilator differential
+now pass; the remaining gap is current-commit scheduled remote evidence and
+broader generated coverage.
 
 The project depends on Hypothesis, and Phase 12 now uses it for bounded source
 and stimulus generation. Handwritten tests cover known bugs well; generators
@@ -337,8 +345,8 @@ Current Phase 12 evidence:
   compiles them through the normal slang/import/compose pipeline.
 - `tests/test_differential.py` compares Python oracle and Icarus simulation in
   the fast local path.
-- Verilator differential checks currently skip locally because Verilator is not
-  installed; this skip is non-evidence.
+- Verilator smoke/fast differential records 2 passed locally; Icarus slow sweep
+  records 1 passed locally.
 - `tests/test_differential_regressions.py` writes sanitized failure artifacts
   and provides a fixed-fixture replay entry point.
 - The first run found and fixed a Python oracle routing bug for implication
@@ -530,9 +538,10 @@ The immediate next work should be:
 2. Add missing real source E2E fixtures called out by `SUPPORT_MATRIX.md`. **(Done 2026-07-11: 12 fixtures added, all slang v11 compat gaps closed.)**
 3. Fix boolean expression semantic modelling. **(Done in Phase 9 — structured BoolNode IR, independent evaluator.)**
 4. Add arbitrary-start and arbitrary-disable formal harnesses. **(Done in Phase 10.)**
-5. Record a remote generated-RTL CI run with Verilator lint executing rather
-   than locally skipping. **(Done — Verilator lint CI job configured.)**
-6. Push current branch, trigger remote CI, confirm full green baseline.
+5. Record a current-commit generated-RTL CI run with Verilator lint executing
+   rather than locally skipping. **Configured, not yet evidenced.**
+6. Commit and push the 2026-07-22 hardening worktree, trigger all remote gates,
+   and confirm a full green baseline before promoting support rows.
 7. Add k-induction proofs for additional small finite-state templates.
 8. Upgrade coverage threshold from 82% toward 95%.
 9. FPGA prototype (FUT-03) — demand-pulled.

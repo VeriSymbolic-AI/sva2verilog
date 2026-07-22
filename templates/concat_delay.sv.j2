@@ -79,7 +79,7 @@ module {{ module_name }} #(
     assign active        = disable_i ? 1'b0 : running_q;
     assign pass          = disable_i ? 1'b0 : (
                                (start && ({{ _emin }} <= 1) && ({{ _emax }} >= 1))
-{% if _emax >= 2 %}                               || (running_q && (count_q >= {{ cnt_width }}'d{{ _cmin }}) && (count_q <= {{ cnt_width }}'d{{ _cmax }}))
+{% if _emax >= 2 %}                               || (running_q && {% if _cmin > 0 %}(count_q >= {{ cnt_width }}'d{{ _cmin }}) && {% endif %}(count_q <= {{ cnt_width }}'d{{ _cmax }}))
 {% endif %}                           );
     assign fail          = 1'b0;
     assign attempt_fired = attempt_fired_q;

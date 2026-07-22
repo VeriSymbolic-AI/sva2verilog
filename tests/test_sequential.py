@@ -20,6 +20,7 @@ from sva2rtl.ast_importer import import_assertion
 from sva2rtl.composer import compose
 from sva2rtl.emitter import emit_all
 from tests.conftest import assert_golden
+from tests.verilator_lint import build_verilator_lint_command
 
 # ── Paths ──────────────────────────────────────────────────────────────────
 
@@ -302,8 +303,8 @@ def test_delay_window_comparator_boundaries(delay_min: int, delay_max: int) -> N
 
     The pass logic now asserts at start+(N-1): a start-cycle combinational term
     ``(start && (delay_min <= 1) && (delay_max >= 1))`` plus, when delay_max>=2, a
-    counter term over the SHIFTED window ``count_q in [max(min-2,0), max(max-2,0)]``
-    so the net chain a->b gap equals the operator window.
+    counter term over the SHIFTED window ``count_q in [max(min-2,0), max(max-2,0)]``.
+    The unsigned lower-bound comparison is omitted when that bound is zero.
     """
     import re
 
@@ -315,9 +316,12 @@ def test_delay_window_comparator_boundaries(delay_min: int, delay_max: int) -> N
     if delay_max >= 2:
         cmin = max(delay_min - 2, 0)
         cmax = max(delay_max - 2, 0)
-        assert re.search(rf"count_q >= \d+'d{cmin}\b", sv), (
-            f"shifted lower bound {cmin} not found for ##[{delay_min}:{delay_max}]"
-        )
+        if cmin > 0:
+            assert re.search(rf"count_q >= \d+'d{cmin}\b", sv), (
+                f"shifted lower bound {cmin} not found for ##[{delay_min}:{delay_max}]"
+            )
+        else:
+            assert "count_q >=" not in sv
         assert re.search(rf"count_q <= \d+'d{cmax}\b", sv), (
             f"shifted upper bound {cmax} not found for ##[{delay_min}:{delay_max}]"
         )
@@ -344,24 +348,22 @@ def test_delay_single_cycle_fixed() -> None:
 def test_delay_range_window_width() -> None:
     """TEST-06 / BUG-DELAY-01: the counter window is the operator window shifted -2.
 
-    The corrected concat_delay compares count_q against [max(min-2,0), max(max-2,0)]
-    (the start-cycle term covers the gap-1 boundary), so the net chain gap spans
-    the operator window [min, max].
+    The corrected concat_delay compares count_q against the non-tautological
+    bounds of [max(min-2,0), max(max-2,0)].  A zero lower bound is implicit for
+    the unsigned counter.
     """
     import re
 
     # ##[2:5] -> shifted counter window [0, 3]
     sv25 = _compile_delay(2, 5)
-    m_min = re.search(r"count_q >= \d+'d(\d+)", sv25)
     m_max = re.search(r"count_q <= \d+'d(\d+)", sv25)
-    assert m_min and int(m_min.group(1)) == 0, "##[2:5]: expected shifted lower bound 0"
+    assert "count_q >=" not in sv25, "##[2:5]: zero lower bound should be implicit"
     assert m_max and int(m_max.group(1)) == 3, "##[2:5]: expected shifted upper bound 3"
 
     # ##[0:15] -> shifted counter window [0, 13]
     sv015 = _compile_delay(0, 15)
-    m015_min = re.search(r"count_q >= \d+'d(\d+)", sv015)
     m015_max = re.search(r"count_q <= \d+'d(\d+)", sv015)
-    assert m015_min and int(m015_min.group(1)) == 0, "##[0:15]: expected shifted lower 0"
+    assert "count_q >=" not in sv015, "##[0:15]: zero lower bound should be implicit"
     assert m015_max and int(m015_max.group(1)) == 13, "##[0:15]: expected shifted upper 13"
 
 
@@ -547,12 +549,13 @@ _HAS_VERILATOR = shutil.which("verilator") is not None
 @pytest.mark.skipif(not _HAS_VERILATOR, reason="verilator not installed")
 @pytest.mark.parametrize("fixture_name", _PHASE2_FIXTURES)
 def test_verilator_lint_clean(fixture_name: str) -> None:
-    """[REVIEW FIX] Verilator lint-only pass: zero errors/warnings on generated RTL.
+    """[REVIEW FIX] Verilator strict lint accepts generated RTL.
 
-    Catches undeclared signals, width mismatches, and undriven nets that
-    iverilog may miss.  Skipped gracefully when verilator is not installed.
+    Catches structural and width defects that iverilog may miss while allowing
+    only the stable-interface warnings shared with the canonical lint gate.
+    Skipped gracefully when Verilator is not installed.
 
-    CI step: verilator --lint-only -Wall output/*.sv
+    CI step: strict shared Verilator lint policy over all generated modules.
     """
     modules = _compile_fixture(_FIXTURES / fixture_name)
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -562,8 +565,13 @@ def test_verilator_lint_clean(fixture_name: str) -> None:
             fpath.write_text(sv_text, encoding="utf-8")
             sv_files.append(str(fpath))
 
+        top_module = next(reversed(modules))
         result = subprocess.run(
-            ["verilator", "--lint-only", "-Wall", *sv_files],
+            build_verilator_lint_command(
+                "verilator",
+                top_module,
+                [Path(path) for path in sv_files],
+            ),
             capture_output=True,
             text=True,
         )

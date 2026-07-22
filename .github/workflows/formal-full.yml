@@ -19,8 +19,12 @@ jobs:
             files: tests/test_formal_passes.py tests/test_formal_templates.py
           - suite: sva-core
             files: tests/test_formal_sva_equiv.py
-          - suite: nfa
-            files: tests/test_v151_nfa_bmc.py tests/test_v151_p2_bmc.py
+          - suite: nfa-composition
+            files: tests/test_v151_nfa_bmc.py
+          - suite: nfa-overlap-implication
+            files: tests/test_v151_p2_bmc.py::TestOverlapImplNfaMiter
+          - suite: nfa-nonoverlap-implication
+            files: tests/test_v151_p2_bmc.py::TestNonoverlapImplNfaMiter
           - suite: kinduction
             files: tests/test_formal_kinduction.py
 
@@ -34,13 +38,17 @@ jobs:
       - name: Install dependencies
         run: uv sync --dev
 
-      - name: Install yosys
-        run: sudo apt-get update && sudo apt-get install -y yosys z3
+      # Pin one coherent YosysHQ toolchain instead of mixing Ubuntu's Yosys
+      # package with an unpinned SymbiYosys checkout.
+      - name: Install OSS CAD Suite
+        uses: YosysHQ/setup-oss-cad-suite@c7845bc0d335c8076aa22047e85972caa8a916df # v4.1.0
+        with:
+          version: "2026-07-21"
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Install SymbiYosys (sby)
+      - name: Report formal tool versions
         run: |
-          git clone --depth 1 https://github.com/YosysHQ/sby.git /tmp/sby
-          sudo make -C /tmp/sby install PREFIX=/usr/local
+          yosys --version
           sby --version
           z3 --version
 

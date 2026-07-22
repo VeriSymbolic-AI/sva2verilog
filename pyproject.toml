@@ -33,6 +33,9 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/sva2rtl"]
 
+[tool.hatch.build.targets.wheel.force-include]
+"templates" = "sva2rtl/templates"
+
 [dependency-groups]
 dev = [
     "hypothesis>=6.100",

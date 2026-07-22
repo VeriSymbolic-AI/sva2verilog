@@ -44,6 +44,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -431,8 +432,14 @@ def _run_simulation_verilator(
     # unnecessary or behave differently on newer versions.
     timing_flag = _verilator_timing_flag(verilator)
 
+    # Hypothesis can invoke this backend repeatedly within one pytest tmp_path.
+    # Give every compile a fresh obj_dir and wrapper path: reusing them lets
+    # make reuse a stale wrapper object when files are replaced within the same
+    # filesystem timestamp tick (observed as flaky macOS differential traces).
+    build_dir = Path(tempfile.mkdtemp(prefix="verilator-", dir=work_dir))
+
     # Write DUT source
-    dut_path = work_dir / "dut.sv"
+    dut_path = build_dir / "dut.sv"
     dut_path.write_text("\n\n".join(sv_sources), encoding="utf-8")
 
     # Generate C++ wrapper
@@ -443,24 +450,26 @@ def _run_simulation_verilator(
         stimulus=stimulus,
         has_overflow_flag=has_overflow_flag,
     )
-    wrapper_path = work_dir / "wrapper.cpp"
+    wrapper_path = build_dir / "wrapper.cpp"
     wrapper_path.write_text(wrapper_code, encoding="utf-8")
 
     # Compile with Verilator
-    sim_path = work_dir / "Vdut"
+    sim_path = build_dir / "Vdut"
+    compile_command = [
+        verilator,
+        "--cc", "--exe", "--build",
+        "-Wno-fatal",
+        "-Wall",
+        "--top-module", module_name,
+        "-o", str(sim_path),
+        str(dut_path),
+        str(wrapper_path),
+    ]
+    if timing_flag:
+        compile_command.insert(4, timing_flag)
     compile_result = subprocess.run(
-        [
-            verilator,
-            "--cc", "--exe", "--build",
-            timing_flag,
-            "-Wno-fatal",
-            "-Wall",
-            "--top-module", module_name,
-            "-o", str(sim_path),
-            str(dut_path),
-            str(wrapper_path),
-        ],
-        cwd=str(work_dir),
+        compile_command,
+        cwd=str(build_dir),
         capture_output=True,
         text=True,
     )

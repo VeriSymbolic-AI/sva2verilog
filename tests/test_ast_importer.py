@@ -11,6 +11,7 @@ import pytest
 from sva2rtl.ast_importer import (
     UNSUPPORTED_KINDS_PHASE1,
     _dispatch_expr_to_ir,
+    _is_boolean_binary,
     build_bool_expr,
     expr_to_sv,
     extract_source_loc,
@@ -30,11 +31,58 @@ from sva2rtl.ir import (
     DisableIff,
     PropImplication,
     SeqConcat,
+    SeqNonconsecRep,
     SourceLoc,
 )
 
 # Fixture directory
 _FIXTURES = Path(__file__).parent / "fixtures"
+
+
+def test_dispatch_legacy_nonconsecutive_repetition() -> None:
+    """The legacy v7 SimpleAssertionExpr representation keeps [=N] semantics."""
+    node = {
+        "kind": "SimpleAssertionExpr",
+        "expr": {"kind": "NamedValue", "symbol": "a"},
+        "repetition": {"kind": "Nonconsecutive", "min": 2, "max": 2},
+    }
+    result = _dispatch_expr_to_ir(node)
+    assert isinstance(result, SeqNonconsecRep)
+    assert (result.rep_min, result.rep_max) == (2, 2)
+
+
+def test_import_legacy_nonconsecutive_repetition_through_property_spec() -> None:
+    """The v7 PropertySpec entry point routes SimpleAssertionExpr [=N]."""
+    ast = json.loads((_FIXTURES / "fell.json").read_text(encoding="utf-8"))
+    assertion = ast["design"]["members"][0]["body"]["members"][-1]
+    assertion["body"]["expr"] = {
+        "kind": "SimpleAssertionExpr",
+        "expr": {"kind": "NamedValue", "symbol": "2 sig"},
+        "repetition": {"kind": "Nonconsecutive", "min": 2, "max": 2},
+    }
+
+    result, _clock, _text, _label = import_assertion(ast)
+    assert isinstance(result, SeqNonconsecRep)
+    assert (result.rep_min, result.rep_max) == (2, 2)
+
+
+def test_boolean_binary_classification_covers_all_terminal_paths() -> None:
+    assert _is_boolean_binary(
+        {"left": {"kind": "Simple"}, "right": {"kind": "NamedValue"}}
+    )
+    assert _is_boolean_binary(
+        {
+            "left": {"kind": "Simple"},
+            "right": {
+                "kind": "BinaryPropertyExpr",
+                "left": {"kind": "Simple"},
+                "right": {"kind": "SequenceExpr"},
+            },
+        }
+    )
+    assert not _is_boolean_binary(
+        {"left": {"kind": "Simple"}, "right": {"kind": "Simple"}}
+    )
 
 
 # ── expr_to_sv unit tests ─────────────────────────────────────────────────

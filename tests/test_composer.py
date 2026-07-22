@@ -8,6 +8,8 @@ import pytest
 
 from sva2rtl.bool_semantics import deserialize_bool_expr
 from sva2rtl.composer import (
+    _is_nfa_liftable,
+    _reject_non_boolean_composition,
     compose,
     compute_hash_map,
     extract_signals,
@@ -49,6 +51,32 @@ def _id(name: str) -> BoolIdent:
 
 def _structured_bool(text: str, expr: BoolBinary | BoolUnary | BoolCompare) -> BoolExpr:
     return BoolExpr(text=text, expr=expr, source_loc=_make_loc())
+
+
+def test_nfa_liftability_has_explicit_leaf_and_fallback_results() -> None:
+    leaf = BoolExpr(text="a", source_loc=_make_loc())
+    assert _is_nfa_liftable(leaf)
+
+    unsupported = PropImplication(
+        antecedent=leaf,
+        consequent=leaf,
+        overlapping=True,
+        source_loc=_make_loc(),
+    )
+    assert not _is_nfa_liftable(unsupported)
+
+
+def test_non_boolean_composition_rejection_checks_every_operand() -> None:
+    leaf = BoolExpr(text="a", source_loc=_make_loc())
+    _reject_non_boolean_composition("intersect", (("left", leaf),), _make_loc())
+
+    sequence = SeqConcat(elements=(leaf, leaf), delays=((1, 1),), source_loc=_make_loc())
+    with pytest.raises(UnsupportedConstruct, match="left=SeqConcat"):
+        _reject_non_boolean_composition(
+            "intersect",
+            (("left", sequence),),
+            _make_loc(),
+        )
 
 
 # ── module_name_from_label ────────────────────────────────────────────────

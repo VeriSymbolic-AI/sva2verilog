@@ -18,6 +18,7 @@ Design decisions (from Research Q1, Q6, pitfalls P5.1, P8.1, P8.2, P8.4):
 from __future__ import annotations
 
 import logging
+from contextvars import ContextVar
 from typing import Any
 
 from sva2rtl.bool_semantics import render_bool_expr
@@ -138,10 +139,12 @@ _TEMPORAL_KIND_NAMES: dict[str, str] = {
 _UNSUPPORTED_BINARY_OPS: dict[str, str] = {}
 
 # ── Named sequence/property declarations (Phase 3) ─────────────────────────
-# Populated by import_assertion() from the current AST's module body members.
+# Bound by import_assertion() / import_all_assertions() for the current module.
 # Maps declaration name -> raw slang AST member dict.
-# Single-threaded compiler; module-level state is safe.
-_DECLARATIONS: dict[str, dict[str, Any]] = {}
+# A ContextVar prevents declarations leaking between concurrent compiler calls.
+_DECLARATIONS: ContextVar[dict[str, dict[str, Any]]] = ContextVar(
+    "sva2rtl_ast_declarations", default={}
+)
 
 
 # ── Public API ─────────────────────────────────────────────────────────────
@@ -176,24 +179,21 @@ def import_assertion(
     design = ast.get("design", {})
     members: list[dict[str, Any]] = design.get("members", [])
 
-    # First pass: collect named sequence/property declarations from each
-    # InstanceBody so that _dispatch_expr_to_ir can inline SequenceInstance refs.
-    global _DECLARATIONS
+    # Keep declaration lookup scoped to the InstanceBody containing the
+    # assertion.  This is both module-correct and safe for concurrent imports.
     for member in members:
         if member.get("kind") == "Instance":
             body = member.get("body", {})
             if body.get("kind") == "InstanceBody":
-                _DECLARATIONS = _collect_declarations(body.get("members", []))
-
-    # Second pass: locate and import the ConcurrentAssertion.
-    # Flatten members from all Instance/InstanceBody nodes
-    for member in members:
-        if member.get("kind") == "Instance":
-            body = member.get("body", {})
-            if body.get("kind") == "InstanceBody":
-                result = _find_assertion_in_members(body.get("members", []))
-                if result is not None:
-                    return result
+                token = _DECLARATIONS.set(
+                    _collect_declarations(body.get("members", []))
+                )
+                try:
+                    result = _find_assertion_in_members(body.get("members", []))
+                    if result is not None:
+                        return result
+                finally:
+                    _DECLARATIONS.reset(token)
 
     raise SvaCompileError(
         message="No concurrent assertion found in the slang AST. "
@@ -226,22 +226,22 @@ def import_all_assertions(
     design = ast.get("design", {})
     members: list[dict[str, Any]] = design.get("members", [])
 
-    # First pass: collect named sequence/property declarations.
-    global _DECLARATIONS
-    _DECLARATIONS.clear()
-    for member in members:
-        if member.get("kind") == "Instance":
-            body = member.get("body", {})
-            if body.get("kind") == "InstanceBody":
-                _DECLARATIONS = _collect_declarations(body.get("members", []))
-
-    # Second pass: collect ALL ConcurrentAssertions.
+    # Collect assertions module by module so named declarations cannot resolve
+    # accidentally across InstanceBody boundaries.
     results: list[tuple[SVANode, ClockSpec, str, str | None]] = []
     for member in members:
         if member.get("kind") == "Instance":
             body = member.get("body", {})
             if body.get("kind") == "InstanceBody":
-                results.extend(_find_all_assertions_in_members(body.get("members", [])))
+                token = _DECLARATIONS.set(
+                    _collect_declarations(body.get("members", []))
+                )
+                try:
+                    results.extend(
+                        _find_all_assertions_in_members(body.get("members", []))
+                    )
+                finally:
+                    _DECLARATIONS.reset(token)
 
     if not results:
         raise SvaCompileError(
@@ -1792,7 +1792,7 @@ def _expand_named_sequence(
                 "not synthesizable."
             )
         )
-    decl_body = _DECLARATIONS.get(seq_name)
+    decl_body = _DECLARATIONS.get().get(seq_name)
     if decl_body is None:
         raise SvaCompileError(
             message=(
