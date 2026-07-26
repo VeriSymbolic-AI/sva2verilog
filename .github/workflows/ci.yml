@@ -6,12 +6,12 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: astral-sh/setup-uv@e4db8464a088ece1b920f60402e813ea4de65b8f # v4
       - name: Install Python
         run: uv python install 3.12
       - name: Install dependencies
-        run: uv sync --dev
+        run: uv sync --dev --frozen
       - name: Lint (ruff)
         run: uv run ruff check src/ tests/
       - name: Type check (mypy)
@@ -26,14 +26,14 @@ jobs:
         simulator: [iverilog, verilator]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: astral-sh/setup-uv@e4db8464a088ece1b920f60402e813ea4de65b8f # v4
 
       - name: Install Python
         run: uv python install ${{ matrix.python }}
 
       - name: Install dependencies
-        run: uv sync --dev
+        run: uv sync --dev --frozen
 
       - name: Install iverilog (Linux)
         if: matrix.simulator == 'iverilog' && runner.os == 'Linux'
@@ -53,47 +53,51 @@ jobs:
 
       - name: Install slang (Linux)
         if: runner.os == 'Linux'
-        run: |
-          SLANG_VERSION="v11.0"
-          wget -q "https://github.com/MikePopoloski/slang/releases/download/${SLANG_VERSION}/slang-linux-x86_64.tar.gz"
-          tar xzf slang-linux-x86_64.tar.gz
-          sudo mv slang /usr/local/bin/slang
-          slang --version
+        run: bash tools/ci/install_slang.sh
 
       - name: Install slang (macOS)
         if: runner.os == 'macOS'
-        run: |
-          SLANG_VERSION="v11.0"
-          wget -q "https://github.com/MikePopoloski/slang/releases/download/${SLANG_VERSION}/slang-macos-arm64.tar.gz"
-          tar xzf slang-macos-arm64.tar.gz
-          sudo mv slang /usr/local/bin/slang
-          slang --version
+        run: bash tools/ci/install_slang.sh
 
       - name: Run tests (iverilog — full suite, bounded differential included)
         if: matrix.simulator == 'iverilog'
-        run: uv run pytest tests/ -v --timeout=120
+        run: uv run pytest tests/ -v --timeout=120 --junitxml=pytest-results.xml
         env:
           SLANG_PATH: /usr/local/bin/slang
 
+      - name: Enforce iverilog execution budget
+        if: matrix.simulator == 'iverilog'
+        run: >
+          uv run python tools/ci/check_junit.py pytest-results.xml
+          --min-passed 1200 --max-skipped 200
+
       - name: Run tests (Verilator — simulation + bounded differential)
         if: matrix.simulator == 'verilator'
-        run: uv run pytest tests/ -m "simulation and not differential_slow" --simulator=verilator -v --timeout=120
+        run: >
+          uv run pytest tests/ -m "simulation and not differential_slow"
+          --simulator=verilator -v --timeout=120 --junitxml=pytest-results.xml
         env:
           SLANG_PATH: /usr/local/bin/slang
+
+      - name: Enforce Verilator execution budget
+        if: matrix.simulator == 'verilator'
+        run: >
+          uv run python tools/ci/check_junit.py pytest-results.xml
+          --min-passed 160 --max-skipped 1
 
   generated-rtl:
     name: generated RTL gates
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: astral-sh/setup-uv@e4db8464a088ece1b920f60402e813ea4de65b8f # v4
 
       - name: Install Python
         run: uv python install 3.12
 
       - name: Install dependencies
-        run: uv sync --dev
+        run: uv sync --dev --frozen
 
       - name: Install Yosys
         run: sudo apt-get update && sudo apt-get install -y yosys
@@ -102,21 +106,28 @@ jobs:
         run: bash tools/ci/install_verilator.sh
 
       - name: Run generated RTL synthesis and lint gates
-        run: uv run pytest tests/test_synthesis_gates.py tests/test_generated_lint.py -v --timeout=180
+        run: >
+          uv run pytest tests/test_synthesis_gates.py tests/test_generated_lint.py
+          -v --timeout=180 --junitxml=pytest-results.xml
+
+      - name: Enforce generated RTL execution budget
+        run: >
+          uv run python tools/ci/check_junit.py pytest-results.xml
+          --min-passed 130 --max-skipped 0
 
   formal:
     name: formal smoke
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: astral-sh/setup-uv@e4db8464a088ece1b920f60402e813ea4de65b8f # v4
 
       - name: Install Python
         run: uv python install 3.12
 
       - name: Install dependencies
-        run: uv sync --dev
+        run: uv sync --dev --frozen
 
       - name: Install OSS CAD Suite
         uses: YosysHQ/setup-oss-cad-suite@c7845bc0d335c8076aa22047e85972caa8a916df # v4.1.0
@@ -131,12 +142,7 @@ jobs:
           z3 --version
 
       - name: Install slang
-        run: |
-          SLANG_VERSION="v11.0"
-          wget -q "https://github.com/MikePopoloski/slang/releases/download/${SLANG_VERSION}/slang-linux-x86_64.tar.gz"
-          tar xzf slang-linux-x86_64.tar.gz
-          sudo mv slang /usr/local/bin/slang
-          slang --version
+        run: bash tools/ci/install_slang.sh
 
       - name: Run formal smoke tests
         run: >
@@ -144,7 +150,81 @@ jobs:
           tests/test_formal_passes.py::TestConstantFoldEquiv::test_constant_true_is_equivalent
           tests/test_formal_templates.py::TestBoolExprTemplate::test_simple_boolean
           tests/test_formal_sva_equiv.py::TestBoolExprSvaEquiv::test_bool_simple_equiv
-          -v --timeout=120
+          -v --timeout=120 --junitxml=pytest-results.xml
         env:
           SLANG_PATH: /usr/local/bin/slang
           SVA2RTL_FORMAL_PROVE_TIMEOUT: "30"
+
+      - name: Enforce formal smoke execution budget
+        run: >
+          uv run python tools/ci/check_junit.py pytest-results.xml
+          --min-passed 3 --max-skipped 0
+
+  coverage:
+    name: coverage regression gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: astral-sh/setup-uv@e4db8464a088ece1b920f60402e813ea4de65b8f # v4
+
+      - name: Install Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --dev --frozen
+
+      - name: Install iverilog
+        run: sudo apt-get update && sudo apt-get install -y iverilog
+
+      - name: Install slang
+        run: bash tools/ci/install_slang.sh
+
+      - name: Run aggregate and critical-module coverage gates
+        run: |
+          uv run pytest tests/ --simulator=iverilog --cov=src/sva2rtl --cov-branch --cov-report=term-missing --cov-report=json:coverage.json --cov-fail-under=82 -v --timeout=120 --junitxml=pytest-results.xml
+          uv run python tools/ci/check_junit.py pytest-results.xml --min-passed 1200 --max-skipped 200
+          uv run python tools/ci/check_coverage.py coverage.json
+        env:
+          SLANG_PATH: /usr/local/bin/slang
+
+  python-314-package:
+    name: Python 3.14 + installed distribution
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: astral-sh/setup-uv@e4db8464a088ece1b920f60402e813ea4de65b8f # v4
+
+      - name: Install Python
+        run: uv python install 3.14
+
+      - name: Install dependencies
+        run: uv sync --dev --frozen --python 3.14
+
+      - name: Install iverilog
+        run: sudo apt-get update && sudo apt-get install -y iverilog
+
+      - name: Install slang
+        run: bash tools/ci/install_slang.sh
+
+      - name: Run broad Python 3.14 compatibility suite
+        run: >
+          uv run --python 3.14 pytest tests/
+          -m "not simulation and not synthesis and not generated_lint"
+          -v --timeout=120 --junitxml=pytest-results.xml
+        env:
+          SLANG_PATH: /usr/local/bin/slang
+
+      - name: Enforce Python 3.14 execution budget
+        run: >
+          uv run --python 3.14 python tools/ci/check_junit.py pytest-results.xml
+          --min-passed 900 --max-skipped 200
+
+      - name: Build wheel and source distribution
+        run: uv build --out-dir dist
+
+      - name: Install wheel outside the checkout and compile an SVA
+        run: >
+          uv run --python 3.14 python tools/ci/smoke_distribution.py
+          dist/*.whl dist/*.tar.gz

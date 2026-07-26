@@ -19,6 +19,7 @@ from tests.differential_cases import (
     generated_sva_cases,
     make_generated_case,
     metadata_is_sanitized,
+    stimulus_input_names_from_checker,
 )
 from tests.differential_reference import SourceBoolExpr, SourceReferenceSpec
 
@@ -27,6 +28,7 @@ def test_default_budget_trace_range() -> None:
     assert DEFAULT_BUDGET.min_trace_length == 8
     assert DEFAULT_BUDGET.max_trace_length == 24
     assert DEFAULT_BUDGET.max_delay == 8
+    assert DEFAULT_BUDGET.max_temporal_depth == 1
     assert DEFAULT_BUDGET.max_repeat == 6
 
 
@@ -103,6 +105,13 @@ def test_example_catalog_covers_expected_families() -> None:
     assert "disable_iff" in families
     assert not (families & DEFERRED_FAMILIES)
     assert all(case.source_reference is not None for case in example_generated_cases())
+    assert any(case.assertion_expr == "a ##8 b" for case in example_generated_cases())
+
+
+@given(generated_sva_cases(DifferentialBudget(max_temporal_depth=0)))
+@settings(max_examples=12, deadline=None)
+def test_zero_temporal_depth_generates_only_boolean_cases(case: GeneratedSvaCase) -> None:
+    assert set(case.family_tags).issubset({"bool", "structured_bool", "disable_iff"})
 
 
 @requires_slang
@@ -117,3 +126,6 @@ def test_compile_generated_case_smoke(
     assert compiled.clock.signal == "clk"
     observed = {port for port, _signal in compiled.checker.observed_signals}
     assert set(case.signal_names).issubset(observed)
+    stimulus_names = stimulus_input_names_from_checker(compiled.checker)
+    assert stimulus_names[0] == "start"
+    assert stimulus_names[-1] == "disable_i"

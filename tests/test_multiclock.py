@@ -208,9 +208,50 @@ def test_sync_2dff_instantiated_in_multi_clock_output() -> None:
     # The top module MUST wire token_i / token_o correctly.
     top_sv = modules[ck.module_name]
     assert "token_i" in top_sv and "token_o" in top_sv, "top must wire sync token"
-    assert "assign active = t0_active | t1_active | t2_active | t3_active;" in top_sv
+    assert (
+        "assign active        = disable_i ? 1'b0 : "
+        "(t0_active | t1_active | t2_active | t3_active);"
+    ) in top_sv
     assert "assign t2_active = 1'b0;" in top_sv
     assert "t4_active" not in top_sv
+
+
+def test_multi_clock_top_exposes_and_enforces_standard_contract() -> None:
+    """Multi-clock output must not bypass start/disable/anti-vacuity ports."""
+
+    from sva2rtl.ast_importer import import_assertion as ia  # noqa: F811
+    from sva2rtl.composer import compose  # noqa: F811
+    from sva2rtl.emitter import emit_all  # noqa: F811
+    from sva2rtl.frontend import invoke_slang as isl  # noqa: F811
+
+    src = Path("/tmp/_mc_contract.sv")
+    src.write_text(
+        "module m(input logic clk1, clk2, a, b);\n"
+        "  ap: assert property (@(posedge clk1) a ##1 @(posedge clk2) b);\n"
+        "endmodule\n",
+        encoding="utf-8",
+    )
+    ast = isl(src, "slang")
+    node, clock, text, label = ia(ast)
+    checker = compose(normalize(node), clock, label, text)
+    modules = emit_all(checker)
+    top_sv = modules[checker.module_name]
+    sync_sv = next(
+        source for source in modules.values() if "TRUSTED COMPONENT" in source
+    )
+
+    for port in ("start", "disable_i", "attempt_fired", "disabled_o"):
+        assert port in top_sv
+    assert "assign t0_pass = start;" in top_sv
+    assert "top-level \"start\" is always asserted" not in top_sv
+    assert top_sv.count(".disable_i(disable_i)") >= 2
+    assert "else if (start)" in top_sv
+    assert "assign disabled_o    = disable_i;" in top_sv
+    assert "disable_i ? 1'b0" in top_sv
+
+    assert "input  logic disable_i" in sync_sv
+    assert "if (!rst_n || disable_i)" in sync_sv
+    assert sync_sv.count("disable_i ? 1'b0") == 2
 
 
 def test_sync_latency_2_dst_cycles() -> None:
@@ -219,7 +260,7 @@ def test_sync_latency_2_dst_cycles() -> None:
     check = (
         "sync0_q <= token_i",
         "sync1_q <= sync0_q",
-        "token_o = sync1_q",
+        "token_o = disable_i ? 1'b0 : sync1_q",
     )
     from sva2rtl.ast_importer import import_assertion as ia  # noqa: F811
     from sva2rtl.composer import compose  # noqa: F811

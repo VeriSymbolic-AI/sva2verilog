@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 from pathlib import Path
 
 import pytest
@@ -25,6 +26,44 @@ from tests.differential_cases import (
     stimulus_traces,
 )
 from tests.differential_reference import SourceBoolExpr, SourceReferenceSpec
+
+
+def test_source_reference_has_no_production_oracle_dependency() -> None:
+    source_path = Path(__file__).with_name("differential_reference.py")
+    tree = ast.parse(source_path.read_text(encoding="utf-8"))
+    imports = {
+        node.module
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom) and node.module is not None
+    }
+
+    assert "sva2rtl.behavioral_oracle" not in imports
+
+
+@pytest.mark.parametrize(
+    ("kind", "values", "expected"),
+    [
+        ("rose", (False, True), (False, True)),
+        ("fell", (True, False), (False, True)),
+        ("stable", (False, False), (True, True)),
+        ("changed", (False, True), (False, True)),
+    ],
+)
+def test_source_reference_sampled_functions(
+    kind: str,
+    values: tuple[bool, bool],
+    expected: tuple[bool, bool],
+) -> None:
+    spec = SourceReferenceSpec(kind, SourceBoolExpr.signal("a"))
+    case = make_generated_case(spec.render(), ("sampled",), ("a",), source_reference=spec)
+    stimulus = [
+        {"start": True, "a": values[0]},
+        {"start": True, "a": values[1]},
+    ]
+
+    trace = run_oracle_trace(case, stimulus)
+
+    assert tuple(cycle.pass_value for cycle in trace) == expected
 
 
 def test_deterministic_stimulus_drives_start_and_signals() -> None:
@@ -93,6 +132,61 @@ def test_source_reference_models_boolean_or_without_checker_ir() -> None:
     assert trace[1].fail is False
 
 
+def test_source_reference_models_full_checker_contract() -> None:
+    """Contract state is sticky across disable and starts before antecedent match."""
+
+    a = SourceBoolExpr.signal("a")
+    spec = SourceReferenceSpec("implication_overlap", a, a)
+    case = make_generated_case(
+        spec.render(),
+        ("implication_overlap",),
+        ("a",),
+        source_reference=spec,
+    )
+    stimulus = [
+        {"start": True, "a": False},
+        {"start": False, "a": False, "disable_i": True},
+        {"start": False, "a": False, "disable_i": False},
+    ]
+
+    trace = run_oracle_trace(case, stimulus)
+
+    assert [row.attempt_fired for row in trace] == [False, True, True]
+    assert [row.disabled_o for row in trace] == [False, True, False]
+
+
+def test_find_trace_mismatch_compares_contract_outputs() -> None:
+    case = make_generated_case("a", ("bool",), ("a",))
+    stimulus = deterministic_stimulus(case)
+    oracle = [
+        CycleObservation(
+            cycle=0,
+            active=False,
+            pass_value=False,
+            fail=False,
+            attempt_fired=True,
+            disabled_o=False,
+            backend="oracle",
+        )
+    ]
+    actual = [
+        CycleObservation(
+            cycle=0,
+            active=False,
+            pass_value=False,
+            fail=False,
+            attempt_fired=False,
+            disabled_o=False,
+            backend="unit",
+        )
+    ]
+
+    mismatch = find_trace_mismatch(case, stimulus, oracle, actual, backend="unit")
+
+    assert mismatch is not None
+    assert mismatch.signal == "attempt_fired"
+
+
 @requires_slang
 def test_run_oracle_trace_preserves_cycle_order(tmp_path: Path) -> None:
     case = example_generated_cases()[0]
@@ -112,9 +206,7 @@ def test_assert_traces_match_passes_for_identical_trace() -> None:
     oracle = [
         CycleObservation(cycle=0, active=False, pass_value=False, fail=False, backend="oracle")
     ]
-    actual = [
-        CycleObservation(cycle=0, active=False, pass_value=False, fail=False, backend="unit")
-    ]
+    actual = [CycleObservation(cycle=0, active=False, pass_value=False, fail=False, backend="unit")]
 
     assert_traces_match(case, stimulus, oracle, actual, backend="unit")
 
@@ -125,9 +217,7 @@ def test_find_trace_mismatch_reports_value_mismatch() -> None:
     oracle = [
         CycleObservation(cycle=0, active=True, pass_value=False, fail=False, backend="oracle")
     ]
-    actual = [
-        CycleObservation(cycle=0, active=False, pass_value=False, fail=False, backend="unit")
-    ]
+    actual = [CycleObservation(cycle=0, active=False, pass_value=False, fail=False, backend="unit")]
 
     mismatch = find_trace_mismatch(case, stimulus, oracle, actual, backend="unit")
 
@@ -157,9 +247,7 @@ def test_find_trace_mismatch_reports_missing_cycle() -> None:
 def test_find_trace_mismatch_reports_extra_cycle() -> None:
     case = make_generated_case("a", ("bool",), ("a",))
     stimulus = deterministic_stimulus(case)
-    actual = [
-        CycleObservation(cycle=0, active=False, pass_value=False, fail=False, backend="unit")
-    ]
+    actual = [CycleObservation(cycle=0, active=False, pass_value=False, fail=False, backend="unit")]
 
     mismatch = find_trace_mismatch(case, stimulus, [], actual, backend="unit")
 
@@ -174,9 +262,7 @@ def test_mismatch_payload_is_serializable() -> None:
     oracle = [
         CycleObservation(cycle=0, active=True, pass_value=False, fail=False, backend="oracle")
     ]
-    actual = [
-        CycleObservation(cycle=0, active=False, pass_value=False, fail=False, backend="unit")
-    ]
+    actual = [CycleObservation(cycle=0, active=False, pass_value=False, fail=False, backend="unit")]
 
     mismatch = find_trace_mismatch(case, stimulus, oracle, actual, backend="unit")
 

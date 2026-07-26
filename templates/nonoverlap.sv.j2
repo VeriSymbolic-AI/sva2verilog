@@ -61,7 +61,7 @@ module {{ module_name }} #(
 {% if bv_width | int == 1 %}
     // ── HARDEN-01: attempt_fired_q never cleared by disable_i ──────────
     {{ wire_type(verilog_mode) }} attempt_fired_q;
-{{ attempt_fired_logic(verilog_mode, clock_edge, clock_signal, "ant_pass_w") }}
+{{ attempt_fired_logic(verilog_mode, clock_edge, clock_signal, "start") }}
 
     // ── Output assignments (|=> single-cycle consequent) ──────────────────────
     // con_start_w = ant_pass_w, so con_pass_w / con_fail_w already encode
@@ -108,7 +108,7 @@ module {{ module_name }} #(
 
     // ── HARDEN-01: attempt_fired_q never cleared by disable_i ──────────
     {{ wire_type(verilog_mode) }} attempt_fired_q;
-{{ attempt_fired_logic(verilog_mode, clock_edge, clock_signal, "ant_pass_w") }}
+{{ attempt_fired_logic(verilog_mode, clock_edge, clock_signal, "start") }}
 
     assign active        = disable_i ? 1'b0 : (overflow_flag_q ? 1'b0 : (ant_active_w | con_active_w | (|bv_q)));
     assign pass          = disable_i ? 1'b0 : (overflow_flag_q ? 1'b0 : (bv_q[BV_WIDTH-1] & con_pass_w));

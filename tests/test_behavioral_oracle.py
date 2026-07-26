@@ -433,6 +433,18 @@ def test_oracle_disable_returns_all_zero() -> None:
     assert not out_dis["overflow"], "disable: overflow must be 0"
 
 
+def test_oracle_disable_preserves_sticky_attempt_evidence() -> None:
+    """disable_i aborts state but cannot erase evidence that an attempt occurred."""
+
+    sim = SVABehavioralSim("delay_fixed", {"delay_min": 2, "delay_max": 2})
+    sim.tick({"start": True})
+    assert sim.attempt_fired is True
+
+    sim.tick({"start": False, "disable": True})
+
+    assert sim.attempt_fired is True
+
+
 def test_oracle_disable_clears_delay_state() -> None:
     """TEST-03: after disable=True, delay state is cleared — no late pass fires.
 

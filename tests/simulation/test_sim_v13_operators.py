@@ -23,7 +23,7 @@ from sva2rtl.ast_importer import import_assertion
 from sva2rtl.behavioral_oracle import simulate_checker_hierarchy
 from sva2rtl.composer import compose
 from sva2rtl.emitter import emit_all
-from sva2rtl.ir import CheckerNode
+from sva2rtl.ir import BoolExpr, CheckerNode, ClockSpec, SeqConcat, SeqOr, SourceLoc
 from tests.simulation.tb_generator import (
     extra_inputs_from_checker,
     generate_testbench,
@@ -39,6 +39,26 @@ def _build_checker(name: str) -> CheckerNode:
     ast = json.loads((_FIXTURES / f"v13_{name}.json").read_text(encoding="utf-8"))
     node, clock, text, label = import_assertion(ast)
     return compose(node, clock, label, text)
+
+
+def _build_multicycle_or(*, delayed_on_left: bool = True) -> CheckerNode:
+    loc = SourceLoc("seq_or_multicycle.sv", 1, 1)
+    delayed_left = SeqConcat(
+        elements=(
+            BoolExpr(text="a", source_loc=loc),
+            BoolExpr(text="b", source_loc=loc),
+        ),
+        delays=((3, 3),),
+        source_loc=loc,
+    )
+    short_branch = BoolExpr(text="c", source_loc=loc)
+    node = SeqOr(
+        left=delayed_left if delayed_on_left else short_branch,
+        right=short_branch if delayed_on_left else delayed_left,
+        source_loc=loc,
+    )
+    clock = ClockSpec(edge="posedge", signal="clk", source_loc=loc)
+    return compose(node, clock, "multicycle_or", "(a ##3 b) or c")
 
 
 def _run_stimulus(
@@ -92,6 +112,7 @@ def _count_events(results: list[dict[str, bool]]) -> dict[str, int]:
 # prop_or — RTL simulation + oracle event pattern cross-check
 # ═══════════════════════════════════════════════════════════════════════════════
 
+
 class TestSeqOrRTL:
     def test_both_pass_rtl(self, tmp_path: Path, simulator: str) -> None:
         checker = _build_checker("or_seq")
@@ -120,10 +141,67 @@ class TestSeqOrRTL:
         oracle_out = simulate_checker_hierarchy(checker, stimulus)
         assert _count_events(oracle_out)["pass"] >= _count_events(rtl_out)["pass"]
 
+    @pytest.mark.parametrize("delayed_on_left", [True, False])
+    def test_early_failure_is_held_until_delayed_branch_passes(
+        self, delayed_on_left: bool, tmp_path: Path, simulator: str
+    ) -> None:
+        checker = _build_multicycle_or(delayed_on_left=delayed_on_left)
+        stimulus = _pad(
+            [
+                {"start": True, "a": True, "b": False, "c": False},
+                {"start": False, "a": False, "b": False, "c": False},
+                {"start": False, "a": False, "b": True, "c": False},
+                {"start": False, "a": False, "b": True, "c": False},
+                {"start": False, "a": False, "b": True, "c": False},
+            ],
+            8,
+        )
+
+        rtl_out = _run_stimulus(checker, stimulus, tmp_path, simulator)
+
+        assert _count_events(rtl_out)["pass"] == 1
+        assert _count_events(rtl_out)["fail"] == 0
+
+    @pytest.mark.parametrize("delayed_on_left", [True, False])
+    def test_delayed_failure_completes_after_early_sibling_failure(
+        self, delayed_on_left: bool, tmp_path: Path, simulator: str
+    ) -> None:
+        checker = _build_multicycle_or(delayed_on_left=delayed_on_left)
+        stimulus = _pad([{"start": True, "a": True, "b": False, "c": False}], 10)
+
+        rtl_out = _run_stimulus(checker, stimulus, tmp_path, simulator)
+
+        assert _count_events(rtl_out)["pass"] == 0
+        assert _count_events(rtl_out)["fail"] == 1
+
+    def test_disable_clears_held_failure_before_next_attempt(
+        self, tmp_path: Path, simulator: str
+    ) -> None:
+        checker = _build_multicycle_or()
+        stimulus = [
+            {"start": True, "a": True, "b": False, "c": False},
+            {"start": False, "a": False, "b": False, "c": False},
+            {
+                "start": False,
+                "a": False,
+                "b": False,
+                "c": False,
+                "disable_i": True,
+            },
+            {"start": True, "a": False, "b": False, "c": True},
+            *_pad([], 6),
+        ]
+
+        rtl_out = _run_stimulus(checker, stimulus, tmp_path, simulator)
+
+        assert _count_events(rtl_out)["pass"] == 1
+        assert _count_events(rtl_out)["fail"] == 0
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # prop_and — latency-aware matching (RTL verification)
 # ═══════════════════════════════════════════════════════════════════════════════
+
 
 class TestSeqAndRTL:
     def test_both_pass_rtl(self, tmp_path: Path, simulator: str) -> None:
@@ -150,6 +228,7 @@ class TestSeqAndRTL:
 # prop_intersect
 # ═══════════════════════════════════════════════════════════════════════════════
 
+
 class TestSeqIntersectRTL:
     def test_both_pass_rtl(self, tmp_path: Path, simulator: str) -> None:
         checker = _build_checker("intersect_seq")
@@ -167,6 +246,7 @@ class TestSeqIntersectRTL:
 # ═══════════════════════════════════════════════════════════════════════════════
 # prop_not
 # ═══════════════════════════════════════════════════════════════════════════════
+
 
 class TestPropNotRTL:
     def test_not_inverts_pass(self, tmp_path: Path, simulator: str) -> None:
@@ -188,14 +268,18 @@ class TestPropNotRTL:
 # prop_if_else
 # ═══════════════════════════════════════════════════════════════════════════════
 
+
 class TestPropIfElseRTL:
     def test_true_branch_rtl(self, tmp_path: Path, simulator: str) -> None:
         checker = _build_checker("if_else_prop")
         # Hold start + sel + a = 1 for 2 cycles to flush NBA pipeline
-        stimulus = _pad([
-            {"start": True,  "sel": True,  "a": True,  "b": False},
-            {"start": True,  "sel": True,  "a": True,  "b": False},
-        ], 12)
+        stimulus = _pad(
+            [
+                {"start": True, "sel": True, "a": True, "b": False},
+                {"start": True, "sel": True, "a": True, "b": False},
+            ],
+            12,
+        )
         rtl_out = _run_stimulus(checker, stimulus, tmp_path, simulator)
         assert _count_events(rtl_out)["pass"] > 0
 
@@ -209,6 +293,7 @@ class TestPropIfElseRTL:
 # ═══════════════════════════════════════════════════════════════════════════════
 # prop_throughout — cond re-evaluation during body (key temporal composition test)
 # ═══════════════════════════════════════════════════════════════════════════════
+
 
 class TestSeqThroughoutRTL:
     def test_en_holds_pass(self, tmp_path: Path, simulator: str) -> None:

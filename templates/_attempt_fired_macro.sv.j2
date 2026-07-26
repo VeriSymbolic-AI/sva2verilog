@@ -10,7 +10,7 @@
      verilog_mode   - boolean, True for V2001
      clock_edge     - e.g. "posedge"
      clock_signal   - e.g. "clk"
-     trigger_signal - "start" for simple templates, "ant_pass_w" for bit-vector
+     trigger_signal - the top-level "start" contract signal
 
    Emits a standalone always block for attempt_fired_q.
    Only cleared by rst_n — NOT by disable_i (HARDEN-01 fix).

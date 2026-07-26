@@ -1,16 +1,16 @@
 # Industrial Validation Gap Plan
 
-> Date: 2026-07-22
-> Scope: v1.7.0 post-release hardening worktree based on `8e7af87`
+> Date: 2026-07-26
+> Scope: v1.7.0 post-release hardening worktree based on `27ebefb`
 > Reader: future maintainer, external reviewer, or industrial user evaluating trust
 > Post-read action: decide and execute the next validation work needed before calling the project industrial-grade
 
 ## Executive Summary
 
 sva2rtl has a strong validation base, but it should not yet be described as fully
-industrial-grade. The project has 1344 collected tests, a recent full local
-result of 1341 passed, 2 skipped, 0 failed, 1 xfailed on both Python 3.12 and
-3.13, a historical 62 non-circular BMC
+industrial-grade. The current Python 3.12 worktree collects 1468 tests and has a
+fresh full Icarus result of 1466 passed, 1 skipped, 0 failed, and 1 xfailed, plus
+a historical 62 non-circular BMC
 equivalence baseline, and Phase 10 local formal-depth targets with 56 BMC or
 contract tests plus 10 k-induction proof targets (+1 xfail liveness boundary). Phase 11 adds local Yosys
 generated-RTL smoke evidence and CI wiring for generated-module Verilator lint.
@@ -32,29 +32,36 @@ dimensions.
 Current project state:
 
 - Version state: v1.7.0 plus current evidence chain hardening.
-- Local branch state: release-hardening changes are uncommitted on top of
-  `8e7af87`; they are not yet a remote evidence baseline.
+- Local branch state: deep-audit remediation changes are uncommitted on top of
+  `27ebefb`; they are not yet a remote evidence baseline.
 - Historical remote state: GitHub Actions run
   [28931676000](https://github.com/VeriSymbolic-AI/sva2verilog/actions/runs/28931676000)
   completed successfully for commit
   `674cea1adf15dade7b664b76912b015c8da04614`.
-- Test collection: 1344 pytest tests collected.
-- Recent full local result: 1341 passed, 2 skipped, 0 failed, 1 xfailed on both
-  Python 3.12 and 3.13.
-- Local Verilator result: pinned 5.028 executes 141 simulation tests on each
-  Python version; one intentionally non-selected case skips.
+- Test collection: 1468 pytest tests collected on Python 3.12.
+- Recent full local result: 1466 passed, 1 skipped, 0 failed, and 1 xfailed on
+  the complete Icarus/default axis; branch coverage is 86.31% against an 82%
+  aggregate gate plus critical-module floors.
+- Local Verilator result: pinned 5.028 passes 169 simulation tests; one
+  Icarus-specific Verilog-2001 compile check skips by design.
 - Generated RTL gates: local Yosys synthesis and strict Verilator lint pass all
-  107 representative cases.
+  107 synthesis/lint cases, plus 26 representative top-contract checks, for
+  133 passed.
 - Simulation coverage: Icarus and Verilator are green locally; same-commit
   remote Ubuntu/macOS confirmation remains required.
-- Formal coverage: historical 62 non-circular BMC equivalence checks; Phase 10
-  local target files currently record 56 BMC/contract tests and 10 k-induction
-  proof targets (+1 xfail liveness boundary).
+- Formal coverage: the current Full Formal file set records 125 passed and one
+  documented liveness xfail; historical evidence includes 62 non-circular BMC
+  equivalence checks and Phase 10 bounded/full-contract/k-induction slices.
 - Static quality: ruff and mypy strict were green in the latest verification run.
+- Python compatibility and distribution: Python 3.14 passes 1240 broad
+  non-simulation tests with one documented xfail; a built wheel and restricted
+  sdist pass a clean out-of-tree install, CLI compile, and Icarus smoke.
 - CI: historical baseline run `28931676000` is green. Newer runs exposed
   Verilator source-build dependency drift, a flaky reused-wrapper differential
   harness, and serialized NFA formal timeouts. All three are fixed locally, but
-  current-commit remote reruns remain required.
+  current-commit remote reruns remain required. The latest scheduled nightly
+  run `30191482973` did not execute because GitHub reported an account
+  billing/spending-limit block.
 
 Recent hardening already completed:
 
@@ -81,6 +88,12 @@ Recent hardening already completed:
 - Unified the pinned Verilator installer across CI/nightly, pinned OSS CAD Suite
   for formal jobs, isolated NFA implication shards, and made each Verilator
   differential build use a fresh directory.
+- Restored the standard checker contract on the multi-clock top and corrected
+  implication `attempt_fired` so it records `start`, not antecedent success.
+- Extended source differential comparison to `attempt_fired` and `disabled_o`,
+  and added external `disable_i` to the randomized stimulus surface.
+- Added JUnit execution budgets to CI/nightly/formal jobs so unexpectedly
+  skipped or missing tests cannot silently produce a green result.
 
 ## Trust Model
 
@@ -287,9 +300,11 @@ Done when:
   they are BMC-only.
 - The support matrix reports proof mode and depth per construct.
 
-Phase 10 closure evidence:
+Phase 10 closure evidence (historical), followed by later P2 expansion:
 
-- `tests/test_formal_kinduction.py` now has 8 passing proof targets.
+- Phase 10 closed with 8 passing proof targets; the current
+  `tests/test_formal_kinduction.py` suite has 10 passing targets plus one strict
+  bounded-liveness xfail.
 - The support matrix distinguishes k-induction-proven slices from BMC-only
   complex families and trusted boundaries.
 - Liveness, complex NFA composition, `disable iff` full-contract bundles, and
@@ -302,11 +317,21 @@ Multi-clock support is currently a split-and-synchronize subset with a trusted
 checks. That is acceptable only if documented as a trusted CDC component, not as
 full formal equivalence.
 
+The boundary is stronger than “metastability is unproven”: the current 2-DFF is
+a level synchronizer carrying a one-cycle token. A narrow source pulse can be
+missed when the destination clock is slower or unfavorably phased, and multiple
+events can coalesce. The compiler currently enforces neither a minimum pulse
+width nor an event-rate assumption. Top-level start/disable/anti-vacuity
+contract wiring and synchronous disable clearing are fixed and tested, but the
+CDC transfer protocol itself is not closed.
+
 Fix:
 
 - Resolve documentation contradiction between multi-clock support and single-clock
   limitation statements.
 - Add asynchronous clock-ratio simulation tests for the supported multi-clock forms.
+- Replace the raw pulse crossing with an acknowledged handshake or a toggle
+  protocol with explicit event-rate/overflow semantics.
 - Add metastability-injection smoke tests where META_ENABLE is available.
 - Keep full CDC/metastability proof outside scope and document it clearly.
 
@@ -315,6 +340,8 @@ Done when:
 - Multi-clock docs say exactly what is supported, what is trusted, and what is
   excluded.
 - CI has at least one dynamic multi-clock simulation.
+- The CDC protocol has a falsifiable source-event-to-destination-event contract
+  and no silent event loss within its published rate bound.
 
 ### P2: Medium-Priority Trust Improvements
 
@@ -348,8 +375,12 @@ Current Phase 12 evidence:
 - The deterministic catalog has 10 operator families, the fast Hypothesis path
   has 10 examples, and each seeded slow backend sweep has 64 examples over
   8-24 cycles, delay up to 8, repetition up to 6, and boolean depth up to 5.
-- Local current-worktree evidence: Icarus fast 12 passed and slow 1 passed;
-  Verilator fast 12 passed and slow 1 passed, with no mismatches.
+- Live traces compare `active`, `pass`, `fail`, `attempt_fired`, `disabled_o`,
+  and optional `overflow`; external `disable_i` is randomized instead of
+  leaving `disabled_o` at a constant zero.
+- Local current-worktree evidence: Icarus fast 16 passed and slow 1 passed;
+  Verilator fast 16 passed and slow 1 passed, with no mismatches. Each slow
+  test contains 64 Hypothesis examples.
 - `tests/differential/regressions/repetition_overlapping_start.json` is a
   sanitized promoted replay from a real discovered mismatch, not an empty
   placeholder path.
@@ -387,16 +418,23 @@ Done when:
 - Critical modules have explicit coverage targets.
 - Mutation score is high enough to catch common timing, gating, and polarity bugs.
 
-Current local evidence (2026-07-22):
+Current local evidence (2026-07-26):
 
 - `bool_semantics.py`: 15/15 killed (100%).
-- `behavioral_oracle.py`: 131/150 killed (87.3%).
-- `composer.py`: 53/55 killed (96.4%); the two survivors are equivalent
-  `hi > 0` guard mutations over the accepted bounded input domain.
-- `ast_importer.py`: 116/116 killed (100%).
-- Reviewed RTL template mutations: 5/5 killed, covering delay upper bounds,
-  repetition counter state, counter width, non-overlap consequent wiring, and
-  sequence-OR failure polarity.
+- `behavioral_oracle.py`: 112/130 covered, valid mutants killed (86.2%);
+  19 uncovered candidates are reported separately.
+- `composer.py`: 41/48 covered, valid mutants killed (85.4%); 4 uncovered
+  candidates are reported separately.
+- `ast_importer.py`: 92/108 covered, valid mutants killed (85.2%); 8 uncovered
+  candidates are reported separately.
+- Reviewed RTL template mutations: 11/11 killed, covering delay upper bounds,
+  repetition counter state, counter width, non-overlap consequent wiring,
+  sequence-OR failure polarity, both sequence-OR failure-retention latches,
+  multi-clock start wiring, multi-clock disable propagation, and implication
+  attempt accounting.
+- Syntax-invalid mutants are excluded rather than counted as killed. Mutation
+  candidates on lines the configured baseline never executes are also excluded
+  from the percentage and exposed as explicit uncovered debt.
 - The scheduled mutation job runs all four Python modules separately at the
   85% threshold and the RTL template suite at a strict 100% threshold.
 

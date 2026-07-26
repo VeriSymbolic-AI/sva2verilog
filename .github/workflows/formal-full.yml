@@ -17,26 +17,33 @@ jobs:
         include:
           - suite: optimizer-and-templates
             files: tests/test_formal_passes.py tests/test_formal_templates.py
+            max-skipped: 0
           - suite: sva-core
             files: tests/test_formal_sva_equiv.py
+            max-skipped: 0
           - suite: nfa-composition
             files: tests/test_v151_nfa_bmc.py
+            max-skipped: 0
           - suite: nfa-overlap-implication
             files: tests/test_v151_p2_bmc.py::TestOverlapImplNfaMiter
+            max-skipped: 0
           - suite: nfa-nonoverlap-implication
             files: tests/test_v151_p2_bmc.py::TestNonoverlapImplNfaMiter
+            max-skipped: 0
           - suite: kinduction
             files: tests/test_formal_kinduction.py
+            # One strict xfail documents the bounded-liveness induction boundary.
+            max-skipped: 1
 
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: astral-sh/setup-uv@e4db8464a088ece1b920f60402e813ea4de65b8f # v4
 
       - name: Install Python
         run: uv python install 3.12
 
       - name: Install dependencies
-        run: uv sync --dev
+        run: uv sync --dev --frozen
 
       # Pin one coherent YosysHQ toolchain instead of mixing Ubuntu's Yosys
       # package with an unpinned SymbiYosys checkout.
@@ -53,15 +60,17 @@ jobs:
           z3 --version
 
       - name: Install slang
-        run: |
-          SLANG_VERSION="v11.0"
-          wget -q "https://github.com/MikePopoloski/slang/releases/download/${SLANG_VERSION}/slang-linux-x86_64.tar.gz"
-          tar xzf slang-linux-x86_64.tar.gz
-          sudo mv slang /usr/local/bin/slang
-          slang --version
+        run: bash tools/ci/install_slang.sh
 
       - name: Run full formal suite shard
-        run: uv run pytest ${{ matrix.files }} -v --timeout=600
+        run: >
+          uv run pytest ${{ matrix.files }} -v --timeout=600
+          --junitxml=formal-results.xml
         env:
           SLANG_PATH: /usr/local/bin/slang
           SVA2RTL_FORMAL_PROVE_TIMEOUT: "90"
+
+      - name: Enforce formal shard execution budget
+        run: >
+          uv run python tools/ci/check_junit.py formal-results.xml
+          --min-passed 1 --max-skipped ${{ matrix.max-skipped }}

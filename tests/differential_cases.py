@@ -76,7 +76,9 @@ class DifferentialBudget:
     min_trace_length: int = 8
     max_trace_length: int = 24
     max_expr_depth: int = 5
-    max_temporal_depth: int = 3
+    # The v1 source generator supports one temporal operator around boolean
+    # leaves.  Keep the budget honest until recursive temporal specs exist.
+    max_temporal_depth: int = 1
     max_delay: int = 8
     max_range_width: int = 4
     max_repeat: int = 6
@@ -188,6 +190,8 @@ class CycleObservation:
     active: bool
     pass_value: bool
     fail: bool
+    attempt_fired: bool | None = None
+    disabled_o: bool | None = None
     overflow: bool | None = None
     backend: str = "oracle"
 
@@ -199,6 +203,8 @@ class CycleObservation:
             "active": self.active,
             "pass": self.pass_value,
             "fail": self.fail,
+            "attempt_fired": self.attempt_fired,
+            "disabled_o": self.disabled_o,
             "overflow": self.overflow,
             "backend": self.backend,
         }
@@ -389,9 +395,13 @@ def example_generated_cases() -> tuple[GeneratedSvaCase, ...]:
             ("bool", "structured_bool"),
         ),
         (SourceReferenceSpec("rose", a), ("sampled",)),
+        (SourceReferenceSpec("fell", a), ("sampled",)),
+        (SourceReferenceSpec("stable", a), ("sampled",)),
+        (SourceReferenceSpec("changed", a), ("sampled",)),
         (SourceReferenceSpec("past", a, depth=1), ("past",)),
         (SourceReferenceSpec("delay", a, b, minimum=1, maximum=1), ("delay_fixed",)),
         (SourceReferenceSpec("delay", a, b, minimum=1, maximum=2), ("delay_range",)),
+        (SourceReferenceSpec("delay", a, b, minimum=8, maximum=8), ("delay_fixed",)),
         (SourceReferenceSpec("implication_overlap", a, b), ("implication_overlap",)),
         (
             SourceReferenceSpec("implication_nonoverlap", a, b),
@@ -465,73 +475,79 @@ def generated_sva_cases(
     bool_expr = draw(_bool_exprs(signals, budget.max_expr_depth))
     first = SourceBoolExpr.signal(signals[0])
     second = SourceBoolExpr.signal(signals[1] if len(signals) > 1 else signals[0])
-    delay_hi = max(1, min(budget.max_delay, 3))
+    delay_hi = max(1, budget.max_delay)
     range_hi = max(1, min(delay_hi, budget.max_range_width + 1))
     repeat_hi = max(2, min(budget.max_repeat, 6))
 
     families = [
         ("bool", SourceReferenceSpec("bool", bool_expr), ("bool", "structured_bool")),
-        ("sampled", SourceReferenceSpec("rose", first), ("sampled",)),
-        (
-            "past",
-            SourceReferenceSpec(
-                "past",
-                first,
-                depth=draw(
-                    st.integers(min_value=1, max_value=max(1, min(4, budget.max_delay)))
-                ),
-            ),
-            ("past",),
-        ),
-        (
-            "delay_fixed",
-            SourceReferenceSpec(
-                "delay",
-                first,
-                second,
-                minimum=(delay := draw(st.integers(min_value=1, max_value=delay_hi))),
-                maximum=delay,
-            ),
-            ("delay_fixed",),
-        ),
-        (
-            "delay_range",
-            SourceReferenceSpec("delay", first, second, minimum=1, maximum=range_hi),
-            ("delay_range",),
-        ),
-        (
-            "overlap",
-            SourceReferenceSpec("implication_overlap", first, second),
-            ("implication_overlap",),
-        ),
-        (
-            "nonoverlap",
-            SourceReferenceSpec("implication_nonoverlap", first, second),
-            ("implication_nonoverlap",),
-        ),
-        (
-            "rep_fixed",
-            SourceReferenceSpec(
-                "repetition",
-                first,
-                minimum=(repeat := draw(st.integers(min_value=2, max_value=repeat_hi))),
-                maximum=repeat,
-            ),
-            ("rep_consecutive_fixed",),
-        ),
-        (
-            "rep_range",
-            SourceReferenceSpec("repetition", first, minimum=1, maximum=repeat_hi),
-            ("rep_consecutive_range",),
-        ),
     ]
+    if budget.max_temporal_depth >= 1:
+        families.extend(
+            [
+                ("rose", SourceReferenceSpec("rose", first), ("sampled",)),
+                ("fell", SourceReferenceSpec("fell", first), ("sampled",)),
+                ("stable", SourceReferenceSpec("stable", first), ("sampled",)),
+                ("changed", SourceReferenceSpec("changed", first), ("sampled",)),
+                (
+                    "past",
+                    SourceReferenceSpec(
+                        "past",
+                        first,
+                        depth=draw(
+                            st.integers(min_value=1, max_value=max(1, min(4, budget.max_delay)))
+                        ),
+                    ),
+                    ("past",),
+                ),
+                (
+                    "delay_fixed",
+                    SourceReferenceSpec(
+                        "delay",
+                        first,
+                        second,
+                        minimum=(delay := draw(st.integers(min_value=1, max_value=delay_hi))),
+                        maximum=delay,
+                    ),
+                    ("delay_fixed",),
+                ),
+                (
+                    "delay_range",
+                    SourceReferenceSpec("delay", first, second, minimum=1, maximum=range_hi),
+                    ("delay_range",),
+                ),
+                (
+                    "overlap",
+                    SourceReferenceSpec("implication_overlap", first, second),
+                    ("implication_overlap",),
+                ),
+                (
+                    "nonoverlap",
+                    SourceReferenceSpec("implication_nonoverlap", first, second),
+                    ("implication_nonoverlap",),
+                ),
+                (
+                    "rep_fixed",
+                    SourceReferenceSpec(
+                        "repetition",
+                        first,
+                        minimum=(repeat := draw(st.integers(min_value=2, max_value=repeat_hi))),
+                        maximum=repeat,
+                    ),
+                    ("rep_consecutive_fixed",),
+                ),
+                (
+                    "rep_range",
+                    SourceReferenceSpec("repetition", first, minimum=1, maximum=repeat_hi),
+                    ("rep_consecutive_range",),
+                ),
+            ]
+        )
     if budget.include_disable:
         families.append(
             (
                 "disable",
-                SourceReferenceSpec(
-                    "bool", bool_expr, disable=SourceBoolExpr.signal("dis")
-                ),
+                SourceReferenceSpec("bool", bool_expr, disable=SourceBoolExpr.signal("dis")),
                 ("disable_iff", "bool"),
             )
         )
@@ -619,6 +635,8 @@ def normalize_observation(
         active=bool(raw["active"]),
         pass_value=bool(raw["pass"]),
         fail=bool(raw["fail"]),
+        attempt_fired=bool(raw["attempt_fired"]) if "attempt_fired" in raw else None,
+        disabled_o=bool(raw["disabled_o"]) if "disabled_o" in raw else None,
         overflow=bool(raw["overflow"]) if "overflow" in raw else None,
         backend=backend,
     )
@@ -656,7 +674,7 @@ def run_simulator_trace(
 
     modules = emit_all(checker)
     sv_sources = list(modules.values())
-    extra_inputs = list(stimulus_input_names_from_checker(checker))
+    extra_inputs = list(extra_inputs_from_checker(checker))
     has_overflow_flag = checker_has_top_overflow(checker)
     clock_signal = checker.params.get("clock_signal", "clk")
     tb_code = generate_testbench(
@@ -665,6 +683,7 @@ def run_simulator_trace(
         extra_inputs,
         stimulus,
         has_overflow_flag=has_overflow_flag,
+        capture_contract=True,
     )
     raw_trace = run_simulation(
         checker.module_name,
@@ -672,6 +691,7 @@ def run_simulator_trace(
         tb_code,
         work_dir=tmp_path,
         has_overflow_flag=has_overflow_flag,
+        capture_contract=True,
         simulator=backend,
         stimulus=stimulus,
         extra_inputs=extra_inputs,
@@ -684,9 +704,9 @@ def run_simulator_trace(
 
 
 def stimulus_input_names_from_checker(checker: CheckerNode) -> tuple[str, ...]:
-    """Return simulator input names from checker metadata."""
+    """Return randomized checker inputs, including the external disable port."""
 
-    return tuple(dict.fromkeys(extra_inputs_from_checker(checker)))
+    return tuple(dict.fromkeys((*extra_inputs_from_checker(checker), "disable_i")))
 
 
 def find_trace_mismatch(
@@ -732,10 +752,24 @@ def find_trace_mismatch(
 
         oracle_obs = oracle[cycle]
         actual_obs = actual[cycle]
-        for signal in ("active", "pass_value", "fail", "overflow"):
+        for signal in (
+            "active",
+            "pass_value",
+            "fail",
+            "attempt_fired",
+            "disabled_o",
+            "overflow",
+        ):
             expected = getattr(oracle_obs, signal)
             observed = getattr(actual_obs, signal)
             if signal == "overflow" and (expected is None or observed is None):
+                continue
+            if signal in {"attempt_fired", "disabled_o"} and (
+                expected is None or observed is None
+            ):
+                # Backward-compatible replay for schema-v1 artifacts that
+                # predate full-contract capture. New live traces always carry
+                # both fields and are compared below.
                 continue
             if expected != observed:
                 signal_name = "pass" if signal == "pass_value" else signal
@@ -889,15 +923,22 @@ def compile_generated_case(
         node, clock, original_text, label = selected
         normalized = normalize(node)
         if case.source_reference is not None:
-            expected_ir_kind = "DisableIff" if case.source_reference.disable else {
-                "bool": "BoolExpr",
-                "rose": "SignalFunc",
-                "past": "SignalFunc",
-                "delay": "SeqConcat",
-                "implication_overlap": "PropImplication",
-                "implication_nonoverlap": "PropImplication",
-                "repetition": "SeqRepetition",
-            }[case.source_reference.kind]
+            expected_ir_kind = (
+                "DisableIff"
+                if case.source_reference.disable
+                else {
+                    "bool": "BoolExpr",
+                    "rose": "SignalFunc",
+                    "fell": "SignalFunc",
+                    "stable": "SignalFunc",
+                    "changed": "SignalFunc",
+                    "past": "SignalFunc",
+                    "delay": "SeqConcat",
+                    "implication_overlap": "PropImplication",
+                    "implication_nonoverlap": "PropImplication",
+                    "repetition": "SeqRepetition",
+                }[case.source_reference.kind]
+            )
             actual_ir_kind = type(normalized).__name__
             if actual_ir_kind != expected_ir_kind:
                 raise AssertionError(

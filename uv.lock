@@ -730,7 +730,7 @@ wheels = [
 
 [[package]]
 name = "sva2rtl"
-version = "1.5.2"
+version = "1.7.0"
 source = { editable = "." }
 dependencies = [
     { name = "click" },

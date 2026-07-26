@@ -16,7 +16,7 @@ def test_all_template_mutation_sites_are_exact_and_unique() -> None:
 
 @pytest.mark.parametrize(
     ("total", "killed", "expected"),
-    [(0, 0, 1), (5, 4, 1), (5, 5, 0)],
+    [(0, 0, 1), (11, 10, 1), (11, 11, 0)],
 )
 def test_template_mutation_gate_requires_every_mutant_killed(
     total: int,

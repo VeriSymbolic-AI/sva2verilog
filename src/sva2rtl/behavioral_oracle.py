@@ -100,6 +100,12 @@ class SVABehavioralSim:
         self._ant_pass_delayed = False
         self._attempt_fired = False
 
+    @property
+    def attempt_fired(self) -> bool:
+        """Return whether this model has ever accepted an attempt since reset."""
+
+        return self._attempt_fired
+
     def tick(self, signals: dict[str, bool]) -> dict[str, bool]:
         """Advance the model by one clock cycle.
 
@@ -120,7 +126,9 @@ class SVABehavioralSim:
         """
         # ── Synchronous disable: mirrors disable_i in the RTL templates ──────
         if bool(signals.get("disable", False)):
+            attempt_fired = self._attempt_fired
             self.reset()
+            self._attempt_fired = attempt_fired
             return {"active": False, "pass": False, "fail": False, "overflow": False}
 
         if self._kind in ("delay_fixed", "delay_range"):
@@ -250,7 +258,7 @@ class SVABehavioralSim:
         elif old_running and sig:
             if old_count < rep_max:
                 self._rep_count = old_count + 1
-        elif old_running and not sig:
+        elif old_running:
             # Sequence broken — clear running
             self._rep_running = False
             self._rep_count = 0
@@ -857,9 +865,7 @@ class _HierarchicalSim:
             st["right_f"] = False
 
         pass_val = lhs["pass"] or rhs["pass"]
-        fail_val = (
-            lhs["fail"] and (rhs["fail"] or st["right_f"])
-        ) or (
+        fail_val = (lhs["fail"] and (rhs["fail"] or st["right_f"])) or (
             rhs["fail"] and (lhs["fail"] or st["left_f"])
         )
 

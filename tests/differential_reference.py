@@ -12,12 +12,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from sva2rtl.behavioral_oracle import SVABehavioralSim
-
 BoolKind = Literal["signal", "const", "not", "and", "or"]
 ReferenceKind = Literal[
     "bool",
     "rose",
+    "fell",
+    "stable",
+    "changed",
     "past",
     "delay",
     "implication_overlap",
@@ -157,6 +158,12 @@ class SourceReferenceSpec:
             return left
         if self.kind == "rose":
             return f"$rose({left})"
+        if self.kind == "fell":
+            return f"$fell({left})"
+        if self.kind == "stable":
+            return f"$stable({left})"
+        if self.kind == "changed":
+            return f"$changed({left})"
         if self.kind == "past":
             return f"$past({left}, {self.depth})"
         if self.kind == "delay":
@@ -172,9 +179,7 @@ class SourceReferenceSpec:
             op = "|->" if self.kind == "implication_overlap" else "|=>"
             return f"{left} {op} {self.right.render()}"
         repeat = (
-            str(self.minimum)
-            if self.minimum == self.maximum
-            else f"{self.minimum}:{self.maximum}"
+            str(self.minimum) if self.minimum == self.maximum else f"{self.minimum}:{self.maximum}"
         )
         # Keep a lexical separator before the repetition suffix.  Without it,
         # slang accepts the assertion but can reduce ``a[*N]`` to plain ``a``.
@@ -208,16 +213,12 @@ class SourceReferenceSpec:
         return cls(
             kind=payload["kind"],
             left=SourceBoolExpr.from_dict(payload["left"]),
-            right=(
-                SourceBoolExpr.from_dict(right_raw) if isinstance(right_raw, dict) else None
-            ),
+            right=(SourceBoolExpr.from_dict(right_raw) if isinstance(right_raw, dict) else None),
             minimum=int(payload.get("minimum", 0)),
             maximum=int(payload.get("maximum", 0)),
             depth=int(payload.get("depth", 1)),
             disable=(
-                SourceBoolExpr.from_dict(disable_raw)
-                if isinstance(disable_raw, dict)
-                else None
+                SourceBoolExpr.from_dict(disable_raw) if isinstance(disable_raw, dict) else None
             ),
         )
 
@@ -248,6 +249,121 @@ class _RegisteredBool:
         return output
 
 
+class _SampledReference:
+    """Independent bounded model for sampled-value system functions."""
+
+    def __init__(self, kind: ReferenceKind, depth: int) -> None:
+        self._kind = kind
+        self._depth = max(depth, 1)
+        self.reset()
+
+    def reset(self) -> None:
+        self._previous = False
+        self._history = [False] * self._depth
+
+    def tick(self, signal: bool, start: bool) -> dict[str, bool]:
+        if self._kind == "past":
+            truth = self._history[-1]
+            self._history = [signal, *self._history[:-1]]
+        else:
+            if self._kind == "rose":
+                truth = signal and not self._previous
+            elif self._kind == "fell":
+                truth = not signal and self._previous
+            elif self._kind == "stable":
+                truth = signal == self._previous
+            else:
+                assert self._kind == "changed"
+                truth = signal != self._previous
+            self._previous = signal
+        return {
+            "active": start,
+            "pass": start and truth,
+            "fail": start and not truth,
+            "overflow": False,
+        }
+
+
+class _DelayReference:
+    """Independent counter model for bounded ``##`` delay windows."""
+
+    def __init__(self, minimum: int, maximum: int) -> None:
+        self._minimum = minimum
+        self._maximum = maximum
+        self.reset()
+
+    def reset(self) -> None:
+        self._running = False
+        self._count = 0
+
+    def tick(self, start: bool) -> dict[str, bool]:
+        if self._minimum == 0 and self._maximum == 0:
+            return {
+                "active": start,
+                "pass": start,
+                "fail": False,
+                "overflow": False,
+            }
+
+        old_running = self._running
+        old_count = self._count
+        if start:
+            self._running = True
+            self._count = 0
+        elif old_running:
+            if old_count >= self._maximum:
+                self._running = False
+                self._count = 0
+            else:
+                self._count = old_count + 1
+
+        counter_min = max(self._minimum - 2, 0)
+        counter_max = max(self._maximum - 2, 0)
+        passes_now = start and self._minimum <= 1 <= self._maximum
+        passes_later = (
+            self._maximum >= 2 and old_running and counter_min <= old_count <= counter_max
+        )
+        return {
+            "active": old_running,
+            "pass": passes_now or passes_later,
+            "fail": False,
+            "overflow": False,
+        }
+
+
+class _RepetitionReference:
+    """Independent model for bounded consecutive repetition."""
+
+    def __init__(self, minimum: int, maximum: int) -> None:
+        self._minimum = minimum
+        self._maximum = maximum
+        self.reset()
+
+    def reset(self) -> None:
+        self._running = False
+        self._count = 0
+
+    def tick(self, signal: bool, start: bool) -> dict[str, bool]:
+        old_running = self._running
+        old_count = self._count
+        if start and signal:
+            self._running = True
+            self._count = 1
+        elif old_running and signal:
+            if old_count < self._maximum:
+                self._count = old_count + 1
+        elif old_running:
+            self._running = False
+            self._count = 0
+
+        return {
+            "active": old_running,
+            "pass": (old_running and signal and self._minimum <= old_count <= self._maximum),
+            "fail": old_running and not signal and old_count < self._minimum,
+            "overflow": False,
+        }
+
+
 class SourceReferenceRunner:
     """Stateful evaluator built solely from :class:`SourceReferenceSpec`."""
 
@@ -256,25 +372,29 @@ class SourceReferenceRunner:
         self._left = _RegisteredBool(spec.left)
         self._right = _RegisteredBool(spec.right) if spec.right is not None else None
         self._primitive = self._build_primitive(spec)
+        self._attempt_fired = False
 
     @staticmethod
-    def _build_primitive(spec: SourceReferenceSpec) -> SVABehavioralSim | None:
+    def _build_primitive(
+        spec: SourceReferenceSpec,
+    ) -> _DelayReference | _RepetitionReference | _SampledReference | None:
         if spec.kind == "delay":
-            return SVABehavioralSim(
-                "delay_range" if spec.minimum != spec.maximum else "delay_fixed",
-                {"delay_min": spec.minimum, "delay_max": spec.maximum},
-            )
+            return _DelayReference(spec.minimum, spec.maximum)
         if spec.kind == "repetition":
-            return SVABehavioralSim(
-                "rep_consecutive",
-                {"rep_min": spec.minimum, "rep_max": spec.maximum},
-            )
-        if spec.kind in {"rose", "past"}:
-            kind = "rose" if spec.kind == "rose" else "past"
-            return SVABehavioralSim(kind, {"depth": spec.depth})
+            return _RepetitionReference(spec.minimum, spec.maximum)
+        if spec.kind in {"rose", "fell", "stable", "changed", "past"}:
+            return _SampledReference(spec.kind, spec.depth)
         return None
 
     def reset(self) -> None:
+        """Reset both semantic evaluation state and the sticky contract state."""
+
+        self._reset_evaluation()
+        self._attempt_fired = False
+
+    def _reset_evaluation(self) -> None:
+        """Abort in-flight evaluation without clearing ``attempt_fired``."""
+
         self._left.reset()
         if self._right is not None:
             self._right.reset()
@@ -282,54 +402,83 @@ class SourceReferenceRunner:
             self._primitive.reset()
 
     def tick(self, signals: dict[str, bool]) -> dict[str, bool]:
-        if self._spec.disable is not None and self._spec.disable.evaluate(signals):
-            self.reset()
-            return {"active": False, "pass": False, "fail": False, "overflow": False}
-
         start = bool(signals.get("start", False))
-        if self._spec.kind == "bool":
-            return self._left.tick(signals, start)
+        attempt_fired = self._attempt_fired
+        if start:
+            # The RTL contract is registered: a start sampled on this edge is
+            # visible in the observation captured at the following edge.
+            self._attempt_fired = True
 
-        if self._spec.kind in {"rose", "past"}:
-            assert self._primitive is not None
+        disabled_o = bool(signals.get("disable_i", False))
+        local_disable = (
+            self._spec.disable is not None and self._spec.disable.evaluate(signals)
+        )
+        if disabled_o or local_disable:
+            self._reset_evaluation()
+            result = {"active": False, "pass": False, "fail": False, "overflow": False}
+            return self._with_contract(result, attempt_fired, disabled_o)
+
+        if self._spec.kind == "bool":
+            result = self._left.tick(signals, start)
+            return self._with_contract(result, attempt_fired, disabled_o)
+
+        if self._spec.kind in {"rose", "fell", "stable", "changed", "past"}:
+            assert isinstance(self._primitive, _SampledReference)
             signal_value = self._spec.left.evaluate(signals)
-            return self._primitive.tick({"start": start, "sig": signal_value})
+            result = self._primitive.tick(signal_value, start)
+            return self._with_contract(result, attempt_fired, disabled_o)
 
         if self._spec.kind == "repetition":
-            assert self._primitive is not None
-            return self._primitive.tick(
-                {"start": start, "sig": self._spec.left.evaluate(signals)}
-            )
+            assert isinstance(self._primitive, _RepetitionReference)
+            result = self._primitive.tick(self._spec.left.evaluate(signals), start)
+            return self._with_contract(result, attempt_fired, disabled_o)
 
         left = self._left.tick(signals, start)
         assert self._right is not None
 
         if self._spec.kind == "delay":
-            assert self._primitive is not None
-            delay = self._primitive.tick({"start": left["pass"]})
+            assert isinstance(self._primitive, _DelayReference)
+            delay = self._primitive.tick(left["pass"])
             right = self._right.tick(signals, delay["pass"])
-            return {
+            result = {
                 "active": left["active"] or delay["active"] or right["active"],
                 "pass": right["pass"],
                 "fail": left["fail"] or right["fail"],
                 "overflow": False,
             }
+            return self._with_contract(result, attempt_fired, disabled_o)
 
         if self._spec.kind == "implication_overlap":
             right = self._right.tick(signals, start)
-            return {
+            result = {
                 "active": left["active"] or right["active"],
                 "pass": left["pass"] and right["pass"],
                 "fail": left["pass"] and right["fail"],
                 "overflow": False,
             }
+            return self._with_contract(result, attempt_fired, disabled_o)
 
         right = self._right.tick(signals, left["pass"])
-        return {
+        result = {
             "active": left["active"] or right["active"],
             "pass": right["pass"],
             "fail": right["fail"],
             "overflow": False,
+        }
+        return self._with_contract(result, attempt_fired, disabled_o)
+
+    @staticmethod
+    def _with_contract(
+        result: dict[str, bool],
+        attempt_fired: bool,
+        disabled_o: bool,
+    ) -> dict[str, bool]:
+        """Attach the two release-critical checker contract outputs."""
+
+        return {
+            **result,
+            "attempt_fired": attempt_fired,
+            "disabled_o": disabled_o,
         }
 
 

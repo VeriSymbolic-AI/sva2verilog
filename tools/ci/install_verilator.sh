@@ -4,6 +4,7 @@ set -euo pipefail
 
 verilator_version="${VERILATOR_VERSION:-v5.028}"
 verilator_release="${verilator_version#v}"
+verilator_sha256="02d4b6f34754b46a97cfd70f5fcbc9b730bd1f0a24c3fc37223397778fcb142c"
 verilator_tmp="$(mktemp -d "${RUNNER_TEMP:-/tmp}/sva2rtl-verilator.XXXXXX")"
 
 case "$(uname -s)" in
@@ -35,6 +36,8 @@ esac
 curl --fail --location --silent --show-error \
   "https://github.com/verilator/verilator/archive/refs/tags/${verilator_version}.tar.gz" \
   --output "${verilator_tmp}/verilator.tar.gz"
+printf '%s  %s\n' "${verilator_sha256}" "${verilator_tmp}/verilator.tar.gz" \
+  | shasum -a 256 -c -
 tar xzf "${verilator_tmp}/verilator.tar.gz" -C "${verilator_tmp}"
 
 cd "${verilator_tmp}/verilator-${verilator_release}"

@@ -20,8 +20,7 @@ module {{ module_name }} (
 
     wire cond_active, cond_pass, cond_fail;
     wire body_active, body_pass, body_fail;
-    wire cond_disabled, body_disabled;
-    {{ signal_type(verilog_mode) }} active_q, pass_q, fail_q, disabled_q;
+    {{ signal_type(verilog_mode) }} active_q, pass_q, fail_q;
     wire _cond_start;
 
     // Drive cond checker on every cycle the body is active, so that a
@@ -46,7 +45,7 @@ module {{ module_name }} (
     .pass(cond_pass),
     .fail(cond_fail),
     .attempt_fired(),
-    .disabled_o(cond_disabled)
+    .disabled_o()
 );
 
 {{ children[1].module_name }} u_body (
@@ -61,7 +60,7 @@ module {{ module_name }} (
     .pass(body_pass),
     .fail(body_fail),
     .attempt_fired(),
-    .disabled_o(body_disabled)
+    .disabled_o()
 );
 
     wire _body_active = body_active;
@@ -81,19 +80,17 @@ module {{ module_name }} (
             active_q <= 1'b0;
             pass_q   <= 1'b0;
             fail_q   <= 1'b0;
-            disabled_q <= 1'b0;
         end else begin
             active_q  <= _body_active;
             pass_q    <= _body_pass;
             fail_q    <= _body_fail;
-            disabled_q <= cond_disabled | body_disabled;
         end
     end
 
     assign active  = active_q;
     assign pass    = pass_q;
     assign fail    = fail_q;
-    assign disabled_o = disabled_q;
+    assign disabled_o = disable_i;
     assign attempt_fired = attempt_fired_q;
 
 endmodule

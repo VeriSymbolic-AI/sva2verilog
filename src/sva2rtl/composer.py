@@ -1009,8 +1009,7 @@ def _compose_implication_sc(
                         "flatten the antecedent into the consequent sequence."
                     ),
                     construct_name=(
-                        "implication with sequence antecedent and "
-                        "multi-cycle consequent"
+                        "implication with sequence antecedent and multi-cycle consequent"
                     ),
                     source_loc=node.source_loc,
                 )
@@ -1655,10 +1654,7 @@ def _is_nfa_liftable(operand: SVANode) -> bool:
     if isinstance(operand, SeqConcat):
         return all(isinstance(e, BoolExpr) for e in operand.elements)
     if isinstance(operand, SeqRepetition):
-        return (
-            isinstance(operand.expr, BoolExpr)
-            and operand.rep_min >= 1
-        )
+        return isinstance(operand.expr, BoolExpr) and operand.rep_min >= 1
     if isinstance(operand, SeqIntersect):
         return _is_nfa_liftable(operand.left) and _is_nfa_liftable(operand.right)
     if isinstance(operand, SeqWithin):
@@ -1741,7 +1737,7 @@ def _lift_to_nfa(
                 current += 1
                 # After d_min-1 wait states, allow exit to element check
                 if w >= d_min - 1:
-                    trans.append((current, guard, current + wait_states - w + 1))
+                    trans.append((current, guard, current + wait_states - w))
             # Final mandatory transition to element check
             trans.append((current, guard, current + 1))
             current += 1
@@ -1875,28 +1871,6 @@ def _lift_to_nfa(
     raise ValueError(f"cannot lift {type(operand).__name__} to NFA yet")
 
 
-def _extract_nfa_from_checker(
-    checker: CheckerNode,
-) -> tuple[int, tuple[tuple[int, str, int], ...], frozenset[int], tuple[str, ...]]:
-    """Extract NFA data from an already-composed ``nfa_generic`` CheckerNode."""
-    if checker.template_name != "nfa_generic":
-        raise UnsupportedConstruct(
-            message=(
-                f"expected nfa_generic checker, got '{checker.template_name}'. "
-                "NFA product construction requires nfa_generic children."
-            ),
-            construct_name="non-nfa-generic checker in NFA product",
-            source_loc=checker.source_loc,
-        )
-    states = int(checker.params["nfa_states"])
-    raw_trans = checker.params.get("nfa_transitions", "")
-    trans = _deserialise_transitions(raw_trans.split(";") if raw_trans else [])
-    raw_accept = checker.params.get("nfa_accept", "")
-    accept = _deserialise_accept(raw_accept.split(",") if raw_accept else [])
-    sigs = tuple(s for s, _ in checker.observed_signals)
-    return states, trans, accept, sigs
-
-
 def _try_lift_operand(
     operand: SVANode,
     clock: ClockSpec,
@@ -2007,30 +1981,6 @@ def _serialise_transitions(
 def _serialise_accept(accept: frozenset[int]) -> str:
     """Encode accept-state set as ``"i,j,k"`` (sorted for determinism)."""
     return ",".join(str(i) for i in sorted(accept))
-
-
-def _deserialise_transitions(
-    raw: list[str],
-) -> tuple[tuple[int, str, int], ...]:
-    """Decode NFA transitions from ``serialise_transitions`` format back."""
-    result: list[tuple[int, str, int]] = []
-    for part in raw:
-        part = part.strip()
-        if not part:
-            continue
-        s, g, t = part.split(",", 2)
-        result.append((int(s), g.strip(), int(t)))
-    return tuple(result)
-
-
-def _deserialise_accept(raw: list[str]) -> frozenset[int]:
-    """Decode accept set from ``serialise_accept`` format back."""
-    result: set[int] = set()
-    for part in raw:
-        part = part.strip()
-        if part:
-            result.add(int(part))
-    return frozenset(result)
 
 
 def _accept_bits(states: int, accept: frozenset[int]) -> str:
@@ -2635,7 +2585,7 @@ def _compose_prop_if_else(
     true_checker = compose(node.true_branch, clock, f"{base}_true", original_text)
     children = [true_checker]
     has_else = node.false_branch is not None
-    if has_else and node.false_branch is not None:
+    if node.false_branch is not None:
         false_checker = compose(node.false_branch, clock, f"{base}_false", original_text)
         children.append(false_checker)
     all_signals = _collect_signals(children)

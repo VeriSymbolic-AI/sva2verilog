@@ -8,6 +8,13 @@
 // in series on the destination clock — the standard industry synchronizer for
 // single-bit CDC (clock domain crossing) signals.
 //
+// IMPORTANT BOUNDARY: this is a level synchronizer, not an acknowledged pulse
+// transfer. A token narrower than the destination sampling interval can be
+// missed, and multiple source events can coalesce. The current compiler does
+// not enforce a minimum token width or event rate. Treat generated multi-clock
+// monitors as a trusted/prototype boundary until a handshake or toggle protocol
+// and asynchronous clock-ratio tests are implemented.
+//
 // When META_ENABLE=0 (default): behaviour is identical to v1.4.1 — two FFs,
 // no injection, deterministic output.
 //
@@ -36,6 +43,7 @@ module {{ module_name }} #(
 {{ port_decl(verilog_mode, "input", src_clock) }},
 {{ port_decl(verilog_mode, "input", dst_clock) }},
 {{ port_decl(verilog_mode, "input", "rst_n") }},
+{{ port_decl(verilog_mode, "input", "disable_i") }},
 {{ port_decl(verilog_mode, "input", "token_i") }},
 {{ port_decl(verilog_mode, "output", "token_o") }}
 );
@@ -50,7 +58,7 @@ module {{ module_name }} #(
     {% endif %}
 
     always_ff @(posedge {{ dst_clock }}) begin
-        if (!rst_n) begin
+        if (!rst_n || disable_i) begin
             sync0_q <= 1'b0;
             sync1_q <= 1'b0;
         end else begin
@@ -75,9 +83,9 @@ module {{ module_name }} #(
                 .lfsr_out(lfsr_bit)
             );
 {% raw %}
-            assign token_o = sync1_q ^ lfsr_bit;
+            assign token_o = disable_i ? 1'b0 : (sync1_q ^ lfsr_bit);
         end else begin : gen_no_inject
-            assign token_o = sync1_q;
+            assign token_o = disable_i ? 1'b0 : sync1_q;
         end
     endgenerate
 {% endraw %}

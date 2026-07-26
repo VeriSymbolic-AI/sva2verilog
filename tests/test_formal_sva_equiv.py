@@ -564,7 +564,7 @@ module {name} (
 
     always_ff @(posedge clk) begin
         if (!rst_n) attempt_fired_q <= 1'b0;
-        else if (ant_pass_q) attempt_fired_q <= 1'b1;
+        else if (start) attempt_fired_q <= 1'b1;
     end
 
     assign active        = ant_active_q | con_active_q;

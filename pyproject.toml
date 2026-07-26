@@ -12,6 +12,7 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Electronic Design Automation (EDA)",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
 ]
 dependencies = [
     "click>=8.0",
@@ -35,6 +36,15 @@ packages = ["src/sva2rtl"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "templates" = "sva2rtl/templates"
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/src",
+    "/templates",
+    "/LICENSE",
+    "/README.md",
+    "/pyproject.toml",
+]
 
 [dependency-groups]
 dev = [

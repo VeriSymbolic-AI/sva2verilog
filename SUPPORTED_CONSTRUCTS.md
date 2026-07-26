@@ -1,4 +1,4 @@
-# Supported SVA Constructs — sva2rtl v1.5.2 current main
+# Supported SVA Constructs — sva2rtl v1.7.0 current main
 
 This file explains supported syntax, semantics, and generated template shapes.
 Exact support status, subset boundaries, and verification evidence are governed
@@ -13,18 +13,20 @@ full-contract, cover-probe, and k-induction slices are recorded in
 `SUPPORT_MATRIX.md`. These are evidence-strength upgrades for named constructs
 and modes, not a blanket claim that every supported operator has full-contract
 or arbitrary-start proof coverage. Phase 11 adds local Yosys generated-RTL smoke
-coverage and CI routing for generated-module Verilator lint; local Verilator
-lint skipped because Verilator was not installed, so remote lint evidence remains
-pending. Phase 12 adds bounded source-level differential testing against the
-independent Python oracle and Icarus, with Verilator routed where available and
-slow randomized breadth kept opt-in. Complex NFA/liveness proof expansion and
-mutation/coverage release metrics remain separate validation work.
+coverage and CI routing for generated-module Verilator lint. Verilator 5.028 is
+installed locally and the generated strict-lint gate passes; same-commit remote
+lint evidence remains pending until this worktree is pushed. Phase 12 adds
+bounded source-level differential testing against an independent test-local
+Python reference under both Icarus and Verilator, with slow randomized breadth
+kept opt-in. Complex NFA/liveness proof expansion remains separate validation
+work; mutation and coverage release metrics are tracked in
+`INDUSTRIAL_VALIDATION_GAPS.md`.
 
 ## Tier 1 Operators (Implemented Core Subset)
 
 | Operator | Category | Description | Example SVA | Generated Template |
 |----------|----------|-------------|-------------|-------------------|
-| `##N` | Delay | Fixed cycle delay | `a ##2 b` | Shift register (N flip-flops) |
+| `##N` | Delay | Fixed cycle delay | `a ##2 b` | Bounded counter/window |
 | `##[M:N]` | Delay | Bounded delay range | `a ##[1:3] b` | Counter with [M,N] window comparator |
 | <code>\|-></code> | Implication | Overlapping implication, including multi-cycle consequent | <code>req \|-> ack</code> | Antecedent match triggers consequent check |
 | <code>\|=></code> | Implication | Non-overlapping implication, including multi-cycle consequent | <code>req \|=> ack</code> | Antecedent match triggers consequent check (next cycle) |
@@ -44,7 +46,7 @@ mutation/coverage release metrics remain separate validation work.
 | `$stable()` | Sampled value | No value change | `$stable(sig)` | Comparator: `sig == sig_prev` |
 | `$past(sig, N)` | Sampled value | Value N cycles ago | `$past(data, 2)` | Shift register delay line (N stages) |
 | `$changed()` | Sampled value | Signal changed since previous cycle | `$changed(sig)` | Comparator: `sig != sig_prev` |
-| `disable iff` | Control | Asynchronous disable condition | `disable iff (rst) prop` | Gating logic on monitor enable |
+| `disable iff` | Control | Disable condition sampled by the generated synchronous monitor | `disable iff (rst) prop` | Output gating plus synchronous state clear |
 | Named sequences | Structure | Reusable sequence definitions | `sequence s; a ##1 b; endsequence` | Submodule instantiation |
 
 ## Tier 2 Operators (v1.3 + v1.5.1 — Implemented Complex Subset)
@@ -94,11 +96,14 @@ Notes for v1.4 Part A:
 
 ## Composition Model
 
-sva2rtl uses token-passing composition to handle concurrent property evaluations:
+sva2rtl uses token-passing composition between generated operator modules:
 
 - Each operator is compiled to a hardware template
 - Templates are composed by connecting token ports (start/match/fail)
-- Multiple overlapping attempts are tracked simultaneously via token replication
+- NFA implication consequents have explicit bounded thread slots (T ≤ 4).
+- Most standalone counter/operator templates hold one active state machine;
+  callers must not infer unlimited overlapping-attempt support from the `start`
+  port. Row-specific evidence in `SUPPORT_MATRIX.md` governs this boundary.
 - Counter encoding replaces one-hot shift registers for range operators (area optimization)
 
 ### Token Flow
@@ -113,16 +118,8 @@ start → [Operator Template] → match (pass downstream)
 
 ### Delay: `##N` (Fixed)
 
-Generates an N-stage shift register. Token enters on `start`, exits on `match` after exactly N clock cycles.
-
-```systemverilog
-// ##2 generates:
-logic [1:0] delay_sr;
-always_ff @(posedge clk or negedge rst_n)
-    if (!rst_n) delay_sr <= '0;
-    else        delay_sr <= {delay_sr[0], token_in};
-assign token_out = delay_sr[1];
-```
+Generates a bounded counter. A token enters on `start`, and the window output
+opens at the counter value corresponding to exactly N source-sample cycles.
 
 ### Delay: `##[M:N]` (Range)
 
@@ -280,13 +277,13 @@ The following operators remain unsupported or deliberately rejected:
 | `[->M:N]` / `[=M:N]` where `M < N` | Repetition | Rejected — v1 supports fixed counts only |
 | `intersect`/`within` with local variables | Sequence | Not supported |
 | Nested multi-path operators | Sequence | Supported when operands are NFA-liftable and K ≤ 32 |
-| Multi-clock properties | Clocking | Supported for path-one split-and-synchronize forms |
+| Multi-clock properties | Clocking | Trusted/prototype boundary for path-one split-and-synchronize forms |
 
 ### Structural Limitations
 
 | Limitation | Description |
 |------------|-------------|
-| Multi-clock path-one only | `##1` clock-change sequences and non-overlap cross-clock implication are supported through trusted 2-DFF synchronization; full CDC/metastability proof and multi-path cross-clock composition are excluded |
+| Multi-clock path-one only | The compiler accepts `##1` clock-change sequences and non-overlap cross-clock implication through a trusted 2-DFF level synchronizer; event delivery, full CDC/metastability proof, and multi-path cross-clock composition are excluded |
 | Unbounded repetition `[*]` | Requires infinite state; not synthesizable |
 | Unbounded delay `##[0:$]` | Requires infinite state; not synthesizable |
 | Local variables | SVA local variables in sequences are not supported |
@@ -296,11 +293,13 @@ The following operators remain unsupported or deliberately rejected:
 
 ### Multi-clock support (v1.4.1 Part B — Path One: trusted 2-DFF synchronizer)
 
-Multi-clock properties are supported using a split-and-synchronize compilation
-approach (Gawanmeh & Tahar, 2009): each `@(clk_i)` sub-sequence is compiled to
+The compiler accepts a bounded multi-clock subset using a split-and-synchronize
+compilation approach (Gawanmeh & Tahar, 2009): each `@(clk_i)` sub-sequence is compiled to
 a single-clock checker in its own clock domain, reusing the full Tier 1/2/3
 generation pipeline. Cross-domain `##1` boundaries are connected through a
-standard 2-DFF synchronizer (`templates/sync_2dff.sv.j2`, TRUSTED COMPONENT).
+2-DFF level synchronizer (`templates/sync_2dff.sv.j2`, TRUSTED COMPONENT).
+This is accepted syntax and generated structure, not a claim of reliable
+cross-domain event delivery.
 
 **Supported subset** (equals the SVA standard's allowed multi-clock forms):
 - `@(posedge clk1) seq1 ##1 @(posedge clk2) seq2` (multi-clock sequence)
@@ -318,6 +317,13 @@ metastability via formal methods. Per-domain sub-checkers retain the full
 verification stack (iverilog+Verilator sim, behavioral oracle, SymbiYosys
 formal equivalence). Cross-clock timing assumptions should be validated on FPGA
 prototypes or in post-silicon testing.
+
+It is also a **level synchronizer, not an acknowledged pulse transfer**.
+Generated one-cycle tokens may be missed when the destination clock is slower
+or unfavorably phased, and multiple events may coalesce. The compiler currently
+does not enforce a minimum token width or event-rate bound. The multi-clock
+subset therefore remains a trusted/prototype boundary until a handshake or
+toggle protocol and asynchronous clock-ratio tests close event delivery.
 
 See `.planning/DESIGN-multiclock-risk-D.md` for the full design and references.
 

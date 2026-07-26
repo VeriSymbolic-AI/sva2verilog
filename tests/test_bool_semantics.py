@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from sva2rtl.bool_semantics import (
@@ -133,3 +135,37 @@ def test_deserialize_rejects_invalid_payload() -> None:
     """Malformed semantic payloads fail before producing partial IR."""
     with pytest.raises(ValueError, match="invalid boolean semantic JSON"):
         deserialize_bool_expr("{")
+
+
+@pytest.mark.parametrize("optional_value", ["missing", None])
+def test_deserialize_const_accepts_absent_or_null_optional_fields(
+    optional_value: str | None,
+) -> None:
+    payload = json.loads(
+        serialize_bool_expr(BoolConst(value=1, width=1, raw="1'b1", source_loc=_LOC))
+    )
+    for key in ("width", "raw"):
+        if optional_value == "missing":
+            del payload[key]
+        else:
+            payload[key] = None
+
+    restored = deserialize_bool_expr(json.dumps(payload))
+
+    assert isinstance(restored, BoolConst)
+    assert restored.width is None
+    assert restored.raw == ""
+
+
+@pytest.mark.parametrize(("field", "value"), [("value", True), ("width", True)])
+def test_deserialize_const_rejects_boolean_integer_fields(
+    field: str,
+    value: bool,
+) -> None:
+    payload = json.loads(
+        serialize_bool_expr(BoolConst(value=1, width=1, raw="1'b1", source_loc=_LOC))
+    )
+    payload[field] = value
+
+    with pytest.raises(ValueError, match="must be an integer"):
+        deserialize_bool_expr(json.dumps(payload))

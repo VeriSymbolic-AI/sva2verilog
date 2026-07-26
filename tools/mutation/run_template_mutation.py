@@ -74,6 +74,92 @@ MUTATIONS: tuple[TemplateMutation, ...] = (
             "--simulator=iverilog",
         ),
     ),
+    TemplateMutation(
+        name="sequence-or-left-failure-retention",
+        template="templates/prop_or.sv.j2",
+        original="left_failed_q  <= left_failed_q  | left_fail;",
+        replacement="left_failed_q  <= left_fail;",
+        pytest_args=(
+            "tests/simulation/test_sim_v13_operators.py",
+            "-k",
+            "delayed_failure_completes",
+            "--simulator=iverilog",
+        ),
+    ),
+    TemplateMutation(
+        name="sequence-or-right-failure-retention",
+        template="templates/prop_or.sv.j2",
+        original="right_failed_q <= right_failed_q | right_fail;",
+        replacement="right_failed_q <= right_fail;",
+        pytest_args=(
+            "tests/simulation/test_sim_v13_operators.py",
+            "-k",
+            "delayed_failure_completes",
+            "--simulator=iverilog",
+        ),
+    ),
+    TemplateMutation(
+        name="overlap-attempt-evidence-must-track-start",
+        template="templates/overlap_bitvec.sv.j2",
+        original=(
+            '{{ attempt_fired_logic(verilog_mode, clock_edge, clock_signal, "start") }}\n'
+            "\n"
+            "    // ── Output assignments (|-> single-cycle consequent)"
+        ),
+        replacement=(
+            '{{ attempt_fired_logic(verilog_mode, clock_edge, clock_signal, "ant_pass_w") }}\n'
+            "\n"
+            "    // ── Output assignments (|-> single-cycle consequent)"
+        ),
+        pytest_args=(
+            "tests/simulation/test_sim_implication.py",
+            "-k",
+            "attempt_fired and overlap",
+            "--simulator=iverilog",
+        ),
+    ),
+    TemplateMutation(
+        name="nonoverlap-attempt-evidence-must-track-start",
+        template="templates/nonoverlap.sv.j2",
+        original=(
+            '{{ attempt_fired_logic(verilog_mode, clock_edge, clock_signal, "start") }}\n'
+            "\n"
+            "    // ── Output assignments (|=> single-cycle consequent)"
+        ),
+        replacement=(
+            '{{ attempt_fired_logic(verilog_mode, clock_edge, clock_signal, "ant_pass_w") }}\n'
+            "\n"
+            "    // ── Output assignments (|=> single-cycle consequent)"
+        ),
+        pytest_args=(
+            "tests/simulation/test_sim_implication.py",
+            "-k",
+            "attempt_fired and nonoverlap",
+            "--simulator=iverilog",
+        ),
+    ),
+    TemplateMutation(
+        name="multiclock-top-must-honor-start",
+        template="templates/mc_seq_top.sv.j2",
+        original="assign t0_pass = start;",
+        replacement="assign t0_pass = 1'b1;",
+        pytest_args=(
+            "tests/test_multiclock.py",
+            "-k",
+            "standard_contract",
+        ),
+    ),
+    TemplateMutation(
+        name="multiclock-disable-must-clear-cdc-state",
+        template="templates/sync_2dff.sv.j2",
+        original="if (!rst_n || disable_i) begin",
+        replacement="if (!rst_n) begin",
+        pytest_args=(
+            "tests/test_multiclock.py",
+            "-k",
+            "standard_contract",
+        ),
+    ),
 )
 
 

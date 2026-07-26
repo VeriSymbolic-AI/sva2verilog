@@ -84,6 +84,7 @@ def _run_stimulus(
         extra_inputs=extra_inputs,
         stimulus=stimulus,
         has_overflow_flag=has_overflow,
+        capture_contract=True,
     )
     return run_simulation(
         simulator=simulator,
@@ -92,10 +93,36 @@ def _run_stimulus(
         tb_code=tb,
         work_dir=tmp_path,
         has_overflow_flag=has_overflow,
+        capture_contract=True,
         stimulus=stimulus,
         extra_inputs=extra_inputs,
         clock_signal=clock_signal,
     )
+
+
+@pytest.mark.parametrize(
+    "fixture_name",
+    ("implication_overlap.json", "implication_nonoverlap.json"),
+)
+def test_attempt_fired_records_start_even_when_antecedent_is_false(
+    fixture_name: str,
+    tmp_path: Path,
+    simulator: str,
+) -> None:
+    """The anti-vacuity contract records attempts, not antecedent matches."""
+
+    checker = _build(fixture_name)
+    stimulus = [
+        {"start": True, "a": False, "b": False},
+        {"start": False, "a": False, "b": False},
+        {"start": False, "a": False, "b": False},
+    ]
+
+    trace = _run_stimulus(checker, stimulus, tmp_path, simulator)
+
+    assert trace[0]["attempt_fired"] is False
+    assert trace[1]["attempt_fired"] is True
+    assert trace[2]["attempt_fired"] is True
 
 
 # ══════════════════════════════════════════════════════════════════════════════

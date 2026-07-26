@@ -1,27 +1,97 @@
 # sva2verilog 项目进展报告
 
-> 更新日期：2026-07-22
+> 更新日期：2026-07-26
 > 仓库：public GitHub repository
 > 当前版本：v1.7.0
 
 ## 当前状态
 
 sva2verilog 是一个开源的 SystemVerilog Assertion (SVA) 到可综合 RTL
-监控器编译器。v1.7.0 已发布；当前工作树处于发布后加固状态，基于
-本地发布加固提交 `3f580cd` 与后续 P1 提交均只存在本机、尚未推送，
-不能作为新的远端证据基线。
+监控器编译器。v1.7.0 已发布；当前分支处于发布后加固状态，本轮深度审计
+修复只有本地证据、尚未推送，不能作为新的远端证据基线。
 
-- 测试套件：本轮最终本地结果见下方“2026-07-22 发布加固”；所有已运行门控 0 failed
+- 测试套件：Python 3.12 完整 Icarus 轴 1466 passed / 1 skipped /
+  1 xfailed；完整 Verilator simulation 轴 169 passed / 1 个明确的
+  Icarus-only skip；所有已运行门控 0 failed
 - 代码质量：mypy --strict 0 errors，ruff 0 errors
-- 形式化验证：本地核心/契约/k-induction 集合与 NFA BMC 均通过；已知 1 个 liveness xfail 保留
-- 生成 RTL：本地 Yosys synthesis 与固定 Verilator 5.028 strict lint gate 均通过
-- 随机差分：Icarus slow sweep 与 Verilator smoke/fast differential 均在本机通过；每次 Verilator example 使用独立构建目录
-- 变异测试：门禁会先验证测试基线、隔离 Python bytecode cache，并按模块在低于 85% 时失败；当前 bool semantics 15/15、behavioral oracle 131/150（87.3%）、composer 53/55（96.4%）、ast importer 116/116，另有 RTL 模板定向变异 5/5
-- 覆盖度：约 95%+ 的实际断言场景；coverage 门控 fail_under=82（当前实测 82.82%）
+- 形式化验证：本地 Full Formal 文件集 125 passed / 1 个已知 liveness
+  xfail；核心/契约/k-induction 集合与 NFA BMC 0 failed
+- 生成 RTL：本地 Yosys synthesis、固定 Verilator 5.028 strict lint 和
+  26 个代表性 top-interface contract 检查合计 133 passed
+- 随机差分：Icarus/Verilator 的 fast 各 16 passed，日期 seed
+  `20260726` 的 slow 各 1 passed（每个内部 64 examples）；现在逐周期比较
+  `active/pass/fail/attempt_fired/disabled_o/overflow`，并随机驱动外部
+  `disable_i`
+- 变异测试：门禁先验证测试基线、隔离 Python bytecode cache，只统计语法有效且被基线执行的 mutants，并将无效/未覆盖候选单列；当前 bool semantics 15/15（100%）、behavioral oracle 112/130（86.2%，19 未覆盖）、composer 41/48（85.4%，4 未覆盖）、ast importer 92/108（85.2%，8 未覆盖），合计 260/301（86.4%，31 未覆盖、41 存活），另有 RTL 模板定向变异 11/11
+- 覆盖度：branch coverage 门控 fail_under=82；当前完整 Icarus 轴实测
+  86.31%，并满足关键模块独立下限
 - 支持状态权威：`SUPPORT_MATRIX.md` 记录逐构造支持边界、证据完整度和降级原因；README / SUPPORTED_CONSTRUCTS 只作概览和解释
 - 工业级验证缺口：已记录在 `INDUSTRIAL_VALIDATION_GAPS.md`，包含当前进展、P0/P1/P2 严重度、修复计划和 fully-supported 定义标准
 
+## 2026-07-26 完整契约与发布门禁加固
+
+本轮从“测试是否真的覆盖可信度契约”而不是测试总数出发，修复了 5 组问题：
+
+- 多时钟 top 恢复统一 `start/disable_i/attempt_fired/disabled_o` 接口，不再
+  永久启动；外部 disable 同时清空 per-domain checker 和 2-DFF 状态。
+- 普通 `|->` / `|=>` 的 `attempt_fired` 改为记录 top-level `start`，即使
+  antecedent 为假也不会被误报为“从未尝试”；独立 full-contract formal
+  reference 同步纠正。
+- source differential 扩展为完整输出契约，外部 `disable_i` 进入 deterministic
+  和 Hypothesis 刺激域；schema-v1 历史 replay 仍可读取，但新 live trace
+  必须实际采集完整信号。
+- push/PR CI、nightly 和 Full Formal 读取 JUnit outcome，分别约束最低
+  passed 数和最大 skip/xfail 数，防止缺工具或错误选择测试导致的空绿灯。
+- 新增 Python 3.14 广泛兼容轴；真实构建 wheel/sdist，source archive 排除
+  `tests/tools/.github/.planning/.gsd`，并在仓库外全新 venv 安装 wheel、
+  调用 CLI、生成 RTL、通过 Icarus。
+
+Fresh 本地证据：Python 3.12 full Icarus 1466 passed / 1 skipped /
+1 xfailed，branch coverage 86.31%；Verilator simulation 169 passed /
+1 个已知 Icarus-only skip；generated RTL 133 passed；Full Formal
+125 passed / 1 个严格 liveness xfail；Python 3.14 非仿真广泛轴
+1240 passed / 1 xfailed；Icarus/Verilator differential fast 各 16 passed，
+slow 各 1 passed（64 examples）；wheel/sdist 仓库外安装冒烟通过。
+
+这些都是本地、当前工作树证据，不是远端同提交证据。2026-07-26 最新
+scheduled nightly run `30191482973` 的三个 job 因 GitHub 账户账单/额度限制
+未启动；origin/main 仍是旧提交 `8e7af87`。因此支持矩阵继续保持 0 个
+Fully supported，不能把本地结果或历史绿色 run 替代 current-commit
+Ubuntu/macOS CI、scheduled nightly 和 Full Formal。
+
+多时钟仍有一个明确的高风险边界：当前 2-DFF 是电平同步器，不是带确认的
+脉冲传输协议；窄 token 可能在异步时钟比下漏采，多事件也可能合并。本轮只
+修复 top contract、start/disable 传播和工具接受度，不宣称 CDC 功能完备。
+在 handshake/toggle 方案、异步 clock-ratio 双仿真和 CDC sign-off 完成前，
+该行保持 `Trusted boundary`。
+
 ## 2026-07-22 发布加固
+
+### 深度审计修复（当前工作树，待远端证据）
+
+- 七个组合模板的 `disabled_o` 改为直接反映外部 `disable_i`，并新增
+  Icarus/Verilator 全契约回归。
+- sequence `or` 新增左右不等长、早失败保持、晚通过/晚失败与 disable
+  清状态测试；RTL 模板 mutation 从 5 个扩为 7 个并全部杀死。
+- 差分参考模型完全移除对生产 `behavioral_oracle` 的导入，样本函数扩展到
+  `$rose/$fell/$stable/$changed/$past`，固定延迟覆盖到 `##8`；当前生成器如实
+  限定为一层时间算子，未再声称未实现的三层递归生成。
+- 有效 mutation 审计发现并修复范围延迟 NFA 提前完成边越界：所有转换现在
+  强制落在 `[0, states)`，`##[2:4]` 的最早/最晚退出边均进入真实接受态。
+- push/PR CI 新增真实 branch coverage 与关键模块下限；nightly 同时保留固定
+  历史 seed 和每日轮换 seed，失败时上传 sanitized replay artifact。
+- GitHub Actions 固定到不可变 commit；Slang 11.0 与 Verilator 5.028 下载均
+  校验 SHA-256；依赖安装全部使用冻结 lock。
+- 包版本、`uv.lock`、支持文档和 BSL Licensed Work 已统一为 1.7.0，并有
+  自动一致性测试。
+
+最终 fresh 验证（Python 3.12）：完整 Icarus 轴 1428 passed / 1 skipped /
+1 xfailed，branch coverage 86.29%；完整 Verilator simulation 轴 167 passed /
+1 skipped；固定 seed `20260722` 的 slow differential 在 Icarus 与 Verilator
+各 64 个生成例均通过；generated RTL synthesis + strict lint 107 passed；
+Full Formal 125 passed / 1 xfailed。ruff、mypy strict、lock、工作流 YAML、
+安装脚本语法与关键覆盖率下限均通过。所有上述命令 0 failed。未推送前仍无
+current-commit 远端 Ubuntu/macOS、scheduled nightly 或 Full Formal 证据。
 
 本轮关闭了审计发现的发布阻塞项：
 
@@ -40,7 +110,9 @@ sva2verilog 是一个开源的 SystemVerilog Assertion (SVA) 到可综合 RTL
   Phase 01/13 计划—摘要计数恢复为 39/39，Phase 13 verification 已补齐。
 - 文档已纠正 `##0`、优化器、支持等级和历史/current-HEAD 证据混用。
 
-本轮最终本地验证：1344 tests collected；Python 3.12 与 3.13 的完整本机
+以下是第一次发布加固阶段的历史快照，不是当前工作树的最终数字；其中
+mutation 数字来自旧 runner，包含后来被识别为无效或未覆盖的候选，不能与
+当前 mutation 分数直接比较：1344 tests collected；Python 3.12 与 3.13 的完整本机
 Icarus/default suite 均为 1341 passed / 2 skipped / 1 xfailed / 0 failed；
 两个 Python 版本的 Verilator simulation 轴均为 141 passed / 1 skipped；
 generated RTL synthesis + strict lint 107 passed；Full Formal 119 passed /
@@ -69,7 +141,8 @@ mutation 检出能力继续加固：
 - nightly mutation 从两个 Python 模块扩展到四个核心语义模块，并新增
   RTL template 的边界、状态、宽度和端口连线定向突变门禁。
 
-当前工作树最终本地证据：ruff 全通过；mypy strict 15 个源码文件 0 error；
+以下是 P1 提交形成时的历史快照，不是本轮深度审计后的最终数字；其中
+mutation 数字来自旧 runner：ruff 全通过；mypy strict 15 个源码文件 0 error；
 coverage 82.82%（门槛 82%）；
 完整默认/Icarus 轴 1371 passed / 1 skipped / 1 xfailed；完整 Verilator
 simulation + fast differential 轴 151 passed / 1 skipped；Icarus 与 Verilator

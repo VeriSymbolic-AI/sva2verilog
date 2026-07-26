@@ -22,6 +22,21 @@ def test_wheel_force_includes_complete_template_tree() -> None:
     assert wheel_config["force-include"] == {"templates": "sva2rtl/templates"}
 
 
+def test_sdist_excludes_development_only_surfaces() -> None:
+    """Published source archives contain build inputs, not audit/test history."""
+
+    config = tomllib.loads((PROJECT_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    include = set(config["tool"]["hatch"]["build"]["targets"]["sdist"]["include"])
+
+    assert include == {
+        "/src",
+        "/templates",
+        "/LICENSE",
+        "/README.md",
+        "/pyproject.toml",
+    }
+
+
 def test_installed_layout_resolves_every_template(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

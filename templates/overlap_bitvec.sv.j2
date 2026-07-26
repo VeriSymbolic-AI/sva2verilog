@@ -81,7 +81,7 @@ module {{ module_name }} #(
     // ── HARDEN-01: attempt_fired_q never cleared by disable_i ──────────
     {{ wire_type(verilog_mode) }} attempt_fired_q;
 
-{{ attempt_fired_logic(verilog_mode, clock_edge, clock_signal, "ant_pass_w") }}
+{{ attempt_fired_logic(verilog_mode, clock_edge, clock_signal, "start") }}
 
     // ── Output assignments (|-> single-cycle consequent) ──────────────────────
     // ant_pass_w and con_pass_w are both registered one cycle by their leaves,
@@ -128,7 +128,7 @@ module {{ module_name }} #(
     // ── HARDEN-01: attempt_fired_q never cleared by disable_i ──────────
     {{ wire_type(verilog_mode) }} attempt_fired_q;
 
-{{ attempt_fired_logic(verilog_mode, clock_edge, clock_signal, "ant_pass_w") }}
+{{ attempt_fired_logic(verilog_mode, clock_edge, clock_signal, "start") }}
 
     // ── Output assignments ────────────────────────────────────────────────────
     assign active        = disable_i ? 1'b0 : (overflow_flag_q ? 1'b0 : (ant_active_w | con_active_w | (|bv_q)));

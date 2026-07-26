@@ -15,31 +15,30 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: astral-sh/setup-uv@e4db8464a088ece1b920f60402e813ea4de65b8f # v4
 
       - name: Install Python
         run: uv python install 3.12
 
       - name: Install dependencies
-        run: uv sync --dev
+        run: uv sync --dev --frozen
 
       - name: Install iverilog
         run: sudo apt-get update && sudo apt-get install -y iverilog
 
       - name: Install slang
-        run: |
-          SLANG_VERSION="v11.0"
-          wget -q "https://github.com/MikePopoloski/slang/releases/download/${SLANG_VERSION}/slang-linux-x86_64.tar.gz"
-          tar xzf slang-linux-x86_64.tar.gz
-          sudo mv slang /usr/local/bin/slang
-          slang --version
+        run: bash tools/ci/install_slang.sh
+
+      - name: Select a reproducible rotating seed
+        run: echo "HYPOTHESIS_ROTATING_SEED=$(date -u +%Y%m%d)" >> "$GITHUB_ENV"
 
       - name: Run deterministic catalog + fast differential (iverilog)
         run: >
           uv run pytest tests/test_differential.py
           -m "not differential_slow" --simulator=iverilog
-          --hypothesis-seed=20260722 -v --timeout=600
+          --hypothesis-seed=20260722 --basetemp=.artifacts/iverilog-fast
+          -v --timeout=600 --junitxml=iverilog-fast.xml
         env:
           SLANG_PATH: /usr/local/bin/slang
 
@@ -47,40 +46,55 @@ jobs:
         run: >
           uv run pytest tests/test_differential.py
           -m "differential_slow" --simulator=iverilog
-          --hypothesis-seed=20260722 -v --timeout=600
+          --hypothesis-seed="${HYPOTHESIS_ROTATING_SEED}"
+          --basetemp=.artifacts/iverilog-slow -v --timeout=600
+          --junitxml=iverilog-slow.xml
         env:
           SLANG_PATH: /usr/local/bin/slang
+
+      - name: Enforce differential execution budgets
+        run: |
+          uv run python tools/ci/check_junit.py iverilog-fast.xml --min-passed 16 --max-skipped 0
+          uv run python tools/ci/check_junit.py iverilog-slow.xml --min-passed 1 --max-skipped 0
+
+      - name: Upload sanitized mismatch replay artifacts
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: differential-iverilog-${{ github.run_id }}
+          path: .artifacts/**/differential-artifacts/*.json
+          if-no-files-found: warn
+          retention-days: 14
 
   differential-verilator:
     name: differential catalog + fast + slow (Verilator)
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: astral-sh/setup-uv@e4db8464a088ece1b920f60402e813ea4de65b8f # v4
 
       - name: Install Python
         run: uv python install 3.12
 
       - name: Install dependencies
-        run: uv sync --dev
+        run: uv sync --dev --frozen
 
       - name: Install Verilator (pinned v5.028)
         run: bash tools/ci/install_verilator.sh
 
       - name: Install slang
-        run: |
-          SLANG_VERSION="v11.0"
-          wget -q "https://github.com/MikePopoloski/slang/releases/download/${SLANG_VERSION}/slang-linux-x86_64.tar.gz"
-          tar xzf slang-linux-x86_64.tar.gz
-          sudo mv slang /usr/local/bin/slang
-          slang --version
+        run: bash tools/ci/install_slang.sh
+
+      - name: Select a reproducible rotating seed
+        run: echo "HYPOTHESIS_ROTATING_SEED=$(date -u +%Y%m%d)" >> "$GITHUB_ENV"
 
       - name: Run deterministic catalog + fast differential (Verilator)
         run: >
           uv run pytest tests/test_differential.py
           -m "not differential_slow" --simulator=verilator
-          --hypothesis-seed=20260722 -v --timeout=600
+          --hypothesis-seed=20260722 --basetemp=.artifacts/verilator-fast
+          -v --timeout=600 --junitxml=verilator-fast.xml
         env:
           SLANG_PATH: /usr/local/bin/slang
 
@@ -88,31 +102,42 @@ jobs:
         run: >
           uv run pytest tests/test_differential.py
           -m "differential_slow" --simulator=verilator
-          --hypothesis-seed=20260722 -v --timeout=600
+          --hypothesis-seed="${HYPOTHESIS_ROTATING_SEED}"
+          --basetemp=.artifacts/verilator-slow -v --timeout=600
+          --junitxml=verilator-slow.xml
         env:
           SLANG_PATH: /usr/local/bin/slang
+
+      - name: Enforce differential execution budgets
+        run: |
+          uv run python tools/ci/check_junit.py verilator-fast.xml --min-passed 16 --max-skipped 0
+          uv run python tools/ci/check_junit.py verilator-slow.xml --min-passed 1 --max-skipped 0
+
+      - name: Upload sanitized mismatch replay artifacts
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: differential-verilator-${{ github.run_id }}
+          path: .artifacts/**/differential-artifacts/*.json
+          if-no-files-found: warn
+          retention-days: 14
 
   mutation-full-sweep:
     name: mutation full sweep (semantic Python + RTL templates)
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: astral-sh/setup-uv@e4db8464a088ece1b920f60402e813ea4de65b8f # v4
 
       - name: Install Python
         run: uv python install 3.12
 
       - name: Install dependencies
-        run: uv sync --dev
+        run: uv sync --dev --frozen
 
       - name: Install slang
-        run: |
-          SLANG_VERSION="v11.0"
-          wget -q "https://github.com/MikePopoloski/slang/releases/download/${SLANG_VERSION}/slang-linux-x86_64.tar.gz"
-          tar xzf slang-linux-x86_64.tar.gz
-          sudo mv slang /usr/local/bin/slang
-          slang --version
+        run: bash tools/ci/install_slang.sh
 
       - name: Install iverilog for RTL-template mutants
         run: sudo apt-get update && sudo apt-get install -y iverilog

@@ -88,7 +88,7 @@ always_ff @(posedge clk) begin
 always_ff @(posedge clk) begin
         if (!rst_n) begin
             attempt_fired_q <= '0;
-        end else if (ant_pass_w) begin
+        end else if (start) begin
             attempt_fired_q <= 1'b1;  // sticky — never cleared by disable_i (HARDEN-01)
         end
     end

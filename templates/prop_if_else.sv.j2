@@ -18,11 +18,11 @@ module {{ module_name }} (
 {{ port_decl(verilog_mode, "output", "disabled_o") }}
 );
 
-    {{ wire_type(verilog_mode) }} true_active, true_pass, true_fail, true_disabled;
+    {{ wire_type(verilog_mode) }} true_active, true_pass, true_fail;
 {% if has_else == "1" %}
-    {{ wire_type(verilog_mode) }} false_active, false_pass, false_fail, false_disabled;
+    {{ wire_type(verilog_mode) }} false_active, false_pass, false_fail;
 {% endif %}
-    {{ signal_type(verilog_mode) }} active_q, pass_q, fail_q, disabled_q;
+    {{ signal_type(verilog_mode) }} active_q, pass_q, fail_q;
 
 {{ children[0].module_name }} u_true (
     .{{ clock_signal }}({{ clock_signal }}),
@@ -36,7 +36,7 @@ module {{ module_name }} (
     .pass(true_pass),
     .fail(true_fail),
     .attempt_fired(),
-    .disabled_o(true_disabled)
+    .disabled_o()
 );
 {% if has_else == "1" %}
 {{ children[1].module_name }} u_false (
@@ -51,7 +51,7 @@ module {{ module_name }} (
     .pass(false_pass),
     .fail(false_fail),
     .attempt_fired(),
-    .disabled_o(false_disabled)
+    .disabled_o()
 );
 {% endif %}
 
@@ -75,23 +75,17 @@ module {{ module_name }} (
             active_q <= 1'b0;
             pass_q   <= 1'b0;
             fail_q   <= 1'b0;
-            disabled_q <= 1'b0;
         end else begin
             active_q  <= _body_active;
             pass_q    <= _body_pass;
             fail_q    <= _body_fail;
-{% if has_else == "1" %}
-            disabled_q <= {{ cond_expr }} ? true_disabled : false_disabled;
-{% else %}
-            disabled_q <= {{ cond_expr }} ? true_disabled : 1'b0;
-{% endif %}
         end
     end
 
     assign active  = active_q;
     assign pass    = pass_q;
     assign fail    = fail_q;
-    assign disabled_o = disabled_q;
+    assign disabled_o = disable_i;
     assign attempt_fired = attempt_fired_q;
 
 endmodule

@@ -18,8 +18,8 @@ module {{ module_name }} (
 {{ port_decl(verilog_mode, "output", "disabled_o") }}
 );
 
-    {{ wire_type(verilog_mode) }} body_active, body_pass, body_fail, body_disabled;
-    {{ signal_type(verilog_mode) }} active_q, pass_q, fail_q, disabled_q;
+    {{ wire_type(verilog_mode) }} body_active, body_pass, body_fail;
+    {{ signal_type(verilog_mode) }} active_q, pass_q, fail_q;
 
 {{ children[0].module_name }} u_body (
     .{{ clock_signal }}({{ clock_signal }}),
@@ -33,7 +33,7 @@ module {{ module_name }} (
     .pass(body_pass),
     .fail(body_fail),
     .attempt_fired(),
-    .disabled_o(body_disabled)
+    .disabled_o()
 );
 
     wire _body_active = body_active;
@@ -50,19 +50,17 @@ module {{ module_name }} (
             active_q <= 1'b0;
             pass_q   <= 1'b0;
             fail_q   <= 1'b0;
-            disabled_q <= 1'b0;
         end else begin
             active_q  <= _body_active;
             pass_q    <= _body_pass;
             fail_q    <= _body_fail;
-            disabled_q <= body_disabled;
         end
     end
 
     assign active  = active_q;
     assign pass    = pass_q;
     assign fail    = fail_q;
-    assign disabled_o = disabled_q;
+    assign disabled_o = disable_i;
     assign attempt_fired = attempt_fired_q;
 
 endmodule

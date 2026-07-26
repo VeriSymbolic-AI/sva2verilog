@@ -40,7 +40,22 @@ int main(int argc, char** argv) {
     // Match the SV testbench's @(posedge clk); $display(...) observation.
     // $display runs before nonblocking assignments commit, so capture the
     // currently settled outputs before toggling the clock high.
-{%- if has_overflow_flag %}
+{%- if capture_contract and has_overflow_flag %}
+    printf("%c %c %c %c %c %c\n",
+        top->active ? '1' : '0',
+        top->pass   ? '1' : '0',
+        top->fail   ? '1' : '0',
+        top->attempt_fired ? '1' : '0',
+        top->disabled_o ? '1' : '0',
+        top->overflow_flag ? '1' : '0');
+{%- elif capture_contract %}
+    printf("%c %c %c %c %c\n",
+        top->active ? '1' : '0',
+        top->pass   ? '1' : '0',
+        top->fail   ? '1' : '0',
+        top->attempt_fired ? '1' : '0',
+        top->disabled_o ? '1' : '0');
+{%- elif has_overflow_flag %}
     printf("%c %c %c %c\n",
         top->active ? '1' : '0',
         top->pass   ? '1' : '0',

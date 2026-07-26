@@ -88,6 +88,7 @@ def generate_testbench(
     stimulus: list[dict[str, Any]],
     *,
     has_overflow_flag: bool = False,
+    capture_contract: bool = False,
 ) -> str:
     """Generate a self-contained SystemVerilog testbench string.
 
@@ -112,6 +113,10 @@ def generate_testbench(
     has_overflow_flag:
         When ``True``, the DUT exposes an ``overflow_flag`` output and the
         testbench captures it as a fourth column.
+    capture_contract:
+        When ``True``, also capture the standard ``attempt_fired`` and
+        ``disabled_o`` outputs.  The default preserves the legacy three/four
+        column trace shape used by existing behavioral tests.
 
     Returns
     -------
@@ -193,7 +198,17 @@ def generate_testbench(
         _w(f"        disable_i = {dis_val};")
         # Capture at posedge
         _w(f"        @(posedge {clock_signal});")
-        if has_overflow_flag:
+        if capture_contract and has_overflow_flag:
+            _w(
+                "        $display(\"%b %b %b %b %b %b\","
+                " active, pass_out, fail_out, attempt_fired, disabled_o, overflow_flag);"
+            )
+        elif capture_contract:
+            _w(
+                "        $display(\"%b %b %b %b %b\","
+                " active, pass_out, fail_out, attempt_fired, disabled_o);"
+            )
+        elif has_overflow_flag:
             _w(
                 "        $display(\"%b %b %b %b\","
                 " active, pass_out, fail_out, overflow_flag);"
@@ -222,6 +237,7 @@ def run_simulation(
     *,
     work_dir: Path,
     has_overflow_flag: bool = False,
+    capture_contract: bool = False,
     simulator: str = "iverilog",
     stimulus: list[dict[str, Any]] | None = None,
     extra_inputs: list[str] | None = None,
@@ -275,6 +291,7 @@ def run_simulation(
         return _run_simulation_iverilog(
             module_name, sv_sources, tb_code, work_dir=work_dir,
             has_overflow_flag=has_overflow_flag,
+            capture_contract=capture_contract,
         )
     elif simulator == "verilator":
         if stimulus is None:
@@ -288,6 +305,7 @@ def run_simulation(
         return _run_simulation_verilator(
             module_name, sv_sources, tb_code, work_dir=work_dir,
             has_overflow_flag=has_overflow_flag,
+            capture_contract=capture_contract,
             stimulus=stimulus, extra_inputs=extra_inputs,
             clock_signal=clock_signal,
         )
@@ -302,6 +320,7 @@ def _run_simulation_iverilog(
     *,
     work_dir: Path,
     has_overflow_flag: bool = False,
+    capture_contract: bool = False,
 ) -> list[dict[str, bool]]:
     """Compile and run a sva2rtl testbench with Icarus Verilog."""
     iverilog = shutil.which("iverilog")
@@ -349,7 +368,11 @@ def _run_simulation_iverilog(
             f"STDERR:\n{sim_result.stderr}"
         )
 
-    return _parse_output(sim_result.stdout, has_overflow_flag=has_overflow_flag)
+    return _parse_output(
+        sim_result.stdout,
+        has_overflow_flag=has_overflow_flag,
+        capture_contract=capture_contract,
+    )
 
 
 def _verilator_timing_flag(verilator: str) -> str:
@@ -387,6 +410,7 @@ def _generate_verilator_wrapper(
     extra_inputs: list[str],
     stimulus: list[dict[str, Any]],
     has_overflow_flag: bool,
+    capture_contract: bool = False,
 ) -> str:
     """Render the Verilator C++ wrapper for a given module and stimulus.
 
@@ -401,6 +425,7 @@ def _generate_verilator_wrapper(
         extra_inputs=extra_inputs,
         stimulus=stimulus,
         has_overflow_flag=has_overflow_flag,
+        capture_contract=capture_contract,
     )
 
 
@@ -411,6 +436,7 @@ def _run_simulation_verilator(
     *,
     work_dir: Path,
     has_overflow_flag: bool,
+    capture_contract: bool = False,
     stimulus: list[dict[str, Any]],
     extra_inputs: list[str],
     clock_signal: str,
@@ -449,6 +475,7 @@ def _run_simulation_verilator(
         extra_inputs=extra_inputs,
         stimulus=stimulus,
         has_overflow_flag=has_overflow_flag,
+        capture_contract=capture_contract,
     )
     wrapper_path = build_dir / "wrapper.cpp"
     wrapper_path.write_text(wrapper_code, encoding="utf-8")
@@ -493,7 +520,11 @@ def _run_simulation_verilator(
             f"STDERR:\n{sim_result.stderr}"
         )
 
-    return _parse_output(sim_result.stdout, has_overflow_flag=has_overflow_flag)
+    return _parse_output(
+        sim_result.stdout,
+        has_overflow_flag=has_overflow_flag,
+        capture_contract=capture_contract,
+    )
 
 
 # ── Private helpers ───────────────────────────────────────────────────────────
@@ -503,6 +534,7 @@ def _parse_output(
     output: str,
     *,
     has_overflow_flag: bool = False,
+    capture_contract: bool = False,
 ) -> list[dict[str, bool]]:
     """Parse ``$fdisplay`` output from the testbench into per-cycle output dicts.
 
@@ -510,6 +542,8 @@ def _parse_output(
     Column order matches what ``generate_testbench`` emits:
     - 3 columns: ``active pass fail``
     - 4 columns: ``active pass fail overflow``
+    - 5 columns: ``active pass fail attempt_fired disabled_o``
+    - 6 columns: ``active pass fail attempt_fired disabled_o overflow``
 
     Empty lines and lines that don't parse as bit vectors are ignored.
 
@@ -542,8 +576,15 @@ def _parse_output(
             "pass":   parts[1] == "1",
             "fail":   parts[2] == "1",
         }
-        if has_overflow_flag and len(parts) >= 4:
-            row["overflow"] = parts[3] == "1"
+        if capture_contract and len(parts) >= 5:
+            row["attempt_fired"] = parts[3] == "1"
+            row["disabled_o"] = parts[4] == "1"
+        elif capture_contract:
+            row["attempt_fired"] = False
+            row["disabled_o"] = False
+        overflow_index = 5 if capture_contract else 3
+        if has_overflow_flag and len(parts) > overflow_index:
+            row["overflow"] = parts[overflow_index] == "1"
         elif has_overflow_flag:
             row["overflow"] = False
         results.append(row)

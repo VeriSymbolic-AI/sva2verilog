@@ -140,6 +140,32 @@ def test_generated_rtl_case_catalog_emits_modules(case: object) -> None:
     assert emitted.case.matrix_rows, f"{emitted.case.case_id}: missing matrix rows"
 
 
+@pytest.mark.parametrize(
+    "case",
+    all_generated_monitor_cases(),
+    ids=lambda case: case.case_id,
+)
+def test_generated_top_exposes_standard_checker_contract(case: object) -> None:
+    """Every representative user-facing top keeps the anti-vacuity interface."""
+
+    assert isinstance(case, GeneratedMonitorCase)
+    emitted = emit_generated_case(case)
+    top_source = emitted.modules[emitted.top_module]
+    module_start = top_source.index(f"module {emitted.top_module}")
+    header = top_source[module_start:].split(");", maxsplit=1)[0]
+    for port in (
+        "rst_n",
+        "start",
+        "disable_i",
+        "active",
+        "pass",
+        "fail",
+        "attempt_fired",
+        "disabled_o",
+    ):
+        assert port in header, f"{case.case_id}: top header missing {port}"
+
+
 def test_yosys_helper_script_contains_required_passes(tmp_path: Path) -> None:
     """The helper builds the expected synthesis-oriented Yosys pass sequence."""
     case = yosys_generated_monitor_cases()[0]
