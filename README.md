@@ -207,6 +207,189 @@ SVA Source → slang --ast-json → IR → Normalize → Compose → Optimize �
 | Optimize | Constant folding, boolean simplification, common subexpression elimination, and dead-logic pruning |
 | Emit | Jinja2 templates generate SystemVerilog or Verilog-2001 |
 
+## Formal Verification Methodology
+
+Correctness of a monitor compiler cannot be established by testing the compiler
+against itself. sva2rtl therefore separates *specification semantics* from
+*implementation structure* at every verification layer, and states its proof
+strength honestly rather than claiming uniform correctness.
+
+### Non-Circularity Principle
+
+The central methodological commitment is that no expected result may be derived
+from the code under test.
+
+- The behavioral oracle (`src/sva2rtl/behavioral_oracle.py`) is a pure-Python
+  model of IEEE 1800 assertion semantics. It is written from the standard, not
+  derived from the composition or emission code.
+- The differential reference (`tests/differential_reference.py`) consumes the
+  typed specification that *rendered* the SVA source, and deliberately imports
+  neither compiler IR nor composition/emission modules. An importer or composer
+  mistake therefore cannot silently become the expected differential result.
+- Formal miters compare generated RTL against an *independently written* IEEE
+  1800 reference monitor, not against a second instance of the generated logic.
+
+### Verification Layers
+
+| Layer | Method | Property established |
+|-------|--------|----------------------|
+| 1 | Behavioral oracle (Python IEEE model) | Cycle-accurate semantic agreement, structure-independent |
+| 2 | Dual-simulator co-simulation (Icarus + Verilator) | Toolchain-independent simulation agreement |
+| 3 | Bounded model checking (SymbiYosys `bmc`) | No counterexample within a stated cycle bound |
+| 4 | k-induction (SymbiYosys `prove`) | Unbounded equivalence for converging monitors |
+| 5 | Synthesis and lint acceptance (Yosys, Verilator) | Generated RTL is structurally synthesizable |
+| 6 | Source-level differential testing (Hypothesis) | Randomized specification-to-RTL agreement |
+
+Layers 3 and 4 differ in strength and this distinction is preserved throughout
+the documentation. A BMC result is a *bounded* claim: it certifies that no
+counterexample exists up to depth *k*. A k-induction result in `prove` mode is
+an *unbounded* claim over all reachable states. Rows in
+[SUPPORT_MATRIX.md](SUPPORT_MATRIX.md) record which of the two applies, and the
+bound where BMC is the strongest available result.
+
+### Miter Construction
+
+Equivalence checking uses a miter that drives the generated monitor and the
+independent reference monitor from identical stimulus and asserts observable
+agreement:
+
+```
+             ┌────────────────────────┐
+stimulus ───►│ generated monitor      │──► pass/fail/active ──┐
+    │        └────────────────────────┘                       │
+    │                                                    ┌────▼────┐
+    │        ┌────────────────────────┐                  │ assert  │
+    └───────►│ independent reference  │──► pass/fail/active─►  equal │
+             │ (hand-written IEEE)    │                  └─────────┘
+             └────────────────────────┘
+```
+
+Arbitrary-start variants relax the assumption that evaluation begins at reset,
+which catches errors that only appear on mid-stream triggering.
+
+### Stated Limitations
+
+The project does not claim uniform formal correctness, and the following
+boundaries are deliberate:
+
+- Unbounded liveness (`s_eventually a` without a range) is rejected at compile
+  time; it is not realizable on finite state.
+- Multi-clock equivalence is a *trusted boundary*. Full clock-domain-crossing
+  and metastability proof is a separate tool category and is out of scope.
+- k-induction does not converge for every operator family. Where it does not,
+  the row remains BMC-bounded and says so; a non-converging induction step is
+  recorded as a known boundary rather than waived.
+- Nested multi-path composition is bounded at K ≤ 32 NFA states, enforced at
+  compile time.
+
+Current per-construct evidence status, including which layers have been
+exercised on the current commit, is maintained in
+[SUPPORT_MATRIX.md](SUPPORT_MATRIX.md). Known gaps and their severity are
+tracked in [INDUSTRIAL_VALIDATION_GAPS.md](INDUSTRIAL_VALIDATION_GAPS.md).
+
+## Industrial Collaboration and Sponsorship
+
+sva2rtl is validated entirely with open-source formal and simulation tools:
+SymbiYosys, Yosys, Icarus Verilog, and Verilator. This is sufficient to
+establish internal consistency and bounded correctness, but it leaves one
+class of evidence out of reach.
+
+### Requested: Commercial Formal Tool Access
+
+We are seeking academic or industrial sponsorship providing evaluation access to
+a commercial formal verification tool — **Cadence JasperGold** in particular,
+though Siemens Questa Formal or Synopsys VC Formal would serve the same
+purpose. The goal is cross-tool differential validation of SVA semantics.
+
+Why this matters: our reference monitors encode our *reading* of IEEE 1800.
+Commercial tools encode a reading that has been exercised against a very large
+body of industrial designs. Comparing the two would let us either confirm
+agreement or locate genuine semantic divergence. Specifically, sponsorship would
+enable:
+
+- Independent confirmation that generated monitors are equivalent to the
+  original SVA under a tool whose semantics were developed independently of ours
+- Detection of divergence in the semantically subtle areas — `disable iff`
+  interaction with reset, sampled-value timing at clock edges, `first_match`
+  and non-consecutive repetition boundaries, and multi-clock sequences
+- Promotion of construct rows from BMC-bounded to cross-tool-confirmed status
+- A published, reproducible open-versus-commercial formal comparison, which to
+  our knowledge does not currently exist for SVA monitor synthesis
+
+We would publish the methodology and results, and acknowledge the sponsoring
+organization. Only evaluation access is needed; no funding is requested. If your
+organization can help, please open an issue titled `Sponsorship: formal tool
+access` on the project repository.
+
+## References
+
+### Academic Foundations
+
+The token-passing composition model and the general approach of synthesizing
+proven-correct monitors from declarative temporal specifications derive from the
+following work. sva2rtl is an independent implementation and is not affiliated
+with these authors or their institutions.
+
+1. K. Morin-Allory and D. Borrione. "Proven correct monitors from PSL
+   specifications." *Design, Automation and Test in Europe (DATE)*, 2006.
+   [ACM](https://dl.acm.org/doi/10.5555/1131481.1131827)
+2. D. Borrione, M. Liu, P. Ostier, and L. Fesquet. "On-Line Assertion-Based
+   Verification with Proven Correct Monitors." TIMA Laboratory, 2005.
+   [HAL](https://hal.science/hal-00078798v1)
+3. M. Boulé and Z. Zilic. "Automata-based assertion-checker synthesis of PSL
+   properties." *ACM Transactions on Design Automation of Electronic Systems
+   (TODAES)*, 13(1), 2008.
+   [ACM](https://dl.acm.org/doi/10.1145/1297666.1297670)
+4. M. Boulé and Z. Zilic. "Efficient Automata-Based Assertion-Checker Synthesis
+   of PSL Properties." *IEEE High Level Design Validation and Test Workshop
+   (HLDVT)*, 2006.
+   [IEEE](https://ieeexplore.ieee.org/document/4110065)
+5. Y. Oddos, K. Morin-Allory, and D. Borrione. "From Assertion-Based
+   Verification to Assertion-Based Synthesis." In *Advances in Design Methods
+   from Modeling Languages for Embedded Systems and SoCs*, Springer, 2010.
+   [Springer](https://link.springer.com/chapter/10.1007/978-3-642-23120-9_6)
+
+### Standards
+
+6. IEEE Std 1800-2017. *IEEE Standard for SystemVerilog — Unified Hardware
+   Design, Specification, and Verification Language*. Clauses 16 (Assertions)
+   and 20 (Utility system tasks and functions).
+   [IEEE](https://ieeexplore.ieee.org/document/8299595)
+
+### Tools Used
+
+7. slang — SystemVerilog compiler and language services library (MIT). Used as
+   the SVA frontend via `--ast-json`.
+   [GitHub](https://github.com/MikePopoloski/slang)
+8. Yosys and SymbiYosys — open-source synthesis and formal verification
+   front-end. Used for BMC, k-induction, and synthesis acceptance.
+   [GitHub](https://github.com/YosysHQ/oss-cad-suite-build)
+9. Verilator — SystemVerilog simulator and linter. Used as a co-simulation
+   oracle and generated-RTL lint gate.
+   [GitHub](https://github.com/verilator/verilator)
+10. Icarus Verilog — event-driven Verilog simulator. Used as the primary
+    co-simulation oracle.
+    [GitHub](https://github.com/steveicarus/iverilog)
+
+The NFA composition engine, token-passing network construction, and the
+checker-tree optimizer (constant folding, boolean simplification, common
+subexpression elimination, dead-logic pruning) are implemented directly in this
+project rather than delegated to an automata library.
+
+### Citing sva2rtl
+
+If sva2rtl is useful in academic work, please cite it as software:
+
+```bibtex
+@software{sva2rtl,
+  title  = {sva2rtl: A SystemVerilog Assertion to Synthesizable RTL
+            Monitor Compiler},
+  year   = {2026},
+  note   = {Version 1.7.1},
+  url    = {https://github.com/VeriSymbolic-AI/sva2verilog}
+}
+```
+
 ## License
 
 Licensed under the Business Source License 1.1 (BSL-1.1).

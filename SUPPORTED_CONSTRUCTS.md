@@ -1,4 +1,4 @@
-# Supported SVA Constructs — sva2rtl v1.7.0 current main
+# Supported SVA Constructs — sva2rtl v1.7.1 current main
 
 This file explains supported syntax, semantics, and generated template shapes.
 Exact support status, subset boundaries, and verification evidence are governed
