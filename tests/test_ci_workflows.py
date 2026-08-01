@@ -22,8 +22,16 @@ NIGHTLY_WORKFLOW = ROOT / ".github" / "workflows" / "differential-nightly.yml"
 
 def test_verilator_installer_has_all_source_build_dependencies() -> None:
     script = INSTALLER.read_text(encoding="utf-8")
-    for dependency in ("autoconf", "bison", "build-essential", "flex", "help2man"):
+    for dependency in (
+        "autoconf",
+        "bison",
+        "build-essential",
+        "flex",
+        "help2man",
+        "libfl-dev",
+    ):
         assert dependency in script
+    assert 'test -r /usr/include/FlexLexer.h' in script
     assert "brew --prefix flex" in script
     assert "brew --prefix bison" in script
     assert "HOMEBREW_NO_AUTO_UPDATE=1" in script

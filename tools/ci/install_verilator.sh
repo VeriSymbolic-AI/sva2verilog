@@ -10,7 +10,14 @@ verilator_tmp="$(mktemp -d "${RUNNER_TEMP:-/tmp}/sva2rtl-verilator.XXXXXX")"
 case "$(uname -s)" in
   Linux)
     sudo apt-get update
-    sudo apt-get install -y autoconf bison build-essential flex help2man
+    # Ubuntu 24.04 splits the C++ Flex header out of the `flex` package.
+    # Verilator's generated lexer includes <FlexLexer.h>, so the recommended
+    # libfl-dev package is a required source-build dependency.
+    sudo apt-get install -y autoconf bison build-essential flex help2man libfl-dev
+    test -r /usr/include/FlexLexer.h || {
+      echo "libfl-dev did not provide /usr/include/FlexLexer.h" >&2
+      exit 1
+    }
     verilator_jobs="$(nproc)"
     verilator_prefix="/usr/local"
     verilator_install=(sudo make install)
