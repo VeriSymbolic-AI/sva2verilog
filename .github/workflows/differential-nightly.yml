@@ -33,6 +33,9 @@ jobs:
       - name: Select a reproducible rotating seed
         run: echo "HYPOTHESIS_ROTATING_SEED=$(date -u +%Y%m%d)" >> "$GITHUB_ENV"
 
+      - name: Prepare differential artifact root
+        run: mkdir -p .artifacts
+
       - name: Run deterministic catalog + fast differential (iverilog)
         run: >
           uv run pytest tests/test_differential.py
@@ -64,6 +67,7 @@ jobs:
           name: differential-iverilog-${{ github.run_id }}
           path: .artifacts/**/differential-artifacts/*.json
           if-no-files-found: warn
+          include-hidden-files: true
           retention-days: 14
 
   differential-verilator:
@@ -88,6 +92,9 @@ jobs:
 
       - name: Select a reproducible rotating seed
         run: echo "HYPOTHESIS_ROTATING_SEED=$(date -u +%Y%m%d)" >> "$GITHUB_ENV"
+
+      - name: Prepare differential artifact root
+        run: mkdir -p .artifacts
 
       - name: Run deterministic catalog + fast differential (Verilator)
         run: >
@@ -120,6 +127,7 @@ jobs:
           name: differential-verilator-${{ github.run_id }}
           path: .artifacts/**/differential-artifacts/*.json
           if-no-files-found: warn
+          include-hidden-files: true
           retention-days: 14
 
   mutation-full-sweep:

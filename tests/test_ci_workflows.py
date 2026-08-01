@@ -117,6 +117,22 @@ def test_nightly_runs_both_differential_backends_and_all_mutation_surfaces() -> 
     assert "tools/mutation/run_template_mutation.py" in workflow
 
 
+def test_nightly_prepares_nested_basetemp_and_uploads_sanitized_hidden_artifacts() -> None:
+    """A clean checkout must support nested pytest basetemp and replay paths."""
+    workflow = NIGHTLY_WORKFLOW.read_text(encoding="utf-8")
+
+    assert workflow.count("mkdir -p .artifacts") == 2
+    assert workflow.count("include-hidden-files: true") == 2
+    job_markers = {
+        "iverilog": "differential-slow-iverilog:",
+        "verilator": "differential-verilator:",
+    }
+    for backend, job_marker in job_markers.items():
+        prepare = workflow.index("mkdir -p .artifacts", workflow.index(job_marker))
+        fast_run = workflow.index(f"--basetemp=.artifacts/{backend}-fast")
+        assert prepare < fast_run
+
+
 def test_ci_enforces_real_coverage_and_critical_module_floors() -> None:
     workflow = WORKFLOWS[0].read_text(encoding="utf-8")
     assert "--cov=src/sva2rtl" in workflow
