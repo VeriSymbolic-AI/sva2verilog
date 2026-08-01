@@ -43,10 +43,13 @@ from sva2rtl.ir import BoolExpr, CheckerNode, ClockSpec, SeqConcat, SeqRepetitio
 from sva2rtl.normalizer import normalize
 from sva2rtl.optimizer import optimize
 
-pytestmark = pytest.mark.skipif(
-    not sby_is_available(),
-    reason="sby (SymbiYosys) not found on PATH — k-induction proofs disabled",
-)
+pytestmark = [
+    pytest.mark.formal,
+    pytest.mark.skipif(
+        not sby_is_available(),
+        reason="sby (SymbiYosys) not found on PATH — k-induction proofs disabled",
+    ),
+]
 
 _FIXTURES = Path(__file__).parent / "fixtures"
 _DEFAULT_PROVE_TIMEOUT_SECONDS = 600

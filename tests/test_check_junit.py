@@ -116,3 +116,27 @@ def test_main_stays_quiet_when_budget_is_met(
 
     assert exit_code == 0
     assert capsys.readouterr().err == ""
+
+
+def test_main_allows_only_declared_skip_reason_prefixes(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    body = _REPORT.replace("<failure", "<skipped").replace(
+        "</failure>", "</skipped>"
+    )
+    report = _write(tmp_path, body)
+
+    exit_code = main(
+        [
+            str(report),
+            "--min-passed",
+            "2",
+            "--max-skipped",
+            "2",
+            "--allow-skip-prefix",
+            "verilator",
+        ]
+    )
+
+    assert exit_code == 1
+    assert "unapproved skip reason" in capsys.readouterr().err

@@ -104,6 +104,7 @@ def validate_outcomes(
     *,
     min_passed: int,
     max_skipped: int,
+    allowed_skip_prefixes: tuple[str, ...] = (),
 ) -> tuple[str, ...]:
     """Return deterministic gate violations for the configured job budget."""
 
@@ -120,6 +121,16 @@ def validate_outcomes(
         violations.append(
             f"{outcomes.skipped} tests skipped; allowed at most {max_skipped}"
         )
+    if allowed_skip_prefixes:
+        unapproved = tuple(
+            case
+            for case in outcomes.skipped_cases
+            if not any(case.reason.startswith(prefix) for prefix in allowed_skip_prefixes)
+        )
+        if unapproved:
+            violations.append(
+                f"{len(unapproved)} skipped tests have an unapproved skip reason"
+            )
     return tuple(violations)
 
 
@@ -147,6 +158,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("report", type=Path)
     parser.add_argument("--min-passed", type=int, required=True)
     parser.add_argument("--max-skipped", type=int, required=True)
+    parser.add_argument(
+        "--allow-skip-prefix",
+        action="append",
+        default=[],
+        help=(
+            "Approved prefix for a recorded skip reason; repeat for each "
+            "intentional tool or selection boundary."
+        ),
+    )
     args = parser.parse_args(argv)
 
     outcomes = parse_junit(args.report)
@@ -159,6 +179,7 @@ def main(argv: list[str] | None = None) -> int:
         outcomes,
         min_passed=args.min_passed,
         max_skipped=args.max_skipped,
+        allowed_skip_prefixes=tuple(args.allow_skip_prefix),
     )
     if violations:
         for violation in violations:

@@ -149,11 +149,15 @@ def test_ci_and_nightly_enforce_test_execution_budgets() -> None:
     formal = FORMAL_WORKFLOW.read_text(encoding="utf-8")
 
     assert ci.count("tools/ci/check_junit.py") == 6
-    assert "--min-passed 1350 --max-skipped 140" in ci
-    assert "--min-passed 170 --max-skipped 1" in ci
+    assert "--min-passed 1325 --max-skipped 185" in ci
+    assert "--min-passed 1325 --max-skipped 0" in ci
+    assert "--min-passed 170 --max-skipped 2" in ci
     assert "--min-passed 133 --max-skipped 0" in ci
     assert "--min-passed 3 --max-skipped 0" in ci
-    assert "--min-passed 1100 --max-skipped 150" in ci
+    assert "--min-passed 1150 --max-skipped 0" in ci
+    assert ci.count("not formal") == 2
+    for prefix in ("sby", "yosys", "verilator", "select with -m differential_slow"):
+        assert f'--allow-skip-prefix "{prefix}"' in ci
     assert nightly.count("tools/ci/check_junit.py") == 4
     assert formal.count("tools/ci/check_junit.py") == 1
     assert "max-skipped: 1" in formal

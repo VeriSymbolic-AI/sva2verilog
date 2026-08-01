@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from tools.ci.check_junit import JUnitOutcomes, parse_junit, validate_outcomes
+from tools.ci.check_junit import CaseOutcome, JUnitOutcomes, parse_junit, validate_outcomes
 
 
 def test_parse_junit_counts_all_outcomes(tmp_path: Path) -> None:
@@ -51,6 +51,45 @@ def test_validate_outcomes_accepts_budget_boundary() -> None:
             JUnitOutcomes(total=12, passed=10, skipped=2, failures=0, errors=0),
             min_passed=10,
             max_skipped=2,
+        )
+        == ()
+    )
+
+
+def test_validate_outcomes_rejects_unapproved_skip_reason() -> None:
+    outcomes = JUnitOutcomes(
+        total=2,
+        passed=1,
+        skipped=1,
+        failures=0,
+        errors=0,
+        skipped_cases=(CaseOutcome("suite::case", "unexpected quarantine"),),
+    )
+
+    assert validate_outcomes(
+        outcomes,
+        min_passed=1,
+        max_skipped=1,
+        allowed_skip_prefixes=("sby", "yosys", "verilator"),
+    ) == ("1 skipped tests have an unapproved skip reason",)
+
+
+def test_validate_outcomes_accepts_approved_skip_reason_prefix() -> None:
+    outcomes = JUnitOutcomes(
+        total=2,
+        passed=1,
+        skipped=1,
+        failures=0,
+        errors=0,
+        skipped_cases=(CaseOutcome("suite::case", "sby not found on PATH"),),
+    )
+
+    assert (
+        validate_outcomes(
+            outcomes,
+            min_passed=1,
+            max_skipped=1,
+            allowed_skip_prefixes=("sby",),
         )
         == ()
     )

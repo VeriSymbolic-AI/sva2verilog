@@ -42,10 +42,13 @@ from sva2rtl.ir import (
     SVANode,
 )
 
-pytestmark = pytest.mark.skipif(
-    not sby_is_available(),
-    reason="sby (SymbiYosys) not found — NFA formal miters disabled",
-)
+pytestmark = [
+    pytest.mark.formal,
+    pytest.mark.skipif(
+        not sby_is_available(),
+        reason="sby (SymbiYosys) not found — NFA formal miters disabled",
+    ),
+]
 
 _LOC = SourceLoc("nfa_bmc.sv", 1, 1)
 _CLK = ClockSpec(edge="posedge", signal="clk", source_loc=_LOC)

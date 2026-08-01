@@ -33,10 +33,13 @@ from sva2rtl.ir import CheckerNode
 from sva2rtl.normalizer import normalize
 from sva2rtl.optimizer import optimize
 
-pytestmark = pytest.mark.skipif(
-    not _yosys_is_available(),
-    reason="yosys not found on PATH — formal verification disabled",
-)
+pytestmark = [
+    pytest.mark.formal,
+    pytest.mark.skipif(
+        not _yosys_is_available(),
+        reason="yosys not found on PATH — formal verification disabled",
+    ),
+]
 
 _FIXTURES = Path(__file__).parent / "fixtures"
 

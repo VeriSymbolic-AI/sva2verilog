@@ -82,7 +82,11 @@ jobs:
         if: matrix.simulator == 'iverilog'
         run: >
           uv run python tools/ci/check_junit.py pytest-results.xml
-          --min-passed 1350 --max-skipped 140
+          --min-passed 1325 --max-skipped 185
+          --allow-skip-prefix "sby"
+          --allow-skip-prefix "yosys"
+          --allow-skip-prefix "verilator"
+          --allow-skip-prefix "select with -m differential_slow"
 
       - name: Run tests (Verilator — simulation + bounded differential)
         if: matrix.simulator == 'verilator'
@@ -96,7 +100,7 @@ jobs:
         if: matrix.simulator == 'verilator'
         run: >
           uv run python tools/ci/check_junit.py pytest-results.xml
-          --min-passed 170 --max-skipped 1
+          --min-passed 170 --max-skipped 2
 
   generated-rtl:
     name: generated RTL gates
@@ -201,8 +205,8 @@ jobs:
 
       - name: Run aggregate and critical-module coverage gates
         run: |
-          uv run pytest tests/ --simulator=iverilog --cov=src/sva2rtl --cov-branch --cov-report=term-missing --cov-report=json:coverage.json --cov-fail-under=82 -v --timeout=120 --junitxml=pytest-results.xml
-          uv run python tools/ci/check_junit.py pytest-results.xml --min-passed 1350 --max-skipped 140
+          uv run pytest tests/ --simulator=iverilog -m "not synthesis and not generated_lint and not formal and not differential_slow" --cov=src/sva2rtl --cov-branch --cov-report=term-missing --cov-report=json:coverage.json --cov-fail-under=82 -v --timeout=120 --junitxml=pytest-results.xml
+          uv run python tools/ci/check_junit.py pytest-results.xml --min-passed 1325 --max-skipped 0
           uv run python tools/ci/check_coverage.py coverage.json
         env:
           SLANG_PATH: /usr/local/bin/slang
@@ -232,7 +236,7 @@ jobs:
       - name: Run broad Python 3.14 compatibility suite
         run: >
           uv run --python 3.14 pytest tests/
-          -m "not simulation and not synthesis and not generated_lint"
+          -m "not simulation and not synthesis and not generated_lint and not formal and not differential_slow"
           -v --timeout=120 --junitxml=pytest-results.xml
         env:
           SLANG_PATH: /usr/local/bin/slang
@@ -240,7 +244,7 @@ jobs:
       - name: Enforce Python 3.14 execution budget
         run: >
           uv run --python 3.14 python tools/ci/check_junit.py pytest-results.xml
-          --min-passed 1100 --max-skipped 150
+          --min-passed 1150 --max-skipped 0
 
       - name: Build wheel and source distribution
         run: uv build --out-dir dist

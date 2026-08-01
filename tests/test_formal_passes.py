@@ -28,10 +28,13 @@ from sva2rtl.optimizer import optimize
 
 _FIXTURES = Path(__file__).parent / "fixtures"
 
-pytestmark = pytest.mark.skipif(
-    not _yosys_is_available(),
-    reason="yosys not found on PATH — formal verification disabled",
-)
+pytestmark = [
+    pytest.mark.formal,
+    pytest.mark.skipif(
+        not _yosys_is_available(),
+        reason="yosys not found on PATH — formal verification disabled",
+    ),
+]
 
 
 def _compile_to_checker(sv_text: str, *, optimize_flag: bool = True) -> CheckerNode:

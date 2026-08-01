@@ -40,10 +40,13 @@ from sva2rtl.ir import CheckerNode
 from sva2rtl.normalizer import normalize
 from sva2rtl.optimizer import optimize
 
-pytestmark = pytest.mark.skipif(
-    not sby_is_available(),
-    reason="sby (SymbiYosys) not found on PATH — SVA↔RTL equivalence disabled",
-)
+pytestmark = [
+    pytest.mark.formal,
+    pytest.mark.skipif(
+        not sby_is_available(),
+        reason="sby (SymbiYosys) not found on PATH — SVA↔RTL equivalence disabled",
+    ),
+]
 
 _FIXTURES = Path(__file__).parent / "fixtures"
 

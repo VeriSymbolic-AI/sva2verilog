@@ -28,10 +28,13 @@ from sva2rtl.ir import (
     SourceLoc,
 )
 
-pytestmark = pytest.mark.skipif(
-    not sby_is_available(),
-    reason="sby not found — NFA impl formal miters disabled",
-)
+pytestmark = [
+    pytest.mark.formal,
+    pytest.mark.skipif(
+        not sby_is_available(),
+        reason="sby not found — NFA impl formal miters disabled",
+    ),
+]
 
 _LOC = SourceLoc("p2_bmc.sv", 1, 1)
 _CLK = ClockSpec(edge="posedge", signal="clk", source_loc=_LOC)

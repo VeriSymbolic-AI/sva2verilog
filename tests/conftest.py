@@ -49,6 +49,10 @@ def pytest_configure(config: pytest.Config) -> None:
         "markers",
         "differential_slow: marks opt-in broader randomized differential sweeps",
     )
+    config.addinivalue_line(
+        "markers",
+        "formal: marks tests requiring Yosys / SymbiYosys formal tools",
+    )
     os.environ.setdefault(
         "SVA2RTL_SIMULATOR",
         str(config.getoption("--simulator", default="iverilog")),
