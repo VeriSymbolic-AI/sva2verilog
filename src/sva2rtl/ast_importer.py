@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Iterator
 from contextvars import ContextVar
 from pathlib import Path
 from typing import Any
@@ -149,6 +150,39 @@ _DECLARATIONS: ContextVar[dict[str, dict[str, Any]]] = ContextVar(
 )
 
 
+def _iter_instance_bodies(
+    members: list[dict[str, Any]],
+    seen: set[str] | None = None,
+) -> Iterator[dict[str, Any]]:
+    """Yield elaborated InstanceBody nodes across the selected hierarchy.
+
+    Slang nests elaborated child instances inside their parent's member list.
+    Real-project ``--top`` and library/filelist compilations therefore require
+    recursion; scanning only ``design.members`` silently misses assertions in
+    instantiated modules. Reused cached bodies are visited once because one
+    generic monitor is sufficient for identical elaborated module semantics.
+    """
+    if seen is None:
+        seen = set()
+
+    for member in members:
+        if member.get("kind") != "Instance":
+            continue
+        body = member.get("body", {})
+        if not isinstance(body, dict) or body.get("kind") != "InstanceBody":
+            continue
+        body_addr = body.get("addr")
+        key = f"addr:{body_addr}" if body_addr is not None else f"object:{id(body)}"
+        if key in seen:
+            continue
+        seen.add(key)
+        yield body
+
+        child_members = body.get("members", [])
+        if isinstance(child_members, list):
+            yield from _iter_instance_bodies(child_members, seen)
+
+
 # ── Public API ─────────────────────────────────────────────────────────────
 
 
@@ -183,17 +217,15 @@ def import_assertion(
 
     # Keep declaration lookup scoped to the InstanceBody containing the
     # assertion.  This is both module-correct and safe for concurrent imports.
-    for member in members:
-        if member.get("kind") == "Instance":
-            body = member.get("body", {})
-            if body.get("kind") == "InstanceBody":
-                token = _DECLARATIONS.set(_collect_declarations(body.get("members", [])))
-                try:
-                    result = _find_assertion_in_members(body.get("members", []))
-                    if result is not None:
-                        return result
-                finally:
-                    _DECLARATIONS.reset(token)
+    for body in _iter_instance_bodies(members):
+        body_members = body.get("members", [])
+        token = _DECLARATIONS.set(_collect_declarations(body_members))
+        try:
+            result = _find_assertion_in_members(body_members)
+            if result is not None:
+                return result
+        finally:
+            _DECLARATIONS.reset(token)
 
     raise SvaCompileError(
         message="No concurrent assertion found in the slang AST. "
@@ -229,15 +261,13 @@ def import_all_assertions(
     # Collect assertions module by module so named declarations cannot resolve
     # accidentally across InstanceBody boundaries.
     results: list[tuple[SVANode, ClockSpec, str, str | None]] = []
-    for member in members:
-        if member.get("kind") == "Instance":
-            body = member.get("body", {})
-            if body.get("kind") == "InstanceBody":
-                token = _DECLARATIONS.set(_collect_declarations(body.get("members", [])))
-                try:
-                    results.extend(_find_all_assertions_in_members(body.get("members", [])))
-                finally:
-                    _DECLARATIONS.reset(token)
+    for body in _iter_instance_bodies(members):
+        body_members = body.get("members", [])
+        token = _DECLARATIONS.set(_collect_declarations(body_members))
+        try:
+            results.extend(_find_all_assertions_in_members(body_members))
+        finally:
+            _DECLARATIONS.reset(token)
 
     if not results:
         raise SvaCompileError(
@@ -312,6 +342,17 @@ def build_bool_expr(node: dict[str, Any]) -> BoolNode:
 
     match kind:
         case "NamedValue":
+            constant = node.get("constant")
+            if constant is not None:
+                value, width, raw = _parse_integer_literal(
+                    {"value": constant}, source_loc
+                )
+                return BoolConst(
+                    value=value,
+                    width=width,
+                    raw=raw,
+                    source_loc=source_loc,
+                )
             return BoolIdent(
                 name=_symbol_name(node),
                 width=_named_value_width(node, source_loc),

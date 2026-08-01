@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import pytest
 
 from sva2rtl.ast_importer import (
@@ -13,12 +16,82 @@ from sva2rtl.ast_importer import (
     _build_seq_repetition,
     _build_signal_func,
     _reconstruct_signal_func_text,
+    build_bool_expr,
+    import_all_assertions,
 )
 from sva2rtl.errors import SvaCompileError, UnsupportedConstruct
-from sva2rtl.ir import SourceLoc
+from sva2rtl.ir import BoolConst, SourceLoc
 
 _LOC = SourceLoc("importer_boundaries.sv", 1, 1)
 _SIGNAL = {"kind": "NamedValue", "symbol": "1 a"}
+_FIXTURES = Path(__file__).parent / "fixtures"
+
+
+def test_import_all_assertions_recurses_elaborated_instance_hierarchy_once() -> None:
+    """Nested cached InstanceBody nodes are visible but never duplicated."""
+    leaf_ast = json.loads((_FIXTURES / "fell.json").read_text(encoding="utf-8"))
+    leaf_instance = leaf_ast["design"]["members"][0]
+    ast = {
+        "design": {
+            "members": [
+                {
+                    "kind": "Instance",
+                    "name": "top",
+                    "body": {
+                        "kind": "InstanceBody",
+                        "addr": 100,
+                        "members": [leaf_instance, leaf_instance],
+                    },
+                }
+            ]
+        }
+    }
+
+    assertions = import_all_assertions(ast)
+
+    assert len(assertions) == 1
+    assert assertions[0][2] == "$fell(sig)"
+
+
+def test_import_all_assertions_ignores_malformed_instance_body_shape() -> None:
+    """Malformed non-object Instance bodies fail closed without attribute errors."""
+    ast = {"design": {"members": [{"kind": "Instance", "body": []}]}}
+
+    with pytest.raises(SvaCompileError, match="No concurrent assertion"):
+        import_all_assertions(ast)
+
+
+def test_named_parameter_value_uses_slang_elaborated_constant() -> None:
+    """A -G-specialized parameter is a constant, never an observed RTL port."""
+    node = {
+        "kind": "NamedValue",
+        "symbol": "1 EXPECTED_PARAM",
+        "type": "bit",
+        "constant": "1'b1",
+        "source_file_start": "importer_boundaries.sv",
+        "source_line_start": 1,
+        "source_column_start": 1,
+    }
+
+    result = build_bool_expr(node)
+
+    assert result == BoolConst(value=1, width=1, raw="1'b1", source_loc=_LOC)
+
+
+def test_named_parameter_four_state_constant_is_rejected() -> None:
+    """Elaborated X/Z parameters do not enter the two-state monitor subset."""
+    node = {
+        "kind": "NamedValue",
+        "symbol": "1 EXPECTED_PARAM",
+        "type": "logic",
+        "constant": "1'bx",
+        "source_file_start": "importer_boundaries.sv",
+        "source_line_start": 1,
+        "source_column_start": 1,
+    }
+
+    with pytest.raises(UnsupportedConstruct, match="Four-state literal"):
+        build_bool_expr(node)
 
 
 @pytest.mark.parametrize("builder", [_build_goto_rep, _build_nonconsec_rep])

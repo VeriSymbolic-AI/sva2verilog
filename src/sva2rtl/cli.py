@@ -36,7 +36,7 @@ from sva2rtl.errors import (
     UnsupportedConstruct,
 )
 from sva2rtl.formal import check_optimizer_pass
-from sva2rtl.frontend import invoke_slang
+from sva2rtl.frontend import SlangCompilationContext, invoke_slang
 from sva2rtl.normalizer import normalize
 from sva2rtl.optimizer import optimize
 
@@ -94,6 +94,90 @@ def _resolve_output_mode(
     show_envvar=True,
 )
 @click.option(
+    "--source",
+    "source_files",
+    multiple=True,
+    type=click.Path(exists=True, file_okay=True, dir_okay=False, path_type=Path),
+    help="Additional SystemVerilog source file (repeatable)",
+)
+@click.option(
+    "-F",
+    "--filelist",
+    "filelists",
+    multiple=True,
+    type=click.Path(exists=True, file_okay=True, dir_okay=False, path_type=Path),
+    help="Slang command file; relative paths resolve from the file (repeatable)",
+)
+@click.option(
+    "-I",
+    "--include-dir",
+    "include_dirs",
+    multiple=True,
+    type=click.Path(exists=True, file_okay=False, dir_okay=True, path_type=Path),
+    help="SystemVerilog include search directory (repeatable)",
+)
+@click.option(
+    "-D",
+    "--define",
+    "defines",
+    multiple=True,
+    metavar="NAME[=VALUE]",
+    help="Preprocessor macro definition (repeatable)",
+)
+@click.option(
+    "--top",
+    "top_modules",
+    multiple=True,
+    metavar="MODULE",
+    help="Top-level module to elaborate (repeatable)",
+)
+@click.option(
+    "-G",
+    "--parameter",
+    "parameter_overrides",
+    multiple=True,
+    metavar="NAME=VALUE",
+    help="Top-level parameter override (repeatable)",
+)
+@click.option(
+    "-v",
+    "--library-file",
+    "library_files",
+    multiple=True,
+    type=click.Path(exists=True, file_okay=True, dir_okay=False, path_type=Path),
+    help="SystemVerilog library file (repeatable)",
+)
+@click.option(
+    "-y",
+    "--library-dir",
+    "library_dirs",
+    multiple=True,
+    type=click.Path(exists=True, file_okay=False, dir_okay=True, path_type=Path),
+    help="Library search directory (repeatable)",
+)
+@click.option(
+    "-Y",
+    "--library-ext",
+    "library_extensions",
+    multiple=True,
+    metavar=".EXT",
+    help="Library file extension such as .sv (repeatable)",
+)
+@click.option(
+    "-L",
+    "--library",
+    "library_order",
+    multiple=True,
+    metavar="NAME",
+    help="Library lookup priority name (repeatable)",
+)
+@click.option(
+    "--single-unit",
+    is_flag=True,
+    default=False,
+    help="Treat all primary sources as one compilation unit",
+)
+@click.option(
     "--dump-ast",
     is_flag=True,
     default=False,
@@ -149,6 +233,17 @@ def main(
     output: str | None,
     force: bool,
     slang_path: str,
+    source_files: tuple[Path, ...],
+    filelists: tuple[Path, ...],
+    include_dirs: tuple[Path, ...],
+    defines: tuple[str, ...],
+    top_modules: tuple[str, ...],
+    parameter_overrides: tuple[str, ...],
+    library_files: tuple[Path, ...],
+    library_dirs: tuple[Path, ...],
+    library_extensions: tuple[str, ...],
+    library_order: tuple[str, ...],
+    single_unit: bool,
     dump_ast: bool,
     dump_ir: bool,
     dump_tree: bool,
@@ -179,7 +274,24 @@ def main(
                 "Run --verilog separately without dump flags for V2001-style RTL."
             )
 
-        ast = invoke_slang(Path(input_file), slang_path)
+        compilation_context = SlangCompilationContext(
+            source_files=source_files,
+            filelists=filelists,
+            include_dirs=include_dirs,
+            defines=defines,
+            top_modules=top_modules,
+            parameter_overrides=parameter_overrides,
+            library_files=library_files,
+            library_dirs=library_dirs,
+            library_extensions=library_extensions,
+            library_order=library_order,
+            single_unit=single_unit,
+        )
+        ast = invoke_slang(
+            Path(input_file),
+            slang_path,
+            context=compilation_context,
+        )
 
         # --dump-ast: print raw JSON AST and exit
         if dump_ast:

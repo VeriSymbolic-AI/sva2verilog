@@ -135,13 +135,51 @@ use [SUPPORT_MATRIX.md](SUPPORT_MATRIX.md).
 | `--force` | Replace differing generated files; without it, output is no-clobber |
 | `--verilog` | Emit Verilog-2001 compatible output |
 | `--experimental-multiclock` | Explicitly opt into the lossy prototype CDC path |
-| `--property`, `-p` | Select a specific property by name |
+| `--property` | Select a specific property by name |
 | `--slang-path` | Path to slang binary (if not on PATH) |
+| `--source` | Additional SystemVerilog source file; repeatable |
+| `--filelist`, `-F` | Slang command file; relative paths resolve from the file; repeatable |
+| `--include-dir`, `-I` | Include search directory; repeatable |
+| `--define`, `-D` | Preprocessor macro as `NAME` or `NAME=VALUE`; repeatable |
+| `--top` | Top-level module to elaborate; repeatable |
+| `--parameter`, `-G` | Top-level parameter override as `NAME=VALUE`; repeatable |
+| `--library-file`, `-v` | Library source file; repeatable |
+| `--library-dir`, `-y` | Library search directory; repeatable |
+| `--library-ext`, `-Y` | Library extension such as `.sv`; repeatable |
+| `--library`, `-L` | Library lookup-priority name; repeatable |
+| `--single-unit` | Treat primary sources as one compilation unit |
 | `--dump-ast` | Dump slang AST JSON and exit |
 | `--dump-ir` | Dump internal IR and exit |
 | `--dump-tree` | Dump composition tree and exit |
 | `--no-optimize` | Skip checker-tree optimization passes |
 | `--version` | Print version and exit |
+
+### Real-project compilation context
+
+The CLI accepts a reviewed subset of slang's project options without exposing
+raw compiler-argument passthrough:
+
+```bash
+sva2rtl rtl/top.sv \
+  -F project/files.f \
+  -I rtl/include \
+  -D ENABLE_ASSERTS=1 \
+  --top soc_top \
+  -G DATA_WIDTH=64 \
+  -y rtl/lib -Y .sv \
+  --single-unit \
+  --output generated-monitors/
+```
+
+All options are passed as separate subprocess arguments; the frontend never
+uses a shell. Paths and identifiers are validated before slang runs, and the
+compiler-owned AST output controls cannot be replaced by a structured option.
+`-F/--filelist` is still a trusted compiler-configuration input: slang command
+files can alter compilation semantics even though they cannot invoke a shell.
+Assertions in elaborated child instances are discovered recursively with
+module-scoped declaration lookup. Reused cached instance bodies are processed
+once; differing generated module identities still fail closed rather than
+silently overwriting output.
 
 ## Generated Monitor Interface
 
