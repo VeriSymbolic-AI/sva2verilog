@@ -1,6 +1,6 @@
 # sva2rtl Support Matrix
 
-This file is the authoritative support evidence ledger for v1.7. `README.md`
+This file is the authoritative support evidence ledger for v1.7.1. `README.md`
 and `SUPPORTED_CONSTRUCTS.md` provide explanations and examples; this matrix
 governs exact support status, subset boundaries, and verification evidence.
 
@@ -14,13 +14,15 @@ Historical baseline: run
 for commit `674cea1adf15dade7b664b76912b015c8da04614` completed successfully on
 2026-07-08 — lint, all Icarus/Verilator matrix axes, and formal smoke.
 
-Current v1.7.0 remediation worktree fixes wheel/template and control-contract
-defects, pins reproducible simulation/formal toolchains, repairs mutation and
-coverage evidence, and removes importer/reference coupling. Local results are
-recorded in `PROJECT_STATUS.md`. Current-worktree Verilator simulation and lint
-now pass locally, but remain `pending-remote` until this worktree is committed,
-pushed, and rerun;
-historical green evidence is not substituted for that gate. Yosys synthesis is
+Current v1.7.1 post-release qualification: CI run
+[`30649226848`](https://github.com/VeriSymbolic-AI/sva2verilog/actions/runs/30649226848)
+for commit `243b839454cd26ceee0a5d2b24fb969fa7484226` passed lint, formal smoke,
+coverage, Python 3.14/package, every Icarus axis, and both macOS Verilator axes.
+The generated-RTL job and both Ubuntu Verilator axes failed before tests because
+Ubuntu 24.04 lacked the separately packaged `FlexLexer.h`. F-01 adds
+`libfl-dev` plus an explicit header probe locally; it remains `pending-remote`
+until a new commit executes those Linux gates. Historical or partial green
+evidence is not substituted for the missing gate. Yosys synthesis is
 complementary structural evidence, not an equivalent replacement for Verilator.
 
 ## Support Status Legend
@@ -225,10 +227,10 @@ evidence, but they are not real-source evidence for `Fully supported` status.
 
 ## Evidence Status Summary
 
-- **0 rows Fully supported** in the current hardening worktree. Local Verilator
-  simulation, generated lint, and differential evidence is now green; the
-  strongest rows remain bounded until the same commit passes the remote
-  Ubuntu/macOS matrix and remaining row-specific evidence gaps are closed.
+- **0 rows Fully supported** in the current v1.7.1 qualification branch. The
+  strongest rows remain bounded until the F-01 fix passes the remote Linux
+  Verilator/generated-RTL gates on the same commit and remaining row-specific
+  evidence gaps are closed.
 - Real `.sv` source fixtures have been added for `[*N]`, `[*M:N]`, `[->N]`,
   `[=N]`, `$rose`, `$fell`, `$stable`, `$changed`, `$past`, `first_match`,
   `disable iff`, and named sequences via `tests/sv_fixtures/` and
@@ -242,8 +244,9 @@ evidence, but they are not real-source evidence for `Fully supported` status.
 - Rows with local Yosys smoke evidence remain bounded until the rest of their
   evidence chain is complete.
 - Verilator simulation and generated-RTL lint evidence was confirmed green in
-  historical run `28931676000` and locally on the current worktree with pinned
-  5.028. Current-commit remote evidence remains pending until a new run
-  succeeds. Yosys synthesis does not replace this evidence.
+  historical run `28931676000` and locally with pinned 5.028. Run
+  `30649226848` adds current-base macOS Verilator evidence but not Linux or
+  generated-RTL evidence; a new F-01 commit run is required. Yosys synthesis
+  does not replace this evidence.
 - Multi-clock support remains a `Trusted boundary`.
 - Rejected rows are positive evidence for rejection behavior only.

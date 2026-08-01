@@ -2,6 +2,17 @@
 
 Released: 2026-07-31
 
+> Post-release qualification update (2026-08-01): CI run
+> [`30649226848`](https://github.com/VeriSymbolic-AI/sva2verilog/actions/runs/30649226848)
+> passed lint, formal smoke, coverage, Python 3.14/package, all Icarus axes, and
+> both macOS Verilator axes. Its three Linux Verilator-dependent jobs failed
+> before tests because Ubuntu 24.04 requires the separately packaged
+> `FlexLexer.h` from `libfl-dev`. The dependency is fixed after the release tag
+> and requires a new same-commit remote run. Nightly and Full Formal also remain
+> blocked by the repository account payment/spending-limit state. Consequently,
+> v1.7.1 remains a corrective distribution, not a fully qualified remote
+> baseline, and the support matrix keeps 0 rows at `Fully supported`.
+
 This is a correctness release. It supersedes v1.7.0, which contained
 full-contract semantic defects in twelve monitor templates that were found by a
 subsequent independent-reference audit. Users of v1.7.0 should upgrade.

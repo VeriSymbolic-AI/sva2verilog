@@ -1,20 +1,21 @@
 # Industrial Validation Gap Plan
 
-> Date: 2026-07-26
-> Scope: v1.7.0 post-release hardening worktree based on `27ebefb`
+> Date: 2026-08-01
+> Scope: v1.7.1 post-release qualification and current `main`
 > Reader: future maintainer, external reviewer, or industrial user evaluating trust
 > Post-read action: decide and execute the next validation work needed before calling the project industrial-grade
 
 ## Executive Summary
 
 sva2rtl has a strong validation base, but it should not yet be described as fully
-industrial-grade. The current Python 3.12 worktree collects 1468 tests and has a
-fresh full Icarus result of 1466 passed, 1 skipped, 0 failed, and 1 xfailed, plus
-a historical 62 non-circular BMC
-equivalence baseline, and Phase 10 local formal-depth targets with 56 BMC or
-contract tests plus 10 k-induction proof targets (+1 xfail liveness boundary). Phase 11 adds local Yosys
-generated-RTL smoke evidence and CI wiring for generated-module Verilator lint.
-Phase 12 adds bounded source-level differential testing.
+industrial-grade. Release v1.7.1 contains the semantic and release-gate fixes
+from the independent-reference audit. On 2026-08-01, same-base remote run
+`30649226848` passed lint, formal smoke, coverage, Python 3.14/package, all
+Icarus axes, and both macOS Verilator axes. Its three Linux Verilator-dependent
+jobs failed before tests because Ubuntu 24.04 requires the separate `libfl-dev`
+package for `FlexLexer.h`; F-01 fixes that dependency locally and awaits a new
+same-commit remote run. Full Formal and nightly differential are additionally
+blocked by the GitHub account payment/spending-limit state.
 The compiler also fixed several real semantic defects that were found only after
 non-circular formal references were introduced.
 
@@ -31,37 +32,35 @@ dimensions.
 
 Current project state:
 
-- Version state: v1.7.0 plus current evidence chain hardening.
-- Local branch state: deep-audit remediation changes are uncommitted on top of
-  `27ebefb`; they are not yet a remote evidence baseline.
+- Version state: v1.7.1 released at `8b5c063`; remote `main` base `243b839`
+  adds self-diagnosing JUnit execution-budget errors.
+- Local branch state: F-01 adds Ubuntu `libfl-dev` and a `FlexLexer.h` fail-fast
+  probe on top of the remote base; it is not yet a remote evidence baseline.
 - Historical remote state: GitHub Actions run
   [28931676000](https://github.com/VeriSymbolic-AI/sva2verilog/actions/runs/28931676000)
   completed successfully for commit
   `674cea1adf15dade7b664b76912b015c8da04614`.
-- Test collection: 1468 pytest tests collected on Python 3.12.
-- Recent full local result: 1466 passed, 1 skipped, 0 failed, and 1 xfailed on
-  the complete Icarus/default axis; branch coverage is 86.31% against an 82%
-  aggregate gate plus critical-module floors.
-- Local Verilator result: pinned 5.028 passes 169 simulation tests; one
-  Icarus-specific Verilog-2001 compile check skips by design.
+- Current-base remote Icarus result: Ubuntu Python 3.12 records 1292 passed and
+  183 skipped by tool/marker selection; the JUnit budget passed and no failure
+  or error was recorded.
+- Current-base remote Verilator result: macOS Python 3.12 records 169 passed and
+  one Icarus-specific skip; the equivalent Ubuntu axes did not reach tests.
 - Generated RTL gates: local Yosys synthesis and strict Verilator lint pass all
   107 synthesis/lint cases, plus 26 representative top-contract checks, for
   133 passed.
-- Simulation coverage: Icarus and Verilator are green locally; same-commit
-  remote Ubuntu/macOS confirmation remains required.
-- Formal coverage: the current Full Formal file set records 125 passed and one
-  documented liveness xfail; historical evidence includes 62 non-circular BMC
+- Simulation coverage: Icarus is green on Ubuntu/macOS and Verilator is green
+  on macOS for commit `243b839`; Linux Verilator requires an F-01 rerun.
+- Formal coverage: current-base formal smoke records 3/3 passed. The latest full
+  local file set records 125 passed and one documented liveness xfail;
+  historical evidence includes 62 non-circular BMC
   equivalence checks and Phase 10 bounded/full-contract/k-induction slices.
 - Static quality: ruff and mypy strict were green in the latest verification run.
-- Python compatibility and distribution: Python 3.14 passes 1240 broad
-  non-simulation tests with one documented xfail; a built wheel and restricted
-  sdist pass a clean out-of-tree install, CLI compile, and Icarus smoke.
-- CI: historical baseline run `28931676000` is green. Newer runs exposed
-  Verilator source-build dependency drift, a flaky reused-wrapper differential
-  harness, and serialized NFA formal timeouts. All three are fixed locally, but
-  current-commit remote reruns remain required. The latest scheduled nightly
-  run `30191482973` did not execute because GitHub reported an account
-  billing/spending-limit block.
+- Python compatibility and distribution: current-base Python 3.14 records 1122
+  passed and 126 tool/marker skips; wheel/sdist out-of-tree smoke passed.
+- CI: run `30649226848` is partially green but release-blocking overall. The
+  Linux Flex header dependency is fixed locally; the latest scheduled nightly
+  run `30610818023` and Full Formal run `30262616745` did not start because
+  GitHub reported an account payment/spending-limit block.
 
 Recent hardening already completed:
 

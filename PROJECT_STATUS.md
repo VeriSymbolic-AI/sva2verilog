@@ -1,34 +1,51 @@
 # sva2verilog 项目进展报告
 
-> 更新日期：2026-07-26
+> 更新日期：2026-08-01
 > 仓库：public GitHub repository
-> 当前版本：v1.7.0
+> 当前版本：v1.7.1
 
 ## 当前状态
 
 sva2verilog 是一个开源的 SystemVerilog Assertion (SVA) 到可综合 RTL
-监控器编译器。v1.7.0 已发布；当前分支处于发布后加固状态，本轮深度审计
-修复只有本地证据、尚未推送，不能作为新的远端证据基线。
+监控器编译器。v1.7.1 已于 2026-07-31 发布，修复了 v1.7.0 的完整契约语义
+缺陷。当前本地 `main` 基于远端 `243b839`，并包含尚未推送的 Linux
+Verilator 安装修复；因此本地结果不能替代下一次同提交远端运行。
 
-- 测试套件：Python 3.12 完整 Icarus 轴 1466 passed / 1 skipped /
-  1 xfailed；完整 Verilator simulation 轴 169 passed / 1 个明确的
-  Icarus-only skip；所有已运行门控 0 failed
-- 代码质量：mypy --strict 0 errors，ruff 0 errors
-- 形式化验证：本地 Full Formal 文件集 125 passed / 1 个已知 liveness
-  xfail；核心/契约/k-induction 集合与 NFA BMC 0 failed
-- 生成 RTL：本地 Yosys synthesis、固定 Verilator 5.028 strict lint 和
-  26 个代表性 top-interface contract 检查合计 133 passed
-- 随机差分：Icarus/Verilator 的 fast 各 16 passed，日期 seed
-  `20260726` 的 slow 各 1 passed（每个内部 64 examples）；现在逐周期比较
-  `active/pass/fail/attempt_fired/disabled_o/overflow`，并随机驱动外部
-  `disable_i`
-- 变异测试：门禁先验证测试基线、隔离 Python bytecode cache，只统计语法有效且被基线执行的 mutants，并将无效/未覆盖候选单列；当前 bool semantics 15/15（100%）、behavioral oracle 112/130（86.2%，19 未覆盖）、composer 41/48（85.4%，4 未覆盖）、ast importer 92/108（85.2%，8 未覆盖），合计 260/301（86.4%，31 未覆盖、41 存活），另有 RTL 模板定向变异 11/11
-- 覆盖度：branch coverage 门控 fail_under=82；当前完整 Icarus 轴实测
-  86.31%，并满足关键模块独立下限
+- 发布状态：tag `v1.7.1` 指向 `8b5c063`；远端 `main` 为 `243b839`
+- 当前远端 CI：run `30649226848` 的 lint、formal smoke、coverage、Python
+  3.14/package、四个 Icarus 轴和两个 macOS Verilator 轴通过；三个 Ubuntu
+  Verilator 相关 job 在安装阶段因缺少 `FlexLexer.h` 失败
+- 远端测试实数：Ubuntu Python 3.12 Icarus 为 1292 passed / 183 skipped；
+  macOS Python 3.12 Verilator 为 169 passed / 1 skipped；coverage 86.25%；
+  Python 3.14 非仿真轴为 1122 passed / 126 skipped
+- F-01 本地修复：Ubuntu 安装器补充 `libfl-dev` 并在源码编译前检查
+  `/usr/include/FlexLexer.h`；尚需新 SHA 的 Ubuntu Actions 证实
+- 形式化验证：同 SHA formal smoke 3/3 通过；本地历史 Full Formal 文件集
+  为 125 passed / 1 个严格 liveness xfail，不能冒充当前远端 Full Formal
+- nightly / Full Formal：最近运行仍停在旧提交 `8e7af87`，且 job 因账户
+  payment/spending-limit 限制未启动；当前 SHA 没有可用的 nightly/full 证据
+- 变异与差分：最近完整本地证据仍为 Python mutation 260/301（86.4%）、
+  RTL template mutation 11/11，以及双后端 fast/slow 差分；都需要在当前
+  修复 SHA 上重新形成 scheduled evidence
 - 支持状态权威：`SUPPORT_MATRIX.md` 记录逐构造支持边界、证据完整度和降级原因；README / SUPPORTED_CONSTRUCTS 只作概览和解释
 - 工业级验证缺口：已记录在 `INDUSTRIAL_VALIDATION_GAPS.md`，包含当前进展、P0/P1/P2 严重度、修复计划和 fully-supported 定义标准
 
-## 2026-07-26 完整契约与发布门禁加固
+## 2026-08-01 v1.7.1 发布后资格审计
+
+最新代码与远端 `main` 已核对一致。当前 CI 失败根因不是 RTL 回归，而是
+Ubuntu 24.04 将 Verilator 所需的 C++ Flex header 放在推荐包 `libfl-dev`；
+仅安装 `flex` 会得到可执行文件，却没有 `<FlexLexer.h>`。本地 F-01 修复
+同时增加静态依赖回归和 header fail-fast 探针。
+
+这次审计也确认 v1.7.1 是“已发布的语义修复版本”，不是“已完成远端资格
+闭环的工业基线”。在 Linux Verilator、generated RTL、nightly differential
+和 Full Formal 对同一修复 SHA 全绿前，支持矩阵保持 0 个 Fully supported。
+多时钟电平同步器的事件丢失/合并风险仍是独立的架构级 Trusted boundary。
+
+## 2026-07-26 完整契约与发布门禁加固（历史快照）
+
+以下数字和远端状态记录的是 2026-07-26 当日证据，不代表 2026-08-01
+当前分支；最新结论以前一节为准。
 
 本轮从“测试是否真的覆盖可信度契约”而不是测试总数出发，修复了 5 组问题：
 
@@ -297,7 +314,8 @@ RISK-01 纪律：预言机和参考监控器必须与 RTL 实现结构独立。�
 - 1 xfail：`s_eventually[1:3]` k-induction induction step 不收敛（liveness 边界，诚实记录）
 - SUPPORT_MATRIX 中 0 个构造行达到 Fully supported，全部为 Bounded evidence（仍缺 current-commit 远端矩阵证据或全契约 formal proof）
 - 全算子等价证明仍以 BMC 有界为主；k-induction 当前覆盖 10 个小状态目标，尚未扩展到全部算子、复杂 NFA、liveness 或 CDC 边界
-- 多时钟形式化等价永久排除（行业通用限制）
+- 多时钟 CDC 与事件交付尚未闭环：当前 2-DFF 电平同步器可能漏采窄脉冲
+  或合并连续事件，必须通过明确的 handshake/toggle 与速率/overflow 契约解决
 - K-state budget (>32) 和 CDC 边界是 NFA 引擎仅存的拒绝路径
 - 本机 Verilator 5.028 已安装并完成双 Python 版本 simulation、generated lint 与 differential；仍需同一提交的远端 Ubuntu/macOS CI 记录
 
@@ -305,14 +323,14 @@ RISK-01 纪律：预言机和参考监控器必须与 RTL 实现结构独立。�
 
 ### 短期（发布加固闭环）
 
-1. 评审并提交 2026-07-22 hardening 工作树。
-2. 推送后触发完整 CI（lint + Icarus/Verilator 双矩阵 + formal smoke +
-   generated RTL），并手动触发 differential nightly 与 Full Formal。
+1. 推送 F-01 `libfl-dev` 修复并确认 Ubuntu Verilator 与 generated RTL job
+   在同一 SHA 上实际执行通过。
+2. 解除 GitHub payment/spending-limit 阻塞，在同一 SHA 上触发
+   differential nightly 与 Full Formal。
 3. 只有所有远端门控在同一 commit 上通过后，记录 run ID 并逐行重评
    `SUPPORT_MATRIX.md`；不得沿用历史 run 替代 current-commit 证据。
-4. 不改写已有 `v1.7.0` tag；远端全绿后以 `v1.7.1` 修复版发布，并让
-   package version、`__version__`、tag、release notes 和 GitHub Release
-   指向同一已验证 commit。
+4. `v1.7.1` 已发布且 tag 不改写；发布资格证据应追加到新的修复 SHA，不能
+   倒推声称 tag 本身已经通过后来才运行的门禁。
 
 ### 中期（Phase 2：证据链闭合，2-3 周）
 
