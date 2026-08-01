@@ -4,8 +4,10 @@
 //
 // Polynomial: x^8 + x^6 + x^5 + x^4 + 1  (Galois).
 // This LFSR is pure synthesizable RTL — no $random / $urandom — and produces
-// IDENTICAL output across iverilog / Verilator for the same seed.  Used inside
-// sync_2dff.sv.j2 when META_ENABLE=1.
+// IDENTICAL output across iverilog / Verilator for the same seed.  The output
+// is a one-cycle event once per 255-cycle nonzero period, not a raw LFSR bit.
+// Used inside sync_2dff.sv.j2 when META_ENABLE=1. A zero seed falls back to A5
+// so the generator cannot lock in the all-zero state.
 //
 // Reference: semify-eda dynamic_cdc (MIT license).
 module {{ module_name }} #(
@@ -23,7 +25,7 @@ module {{ module_name }} #(
 
     always_ff @(posedge clk) begin
         if (!rst_n)
-            state <= SEED;
+            state <= (SEED == 8'h00) ? 8'hA5 : SEED;
         else
             state <= _next_galois(state);
     end
@@ -38,5 +40,9 @@ module {{ module_name }} #(
         _next_galois[3] = s[4] ^ fb;   // tap at bit 4
     endfunction
 
-    assign lfsr_out = state[0];
+    // A maximal 8-bit LFSR visits each nonzero state exactly once per period.
+    // Comparing the complete state therefore produces one deterministic pulse
+    // per 255 cycles; using state[0] directly would be high on roughly half of
+    // all cycles and would grossly over-inject faults.
+    assign lfsr_out = (state == 8'h01);
 endmodule

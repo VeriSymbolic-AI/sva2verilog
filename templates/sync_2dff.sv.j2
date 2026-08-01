@@ -22,8 +22,8 @@
 // output across iverilog / Verilator) drives a configurable-probability bit-flip
 // on the synchronizer output. The LFSR seed is per-instance, derived from the
 // module name, so each sync_2dff instance produces its own deterministic but
-// uncorrelated injection pattern. Injection probability is ~1/256 per cycle
-// (exact: one LFSR bit-period per cycle).
+// uncorrelated injection phase. Injection occurs once per 255-cycle nonzero
+// LFSR period; a zero seed is replaced with 8'hA5.
 //
 // WARNING: This synchronizer has NOT been verified against metastability via
 // formal methods (yosys equiv_induct assumes single-clock synchronous logic).
@@ -69,8 +69,8 @@ module {{ module_name }} #(
 
 {% raw %}
     // ── Optional deterministic metastability injection (v1.4.2 Path Two) ────
-    // When META_ENABLE=1, an 8-bit Galois LFSR is instantiated and its LSB
-    // inverts the synchronizer output with ~1/256 probability per dst-clock
+    // When META_ENABLE=1, an 8-bit Galois LFSR emits one event per 255-cycle
+    // nonzero period and inverts the synchronizer output for that dst-clock
     // cycle. The LFSR is pure RTL (no $random) → identical across iverilog /
     // The result is identical in Verilator for the same LFSR_SEED.
     generate

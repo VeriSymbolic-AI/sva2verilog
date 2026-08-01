@@ -30,6 +30,9 @@ from sva2rtl.ir import (
 from sva2rtl.normalizer import normalize
 
 
+ROOT = Path(__file__).parents[1]
+
+
 def _import(prop: str) -> SVANode:
     """Import an inline multi-clock property and return its root IR node."""
     src = Path("/tmp/_mc_test.sv")
@@ -282,3 +285,19 @@ def test_sync_latency_2_dst_cycles() -> None:
     sync_sv = [v for v in modules.values() if "TRUSTED COMPONENT" in v][0]
     for pattern in check:
         assert pattern in sync_sv, f"sync module must contain: {pattern}"
+
+
+def test_meta_injection_is_one_pulse_per_nonzero_lfsr_period() -> None:
+    """The optional fault injector must not flip on roughly half the cycles."""
+
+    lfsr_template = (ROOT / "templates" / "lfsr_8bit.sv.j2").read_text(
+        encoding="utf-8"
+    )
+    sync_template = (ROOT / "templates" / "sync_2dff.sv.j2").read_text(
+        encoding="utf-8"
+    )
+
+    assert "assign lfsr_out = (state == 8'h01);" in lfsr_template
+    assert "assign lfsr_out = state[0];" not in lfsr_template
+    assert "(SEED == 8'h00) ? 8'hA5 : SEED" in lfsr_template
+    assert "Injection occurs once per 255-cycle nonzero" in sync_template
