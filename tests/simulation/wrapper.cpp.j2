@@ -33,7 +33,7 @@ int main(int argc, char** argv) {
     // Drive inputs at negedge (clk=0)
     top->rst_n = {{ 1 if stim.get('rst_n', True) else 0 }};
 {%- for sig in extra_inputs %}
-    top->{{ sig }} = {{ 1 if stim.get(sig, False) else 0 }};
+    top->{{ sig }} = {{ stim.get(sig, 0) | int }};
 {%- endfor %}
     top->disable_i = {{ 1 if stim.get('disable_i', False) else 0 }};
     top->eval();

@@ -17,10 +17,11 @@
 
 
 {%- macro port_decl(verilog_mode, direction, signal_name) -%}
+{%- set width = signal_widths.get(signal_name, 1) if signal_widths is defined else 1 -%}
 {%- if verilog_mode -%}
-    {{ direction }}  {{ signal_name }}
+    {{ direction }}  {% if width > 1 %}[{{ width - 1 }}:0] {% endif %}{{ signal_name }}
 {%- else -%}
-    {{ direction }}  logic {{ signal_name }}
+    {{ direction }}  logic {% if width > 1 %}[{{ width - 1 }}:0] {% endif %}{{ signal_name }}
 {%- endif -%}
 {%- endmacro -%}
 

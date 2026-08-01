@@ -10,7 +10,14 @@ import pytest
 from sva2rtl import __version__
 from sva2rtl.ast_importer import import_assertion
 from sva2rtl.composer import compose
-from sva2rtl.emitter import emit, emit_all, write_output, write_output_dir
+from sva2rtl.emitter import (
+    emit,
+    emit_all,
+    merge_module_outputs,
+    write_output,
+    write_output_dir,
+)
+from sva2rtl.errors import SvaCompileError
 from sva2rtl.ir import CheckerNode, SourceLoc
 
 # ── Helpers ───────────────────────────────────────────────────────────────
@@ -127,6 +134,21 @@ def test_emit_contains_observed_signals_as_ports() -> None:
     result = emit(checker)
     assert "input  logic a" in result
     assert "input  logic b" in result
+
+
+def test_emit_preserves_observed_vector_port_width() -> None:
+    """Observed packed vectors are emitted as width-correct module inputs."""
+    checker = _labeled_checker()
+    checker = CheckerNode(
+        template_name=checker.template_name,
+        module_name=checker.module_name,
+        params=checker.params,
+        observed_signals=(("data", "data"),),
+        observed_signal_widths=(("data", 4),),
+        source_loc=checker.source_loc,
+    )
+
+    assert "input  logic [3:0] data" in emit(checker)
 
 
 def test_emit_contains_version_comment() -> None:
@@ -406,6 +428,27 @@ def test_write_output_dir_creates_dir_if_missing(tmp_path: Path) -> None:
     write_output_dir(modules, new_dir)
     assert new_dir.is_dir()
     assert len(list(new_dir.iterdir())) == len(modules)
+
+
+def test_merge_module_outputs_rejects_conflicting_duplicate_name() -> None:
+    """A module name collision must never silently replace earlier RTL."""
+    merged = {"sva_same": "module sva_same; wire a; endmodule\n"}
+
+    with pytest.raises(SvaCompileError, match="module name collision"):
+        merge_module_outputs(
+            merged,
+            {"sva_same": "module sva_same; wire b; endmodule\n"},
+        )
+
+
+def test_merge_module_outputs_accepts_byte_identical_duplicate() -> None:
+    """Shared byte-identical helper modules remain deduplicated."""
+    text = "module shared; endmodule\n"
+    merged = {"shared": text}
+
+    merge_module_outputs(merged, {"shared": text})
+
+    assert merged == {"shared": text}
 
 
 # ── Implication (|-> and |=>) emitter tests ───────────────────────────────

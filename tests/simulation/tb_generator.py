@@ -87,6 +87,7 @@ def generate_testbench(
     extra_inputs: list[str],
     stimulus: list[dict[str, Any]],
     *,
+    input_widths: dict[str, int] | None = None,
     has_overflow_flag: bool = False,
     capture_contract: bool = False,
 ) -> str:
@@ -142,9 +143,13 @@ def generate_testbench(
     _w("    reg rst_n;")
     _w("    reg disable_i;")
 
+    input_widths = input_widths or {}
+
     # Extra inputs
     for sig in extra_inputs:
-        _w(f"    reg {sig};")
+        width = input_widths.get(sig, 1)
+        packed = f"[{width - 1}:0] " if width > 1 else ""
+        _w(f"    reg {packed}{sig};")
     _w()
 
     # Output wires — rename pass/fail to avoid SV keyword clash
@@ -192,7 +197,7 @@ def generate_testbench(
         # Drive inputs at negedge
         _w(f"        // ── cycle {i} ──────────────────────────────────────────────")
         for sig in extra_inputs:
-            val = 1 if stim.get(sig, False) else 0
+            val = int(stim.get(sig, 0))
             _w(f"        {sig} = {val};")
         dis_val = 1 if stim.get("disable_i", False) else 0
         _w(f"        disable_i = {dis_val};")

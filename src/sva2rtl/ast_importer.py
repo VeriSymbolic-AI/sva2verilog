@@ -18,6 +18,7 @@ Design decisions (from Research Q1, Q6, pitfalls P5.1, P8.1, P8.2, P8.4):
 from __future__ import annotations
 
 import logging
+import re
 from contextvars import ContextVar
 from typing import Any
 
@@ -316,7 +317,11 @@ def build_bool_expr(node: dict[str, Any]) -> BoolNode:
 
     match kind:
         case "NamedValue":
-            return BoolIdent(name=_symbol_name(node), source_loc=source_loc)
+            return BoolIdent(
+                name=_symbol_name(node),
+                width=_named_value_width(node, source_loc),
+                source_loc=source_loc,
+            )
 
         case "IntegerLiteral":
             value, width, raw = _parse_integer_literal(node, source_loc)
@@ -440,6 +445,26 @@ def _build_bool_binary_op(node: dict[str, Any], source_loc: SourceLoc) -> BoolNo
 def _symbol_name(node: dict[str, Any]) -> str:
     symbol = str(node.get("symbol", " "))
     return symbol.split(" ", 1)[-1]
+
+
+def _named_value_width(node: dict[str, Any], source_loc: SourceLoc) -> int:
+    """Read a supported scalar or fixed packed-vector width from slang JSON."""
+    type_text = str(node.get("type", "")).replace(" ", "")
+    if not type_text:
+        return 1
+    packed = re.search(r"\[(-?\d+):(-?\d+)\]", type_text)
+    if packed is not None:
+        return abs(int(packed.group(1)) - int(packed.group(2))) + 1
+    if type_text in {"bit", "logic", "reg"}:
+        return 1
+    scalar_widths = {"byte": 8, "shortint": 16, "int": 32, "integer": 32, "longint": 64}
+    if type_text in scalar_widths:
+        return scalar_widths[type_text]
+    raise UnsupportedConstruct(
+        message=f"Unsupported boolean identifier type: '{type_text}'",
+        construct_name="boolean identifier type",
+        source_loc=source_loc,
+    )
 
 
 def _required_expr_child(node: dict[str, Any], source_loc: SourceLoc) -> dict[str, Any]:

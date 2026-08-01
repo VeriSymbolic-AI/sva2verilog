@@ -19,7 +19,13 @@ import math
 import re
 
 from sva2rtl import __version__
-from sva2rtl.bool_semantics import collect_bool_signals, render_bool_expr, serialize_bool_expr
+from sva2rtl.bool_semantics import (
+    collect_bool_signal_widths,
+    collect_bool_signals,
+    rename_bool_signals,
+    render_bool_expr,
+    serialize_bool_expr,
+)
 from sva2rtl.errors import SvaCompileError, UnsupportedConstruct
 from sva2rtl.ir import (
     BoolExpr,
@@ -306,6 +312,20 @@ _SV_KEYWORDS: frozenset[str] = frozenset(
 # Matches any SV identifier token within an expression string.
 _IDENT_RE: re.Pattern[str] = re.compile(r"\b([a-zA-Z_][a-zA-Z0-9_]*)\b")
 
+_RESERVED_MONITOR_PORTS: frozenset[str] = frozenset(
+    {
+        "rst_n",
+        "start",
+        "disable_i",
+        "active",
+        "pass",
+        "fail",
+        "attempt_fired",
+        "disabled_o",
+        "overflow_flag",
+    }
+)
+
 
 # ── Public API ────────────────────────────────────────────────────────────
 
@@ -366,15 +386,46 @@ def extract_signals(expr_text: str) -> tuple[tuple[str, str], ...]:
 def _bool_expr_text(node: BoolExpr) -> str:
     """Render a BoolExpr from structure when available, else legacy text."""
     if node.expr is not None:
-        return render_bool_expr(node.expr)
-    return node.text
+        return render_bool_expr(rename_bool_signals(node.expr, _bool_expr_aliases(node)))
+    aliases = _bool_expr_aliases(node)
+    return _IDENT_RE.sub(lambda match: aliases.get(match.group(1), match.group(1)), node.text)
 
 
 def _bool_expr_observed(node: BoolExpr) -> tuple[tuple[str, str], ...]:
     """Collect observed signal pairs from structure when available."""
-    if node.expr is not None:
-        return collect_bool_signals(node.expr)
-    return extract_signals(node.text)
+    raw = collect_bool_signals(node.expr) if node.expr is not None else extract_signals(node.text)
+    aliases = _bool_expr_aliases(node)
+    return tuple((aliases.get(name, name), signal) for name, signal in raw)
+
+
+def _bool_expr_widths(node: BoolExpr) -> tuple[tuple[str, int], ...]:
+    """Return generated-port widths for a structured or legacy BoolExpr."""
+    aliases = _bool_expr_aliases(node)
+    if node.expr is None:
+        return tuple((aliases.get(name, name), 1) for name, _ in extract_signals(node.text))
+    renamed = rename_bool_signals(node.expr, aliases)
+    return collect_bool_signal_widths(renamed)
+
+
+def _bool_expr_aliases(node: BoolExpr) -> dict[str, str]:
+    """Allocate deterministic non-conflicting aliases for standard monitor ports."""
+    raw = collect_bool_signals(node.expr) if node.expr is not None else extract_signals(node.text)
+    original_names = {name for name, _ in raw}
+    used = set(_RESERVED_MONITOR_PORTS) | original_names
+    aliases: dict[str, str] = {}
+    for name, _ in raw:
+        if name not in _RESERVED_MONITOR_PORTS:
+            aliases[name] = name
+            continue
+        base = f"dut_{name}"
+        candidate = base
+        suffix = 2
+        while candidate in used:
+            candidate = f"{base}_{suffix}"
+            suffix += 1
+        used.add(candidate)
+        aliases[name] = candidate
+    return aliases
 
 
 def _bool_expr_signal_names(node: BoolExpr) -> tuple[str, ...]:
@@ -414,6 +465,10 @@ def structural_hash(node: CheckerNode) -> str:
     """
     h = hashlib.sha256()
     h.update(node.template_name.encode())
+    for port, signal in node.observed_signals:
+        h.update(f"signal:{port}={signal}".encode())
+    for port, width in node.observed_signal_widths:
+        h.update(f"width:{port}={width}".encode())
     for k, v in sorted(node.params.items()):
         if k not in _VOLATILE_PARAMS:
             h.update(f"{k}={v}".encode())
@@ -552,6 +607,12 @@ def _compose_bool_expr(
     module_name = module_name_from_label(label, original_text)
     rendered = _bool_expr_text(node)
     observed = _bool_expr_observed(node)
+    widths = _bool_expr_widths(node)
+
+    # The clock is already a standard monitor port.  If the property reads it
+    # as data, keep the expression reference but do not emit a duplicate input.
+    observed = tuple(pair for pair in observed if pair[0] != clock.signal)
+    widths = tuple(pair for pair in widths if pair[0] != clock.signal)
 
     params: dict[str, str] = {
         "module_name": module_name,
@@ -563,13 +624,16 @@ def _compose_bool_expr(
         "original_text": original_text,
     }
     if node.expr is not None:
-        params["bool_semantic"] = serialize_bool_expr(node.expr)
+        params["bool_semantic"] = serialize_bool_expr(
+            rename_bool_signals(node.expr, _bool_expr_aliases(node))
+        )
 
     return CheckerNode(
         template_name="bool_expr",
         module_name=module_name,
         params=params,
         observed_signals=observed,
+        observed_signal_widths=widths,
         source_loc=node.source_loc,
         children=(),
         cse_origin=cse_origin,
@@ -782,6 +846,7 @@ def _compose_repetition(
 
     if isinstance(node.expr, BoolExpr):
         observed = _bool_expr_observed(node.expr)
+        widths = _bool_expr_widths(node.expr)
         signal_expr = _bool_expr_text(node.expr)
     else:
         raise SvaCompileError(
@@ -811,6 +876,7 @@ def _compose_repetition(
         module_name=module_name,
         params=params,
         observed_signals=observed,
+        observed_signal_widths=widths,
         source_loc=node.source_loc,
         children=(),
         cse_origin=cse_origin,
@@ -1102,6 +1168,7 @@ def _compose_implication_nfa(
         )
     ant_guard = _bool_expr_text(node.antecedent)
     ant_sigs = _bool_expr_signal_names(node.antecedent)
+    ant_widths = _bool_expr_widths(node.antecedent)
 
     # Consequent → sub-NFA (property-kind: dead-end = fail after attempt).
     cons_states, cons_trans, cons_accept, cons_sigs = _lift_to_nfa(
@@ -1148,6 +1215,7 @@ def _compose_implication_nfa(
         module_name=module_name,
         params=params,
         observed_signals=tuple((s, s) for s in all_sigs),
+        observed_signal_widths=ant_widths,
         source_loc=node.source_loc,
         children=(cons_checker,),
         cse_origin=cse_origin,
@@ -1274,6 +1342,7 @@ def _compose_disable_iff(
     # generated module and must not appear again in the observed_signals loop.
     _reserved_ports = {"rst_n", clock.signal}
     cond_raw = _bool_expr_observed(node.condition) if isinstance(node.condition, BoolExpr) else ()
+    cond_widths = _bool_expr_widths(node.condition) if isinstance(node.condition, BoolExpr) else ()
     cond_signals = tuple((p, s) for p, s in cond_raw if p not in _reserved_ports)
     cond_seen = {p for p, _ in cond_signals}
     body_extra = tuple(
@@ -1298,6 +1367,7 @@ def _compose_disable_iff(
         module_name=module_name,
         params=params,
         observed_signals=all_signals,
+        observed_signal_widths=cond_widths,
         source_loc=node.source_loc,
         children=(body_checker,),
         cse_origin=cse_origin,
@@ -1355,6 +1425,7 @@ def _compose_goto_rep(
 
     if isinstance(node.expr, BoolExpr):
         observed = _bool_expr_observed(node.expr)
+        widths = _bool_expr_widths(node.expr)
         signal_expr = _bool_expr_text(node.expr)
     else:
         raise SvaCompileError(
@@ -1381,6 +1452,7 @@ def _compose_goto_rep(
         module_name=module_name,
         params=params,
         observed_signals=observed,
+        observed_signal_widths=widths,
         source_loc=node.source_loc,
         children=(),
         cse_origin=cse_origin,
@@ -1400,6 +1472,7 @@ def _compose_nonconsec_rep(
 
     if isinstance(node.expr, BoolExpr):
         observed = _bool_expr_observed(node.expr)
+        widths = _bool_expr_widths(node.expr)
         signal_expr = _bool_expr_text(node.expr)
     else:
         raise SvaCompileError(
@@ -1426,6 +1499,7 @@ def _compose_nonconsec_rep(
         module_name=module_name,
         params=params,
         observed_signals=observed,
+        observed_signal_widths=widths,
         source_loc=node.source_loc,
         children=(),
         cse_origin=cse_origin,
@@ -1681,6 +1755,7 @@ def _lift_to_nfa(
     uniformly.
     """
     if isinstance(operand, BoolExpr):
+        _require_scalar_bool_for_nfa(operand)
         # 0 --expr--> 1 (accept)
         guard = f"({_bool_expr_text(operand)})"
         signals = _bool_expr_signal_names(operand)
@@ -1720,6 +1795,7 @@ def _lift_to_nfa(
                     construct_name="NFA SeqConcat non-boolean element",
                     source_loc=operand.source_loc,
                 )
+            _require_scalar_bool_for_nfa(element)
             guard = f"({_bool_expr_text(element)})"
             for s, _ in _bool_expr_observed(element):
                 signal_set.add(s)
@@ -1767,6 +1843,7 @@ def _lift_to_nfa(
             )
         m = operand.rep_min
         n = operand.rep_max
+        _require_scalar_bool_for_nfa(operand.expr)
         guard = f"({_bool_expr_text(operand.expr)})"
         rep_trans: list[tuple[int, str, int]] = []
         # State 0..n: after k repetitions
@@ -1835,6 +1912,7 @@ def _lift_to_nfa(
                 source_loc=operand.source_loc,
             )
         n = operand.rep_min
+        _require_scalar_bool_for_nfa(operand.expr)
         guard = f"({_bool_expr_text(operand.expr)})"
         neg_guard = f"!({_bool_expr_text(operand.expr)})"
         gt_trans: list[tuple[int, str, int]] = []
@@ -1857,6 +1935,7 @@ def _lift_to_nfa(
                 source_loc=operand.source_loc,
             )
         n = operand.rep_min
+        _require_scalar_bool_for_nfa(operand.expr)
         guard = f"({_bool_expr_text(operand.expr)})"
         neg_guard = f"!({_bool_expr_text(operand.expr)})"
         nc_trans: list[tuple[int, str, int]] = []
@@ -1869,6 +1948,21 @@ def _lift_to_nfa(
         return n + 1, tuple(nc_trans), frozenset({n}), signals
 
     raise ValueError(f"cannot lift {type(operand).__name__} to NFA yet")
+
+
+def _require_scalar_bool_for_nfa(expr: BoolExpr) -> None:
+    """Fail closed until NFA signal metadata can carry packed-vector widths."""
+    vectors = [(name, width) for name, width in _bool_expr_widths(expr) if width > 1]
+    if vectors:
+        details = ", ".join(f"{name}[{width}]" for name, width in vectors)
+        raise UnsupportedConstruct(
+            message=(
+                "packed-vector operands are not yet supported by the NFA backend "
+                f"({details}); split the vector comparison into a scalar helper signal"
+            ),
+            construct_name="packed-vector NFA operand",
+            source_loc=expr.source_loc,
+        )
 
 
 def _try_lift_operand(
@@ -2354,6 +2448,7 @@ def _compose_throughout_nfa(
             construct_name="throughout with non-boolean condition",
             source_loc=node.source_loc,
         )
+    _require_scalar_bool_for_nfa(node.condition)
     cond_text = _bool_expr_text(node.condition)
     cond_signals = _bool_expr_signal_names(node.condition)
 
@@ -2593,11 +2688,13 @@ def _compose_prop_if_else(
         cond_text = _bool_expr_text(node.condition)
         # Add condition signals to observed_signals (used in comb. MUX)
         cond_sigs = _bool_expr_observed(node.condition)
+        cond_widths = _bool_expr_widths(node.condition)
         cond_seen = {p for p, _ in all_signals}
         cond_extra = tuple((p, s) for p, s in cond_sigs if p not in cond_seen)
         all_signals = all_signals + cond_extra
     else:
         cond_text = "<cond>"
+        cond_widths = ()
     params: dict[str, str] = {
         "module_name": module_name,
         "cond_expr": cond_text,
@@ -2613,6 +2710,7 @@ def _compose_prop_if_else(
         module_name=module_name,
         params=params,
         observed_signals=all_signals,
+        observed_signal_widths=cond_widths,
         source_loc=node.source_loc,
         children=tuple(children),
         cse_origin=cse_origin,
@@ -2643,6 +2741,7 @@ def _compose_bounded_eventually(
         )
     module_name = module_name_from_label(label, original_text)
     observed = _bool_expr_observed(node.body)
+    widths = _bool_expr_widths(node.body)
     body_text = _bool_expr_text(node.body)
     cnt_width = max(1, math.ceil(math.log2(node.hi + 1))) if node.hi > 0 else 1
     params: dict[str, str] = {
@@ -2663,6 +2762,7 @@ def _compose_bounded_eventually(
         module_name=module_name,
         params=params,
         observed_signals=observed,
+        observed_signal_widths=widths,
         source_loc=node.source_loc,
         children=(),
         cse_origin=cse_origin,
@@ -2693,6 +2793,7 @@ def _compose_bounded_always(
         )
     module_name = module_name_from_label(label, original_text)
     observed = _bool_expr_observed(node.body)
+    widths = _bool_expr_widths(node.body)
     body_text = _bool_expr_text(node.body)
     cnt_width = max(1, math.ceil(math.log2(node.hi + 1))) if node.hi > 0 else 1
     params: dict[str, str] = {
@@ -2713,6 +2814,7 @@ def _compose_bounded_always(
         module_name=module_name,
         params=params,
         observed_signals=observed,
+        observed_signal_widths=widths,
         source_loc=node.source_loc,
         children=(),
         cse_origin=cse_origin,
@@ -2745,6 +2847,16 @@ def _compose_until(
     module_name = module_name_from_label(label, original_text)
     left_obs = _bool_expr_observed(node.left)
     right_obs = _bool_expr_observed(node.right)
+    widths = dict(_bool_expr_widths(node.left))
+    for port, width in _bool_expr_widths(node.right):
+        previous = widths.get(port)
+        if previous is not None and previous != width:
+            raise UnsupportedConstruct(
+                message=f"conflicting widths for signal '{port}'",
+                construct_name="inconsistent signal width",
+                source_loc=node.source_loc,
+            )
+        widths[port] = width
     left_text = _bool_expr_text(node.left)
     right_text = _bool_expr_text(node.right)
     # Ordered union (left first), preserving first-appearance order.
@@ -2772,6 +2884,7 @@ def _compose_until(
         module_name=module_name,
         params=params,
         observed_signals=tuple(observed),
+        observed_signal_widths=tuple(widths.items()),
         source_loc=node.source_loc,
         children=(),
         cse_origin=cse_origin,

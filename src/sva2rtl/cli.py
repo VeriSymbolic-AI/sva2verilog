@@ -22,7 +22,13 @@ import click
 from sva2rtl.ast_importer import import_all_assertions
 from sva2rtl.composer import compose
 from sva2rtl.debug import format_dump_ir
-from sva2rtl.emitter import emit, emit_all, write_output, write_output_dir
+from sva2rtl.emitter import (
+    emit,
+    emit_all,
+    merge_module_outputs,
+    write_output,
+    write_output_dir,
+)
 from sva2rtl.errors import (
     PropertyNotFound,
     SlangNotFound,
@@ -333,7 +339,7 @@ def main(
                     continue
 
                 modules = emit_all(checker_node, verilog_mode=verilog)
-                all_modules.update(modules)
+                merge_module_outputs(all_modules, modules)
 
             if dump_tree:
                 sys.exit(0)

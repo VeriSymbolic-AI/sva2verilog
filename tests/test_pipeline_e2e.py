@@ -205,6 +205,7 @@ def test_e2e_bool_semantics_fixture_renders_supported_forms(tmp_path: Path) -> N
     assert "(data == 4'b11)" in generated
     assert "(data != 4'b0)" in generated
     assert "(data[0])" in generated
+    assert "input  logic [3:0] data" in generated
 
 
 # ── Test 7: --dump-tree on bool_assert.sv ────────────────────────────────────

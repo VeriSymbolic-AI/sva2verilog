@@ -7,9 +7,11 @@ import json
 import pytest
 
 from sva2rtl.bool_semantics import (
+    collect_bool_signal_widths,
     collect_bool_signals,
     deserialize_bool_expr,
     eval_bool_expr,
+    rename_bool_signals,
     render_bool_expr,
     serialize_bool_expr,
 )
@@ -107,6 +109,22 @@ def test_collect_bool_signals_preserves_first_seen_order_and_deduplicates() -> N
     )
 
     assert collect_bool_signals(expr) == (("a", "a"), ("data", "data"))
+
+
+def test_signal_widths_and_renames_preserve_vector_metadata() -> None:
+    """Identifier width metadata follows deterministic port aliases."""
+    expr = BoolBinary(
+        op="and",
+        left=BoolIdent(name="start", width=1, source_loc=_LOC),
+        right=BoolIdent(name="data", width=4, source_loc=_LOC),
+        source_loc=_LOC,
+    )
+
+    renamed = rename_bool_signals(expr, {"start": "dut_start"})
+
+    assert render_bool_expr(renamed) == "(dut_start && data)"
+    assert collect_bool_signal_widths(renamed) == (("dut_start", 1), ("data", 4))
+    assert deserialize_bool_expr(serialize_bool_expr(renamed)) == renamed
 
 
 def test_serialize_deserialize_round_trips_supported_nodes_deterministically() -> None:

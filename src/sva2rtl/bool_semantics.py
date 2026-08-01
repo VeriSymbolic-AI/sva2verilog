@@ -21,9 +21,11 @@ SignalValue = bool | int
 JsonMap = dict[str, object]
 
 __all__ = [
+    "collect_bool_signal_widths",
     "collect_bool_signals",
     "deserialize_bool_expr",
     "eval_bool_expr",
+    "rename_bool_signals",
     "render_bool_expr",
     "serialize_bool_expr",
 ]
@@ -81,6 +83,55 @@ def collect_bool_signals(expr: BoolNode) -> tuple[tuple[str, str], ...]:
     return tuple(ordered)
 
 
+def collect_bool_signal_widths(expr: BoolNode) -> tuple[tuple[str, int], ...]:
+    """Return identifier widths in first-seen order, rejecting inconsistent IR."""
+    widths: dict[str, int] = {}
+    for ident in _walk_bool_idents(expr):
+        previous = widths.get(ident.name)
+        if previous is not None and previous != ident.width:
+            raise ValueError(
+                f"inconsistent widths for boolean identifier {ident.name!r}: "
+                f"{previous} and {ident.width}"
+            )
+        widths.setdefault(ident.name, ident.width)
+    return tuple(widths.items())
+
+
+def rename_bool_signals(expr: BoolNode, aliases: Mapping[str, str]) -> BoolNode:
+    """Return a semantic expression whose identifiers use generated port aliases."""
+    match expr:
+        case BoolIdent(name=name, width=width, source_loc=source_loc):
+            return BoolIdent(name=aliases.get(name, name), width=width, source_loc=source_loc)
+        case BoolConst():
+            return expr
+        case BoolUnary(op=op, operand=operand, source_loc=source_loc):
+            return BoolUnary(
+                op=op,
+                operand=rename_bool_signals(operand, aliases),
+                source_loc=source_loc,
+            )
+        case BoolBinary(op=op, left=left, right=right, source_loc=source_loc):
+            return BoolBinary(
+                op=op,
+                left=rename_bool_signals(left, aliases),
+                right=rename_bool_signals(right, aliases),
+                source_loc=source_loc,
+            )
+        case BoolCompare(op=op, left=left, right=right, source_loc=source_loc):
+            return BoolCompare(
+                op=op,
+                left=rename_bool_signals(left, aliases),
+                right=rename_bool_signals(right, aliases),
+                source_loc=source_loc,
+            )
+        case BoolBitSelect(value=value, index=index, source_loc=source_loc):
+            renamed = rename_bool_signals(value, aliases)
+            if not isinstance(renamed, BoolIdent):
+                raise ValueError("bit-select base must remain an identifier")
+            return BoolBitSelect(value=renamed, index=index, source_loc=source_loc)
+    _unsupported(expr)
+
+
 def serialize_bool_expr(expr: BoolNode) -> str:
     """Serialize a structured boolean expression to deterministic JSON."""
     return json.dumps(_to_json_obj(expr), sort_keys=True, separators=(",", ":"))
@@ -120,11 +171,12 @@ def _collect_bool_signals(
 
 def _to_json_obj(expr: BoolNode) -> JsonMap:
     match expr:
-        case BoolIdent(name=name, source_loc=source_loc):
+        case BoolIdent(name=name, width=width, source_loc=source_loc):
             return {
                 "kind": "ident",
                 "name": name,
                 "source_loc": _source_loc_to_json(source_loc),
+                "width": width,
             }
         case BoolConst(value=value, width=width, raw=raw, source_loc=source_loc):
             return {
@@ -172,7 +224,11 @@ def _from_json_obj(obj: JsonMap) -> BoolNode:
     source_loc = _source_loc_from_json(_require_map(obj, "source_loc"))
 
     if kind == "ident":
-        return BoolIdent(name=_require_str(obj, "name"), source_loc=source_loc)
+        return BoolIdent(
+            name=_require_str(obj, "name"),
+            width=_optional_int(obj, "width") or 1,
+            source_loc=source_loc,
+        )
     if kind == "const":
         return BoolConst(
             value=_require_int(obj, "value"),
@@ -220,6 +276,21 @@ def _from_json_obj(obj: JsonMap) -> BoolNode:
         )
 
     raise ValueError(f"unsupported boolean semantic node kind: {kind}")
+
+
+def _walk_bool_idents(expr: BoolNode) -> tuple[BoolIdent, ...]:
+    match expr:
+        case BoolIdent():
+            return (expr,)
+        case BoolConst():
+            return ()
+        case BoolUnary(operand=operand):
+            return _walk_bool_idents(operand)
+        case BoolBinary(left=left, right=right) | BoolCompare(left=left, right=right):
+            return _walk_bool_idents(left) + _walk_bool_idents(right)
+        case BoolBitSelect(value=value):
+            return (value,)
+    _unsupported(expr)
 
 
 def _source_loc_to_json(source_loc: SourceLoc) -> JsonMap:

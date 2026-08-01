@@ -311,6 +311,20 @@ def test_build_bool_expr_constants_comparisons_and_bit_select() -> None:
     assert expr_to_sv(ne_node) == "(vec != 4'hf)"
 
 
+def test_build_bool_expr_preserves_named_value_packed_width() -> None:
+    """slang packed-vector type metadata reaches BoolIdent IR."""
+    expr = build_bool_expr(
+        {
+            "kind": "NamedValue",
+            "symbol": "1 data",
+            "type": "logic[7:4]",
+        }
+    )
+
+    assert isinstance(expr, BoolIdent)
+    assert expr.width == 4
+
+
 def test_build_bool_expr_conversion_unwraps_to_inner_structure() -> None:
     """Conversion wrappers do not erase the underlying BoolNode structure."""
     node = {

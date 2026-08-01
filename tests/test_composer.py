@@ -294,6 +294,26 @@ def test_compose_structured_bool_expr_collects_bit_select_signal_once() -> None:
     assert "bool_semantic" in checker.params
 
 
+def test_compose_vector_width_and_reserved_port_alias_are_preserved() -> None:
+    """Reserved monitor ports are aliased while vector widths remain explicit."""
+    semantic = BoolBinary(
+        op="and",
+        left=BoolIdent(name="start", width=1, source_loc=_make_loc()),
+        right=BoolIdent(name="data", width=4, source_loc=_make_loc()),
+        source_loc=_make_loc(),
+    )
+    checker = compose(
+        BoolExpr(text="start && data", expr=semantic, source_loc=_make_loc()),
+        _make_clock(),
+        "reserved_vector",
+        "start && data",
+    )
+
+    assert checker.observed_signals == (("dut_start", "start"), ("data", "data"))
+    assert checker.observed_signal_widths == (("dut_start", 1), ("data", 4))
+    assert checker.params["bool_expr"] == "(dut_start && data)"
+
+
 def test_compose_source_loc_preserved() -> None:
     """CheckerNode.source_loc matches the input node's source_loc."""
     loc = _make_loc(file="prop.sv", line=10, col=2)

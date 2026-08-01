@@ -23,7 +23,45 @@ from pathlib import Path
 
 from jinja2 import Environment, FileSystemLoader
 
+from sva2rtl.errors import SvaCompileError
 from sva2rtl.ir import CheckerNode
+
+
+def observed_signal_widths(checker: CheckerNode) -> dict[str, int]:
+    """Collect width metadata visible at *checker*, including child checkers."""
+    visible = {port for port, _ in checker.observed_signals}
+    widths: dict[str, int] = {}
+
+    def visit(node: CheckerNode) -> None:
+        for child in node.children:
+            visit(child)
+        for port, width in node.observed_signal_widths:
+            if port not in visible:
+                continue
+            previous = widths.get(port)
+            if previous is not None and previous != width:
+                raise ValueError(
+                    f"conflicting widths for observed port {port!r}: {previous} and {width}"
+                )
+            widths[port] = width
+
+    visit(checker)
+    return widths
+
+
+def merge_module_outputs(target: dict[str, str], incoming: dict[str, str]) -> None:
+    """Merge rendered modules without allowing name-based silent replacement."""
+    for module_name, sv_text in incoming.items():
+        previous = target.get(module_name)
+        if previous is not None and previous != sv_text:
+            raise SvaCompileError(
+                message=(
+                    f"module name collision for '{module_name}': two different "
+                    "checkers would overwrite the same output file; use unique "
+                    "assertion labels"
+                )
+            )
+        target[module_name] = sv_text
 
 # ── Template directory resolution ─────────────────────────────────────────
 
@@ -106,6 +144,7 @@ def emit(
     # non-string values (observed_signals, children) that the template iterates.
     ctx: dict[str, object] = dict(checker.params)
     ctx["observed_signals"] = checker.observed_signals
+    ctx["signal_widths"] = observed_signal_widths(checker)
     ctx["children"] = checker.children
     ctx["verilog_mode"] = verilog_mode
 
@@ -199,17 +238,16 @@ def _emit_recursive(
 ) -> None:
     """Depth-first recursive renderer; populates *results* in-place."""
     for child in checker.children:
-        if child.module_name not in results:
-            _emit_recursive(child, env, results, verilog_mode=verilog_mode)
+        _emit_recursive(child, env, results, verilog_mode=verilog_mode)
 
-    if checker.module_name not in results:
-        template_file = checker.template_name + ".sv.j2"
-        tmpl = env.get_template(template_file)
-        ctx: dict[str, object] = dict(checker.params)
-        ctx["observed_signals"] = checker.observed_signals
-        ctx["children"] = checker.children
-        ctx["verilog_mode"] = verilog_mode
-        results[checker.module_name] = str(tmpl.render(**ctx))
+    template_file = checker.template_name + ".sv.j2"
+    tmpl = env.get_template(template_file)
+    ctx: dict[str, object] = dict(checker.params)
+    ctx["observed_signals"] = checker.observed_signals
+    ctx["signal_widths"] = observed_signal_widths(checker)
+    ctx["children"] = checker.children
+    ctx["verilog_mode"] = verilog_mode
+    merge_module_outputs(results, {checker.module_name: str(tmpl.render(**ctx))})
 
 
 def write_output(sv_text: str, output_path: Path | None) -> None:
