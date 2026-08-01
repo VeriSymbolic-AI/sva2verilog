@@ -8,41 +8,40 @@
 
 sva2verilog 是一个开源的 SystemVerilog Assertion (SVA) 到可综合 RTL
 监控器编译器。v1.7.1 已于 2026-07-31 发布，修复了 v1.7.0 的完整契约语义
-缺陷。当前本地 `main` 基于远端 `243b839`，并包含尚未推送的 Linux
-Verilator 安装修复；因此本地结果不能替代下一次同提交远端运行。
+缺陷。发布后的可执行代码与工作流基线 `b055105` 已完成同提交远端资格
+闭环；后续文档提交只记录该基线，不把文档 SHA 倒推为新的证明对象。
 
-- 发布状态：tag `v1.7.1` 指向 `8b5c063`；远端 `main` 为 `243b839`
-- 当前远端 CI：run `30649226848` 的 lint、formal smoke、coverage、Python
-  3.14/package、四个 Icarus 轴和两个 macOS Verilator 轴通过；三个 Ubuntu
-  Verilator 相关 job 在安装阶段因缺少 `FlexLexer.h` 失败
-- 远端测试实数：Ubuntu Python 3.12 Icarus 为 1292 passed / 183 skipped；
-  macOS Python 3.12 Verilator 为 169 passed / 1 skipped；coverage 86.25%；
-  Python 3.14 非仿真轴为 1122 passed / 126 skipped
-- F-01 本地修复：Ubuntu 安装器补充 `libfl-dev` 并在源码编译前检查
-  `/usr/include/FlexLexer.h`；尚需新 SHA 的 Ubuntu Actions 证实
-- 形式化验证：同 SHA formal smoke 3/3 通过；当前本地 Full Formal 文件集
-  为 125 passed / 1 个严格 liveness xfail，不能冒充当前远端 Full Formal
-- nightly / Full Formal：最近运行仍停在旧提交 `8e7af87`，且 job 因账户
-  payment/spending-limit 限制未启动；当前 SHA 没有可用的 nightly/full 证据
+- 发布状态：tag `v1.7.1` 指向 `8b5c063`；发布后资格基线为 `b055105`
+- 主 CI：run `30683023280` 全部 13 个 job 通过，包括 8 个
+  `{ubuntu,macos} × {3.12,3.13} × {iverilog,verilator}` 仿真轴、generated
+  RTL、formal smoke、coverage、lint、Python 3.14 与仓库外安装包验证
+- F-01 已远端关闭：两个 Ubuntu Verilator 轴及 generated RTL job 均越过
+  `FlexLexer.h` 探针并实际完成测试，证明 `libfl-dev` 修复有效
+- Full Formal：run `30683026438` 的 6 个分片全部通过；这是一组针对
+  `b055105` 的远端完整工作流证据，不等同于对所有语言构造的无界证明
+- nightly differential：run `30683026683` 的 Icarus、Verilator 与完整
+  mutation 三个 job 全部通过；干净 checkout 暴露的 `.artifacts` 父目录
+  缺失问题已先由回归测试复现，再在同一基线中修复并远端验证
 - 当前本地验证：完整 Icarus 1473 passed / 1 skipped / 1 xfailed，branch
   coverage 86.31%，generated RTL 133 passed，Python 3.14 广泛轴 1247 passed /
   1 xfailed；wheel/sdist 分别在 Python 3.12 和 3.14 仓库外冒烟通过
 - 变异与差分：当前分支 Python mutation 260/301（86.4%，另有 31 个未覆盖
   候选）、RTL template mutation 11/11；Icarus/Verilator fast 各 16 passed，
-  date-seeded slow 各 1 passed（每项 64 examples）；scheduled evidence 仍缺失
+  date-seeded slow 各 1 passed（每项 64 examples）；远端 nightly 已通过
 - 支持状态权威：`SUPPORT_MATRIX.md` 记录逐构造支持边界、证据完整度和降级原因；README / SUPPORTED_CONSTRUCTS 只作概览和解释
 - 工业级验证缺口：已记录在 `INDUSTRIAL_VALIDATION_GAPS.md`，包含当前进展、P0/P1/P2 严重度、修复计划和 fully-supported 定义标准
 
 ## 2026-08-01 v1.7.1 发布后资格审计
 
-最新代码与远端 `main` 已核对一致。当前 CI 失败根因不是 RTL 回归，而是
-Ubuntu 24.04 将 Verilator 所需的 C++ Flex header 放在推荐包 `libfl-dev`；
-仅安装 `flex` 会得到可执行文件，却没有 `<FlexLexer.h>`。本地 F-01 修复
-同时增加静态依赖回归和 header fail-fast 探针。
+审计先定位并修复 Ubuntu Verilator 的 C++ Flex header 依赖，又在真实
+nightly 干净 checkout 中发现 pytest 嵌套 `--basetemp` 缺少父目录，以及
+隐藏 `.artifacts` 默认不会上传的问题。新增的 CI workflow 回归同时约束
+父目录创建和隐藏 artifact 上传配置；最终三条远端工作流在 `b055105` 上
+全部通过。
 
-这次审计也确认 v1.7.1 是“已发布的语义修复版本”，不是“已完成远端资格
-闭环的工业基线”。在 Linux Verilator、generated RTL、nightly differential
-和 Full Formal 对同一修复 SHA 全绿前，支持矩阵保持 0 个 Fully supported。
+这完成了“远端资格是否实际执行”的闭环，但不是“工业级完备”的宣告。
+支持矩阵仍保持 0 个 Fully supported，原因已从缺少同提交远端证据收敛为
+逐构造的真实 source、独立 oracle、formal 深度/无界性与拒绝边界缺口。
 多时钟电平同步器的事件丢失/合并风险仍是独立的架构级 Trusted boundary。
 
 ### 当前本地资格证据（2026-08-01）
@@ -332,31 +331,32 @@ RISK-01 纪律：预言机和参考监控器必须与 RTL 实现结构独立。�
 ## 已知限制
 
 - 1 xfail：`s_eventually[1:3]` k-induction induction step 不收敛（liveness 边界，诚实记录）
-- SUPPORT_MATRIX 中 0 个构造行达到 Fully supported，全部为 Bounded evidence（仍缺 current-commit 远端矩阵证据或全契约 formal proof）
+- SUPPORT_MATRIX 中 0 个构造行达到 Fully supported；同提交远端矩阵已闭环，
+  但逐构造仍存在真实 source、独立 oracle、formal 深度/无界性或拒绝边界缺口
 - 全算子等价证明仍以 BMC 有界为主；k-induction 当前覆盖 10 个小状态目标，尚未扩展到全部算子、复杂 NFA、liveness 或 CDC 边界
 - 多时钟 CDC 与事件交付尚未闭环：当前 2-DFF 电平同步器可能漏采窄脉冲
   或合并连续事件，必须通过明确的 handshake/toggle 与速率/overflow 契约解决
 - K-state budget (>32) 和 CDC 边界是 NFA 引擎仅存的拒绝路径
-- 本机 Verilator 5.028 已安装并完成双 Python 版本 simulation、generated lint 与 differential；仍需同一提交的远端 Ubuntu/macOS CI 记录
+- 本机与远端均已使用 Verilator 5.028 完成 simulation、generated lint 与
+  differential；GitHub Actions 的 Node.js 20 强制迁移警告仍需后续升级 action
 
 ## 未来规划
 
 ### 短期（发布加固闭环）
 
-1. 推送 F-01 `libfl-dev` 修复并确认 Ubuntu Verilator 与 generated RTL job
-   在同一 SHA 上实际执行通过。
-2. 解除 GitHub payment/spending-limit 阻塞，在同一 SHA 上触发
-   differential nightly 与 Full Formal。
-3. 只有所有远端门控在同一 commit 上通过后，记录 run ID 并逐行重评
-   `SUPPORT_MATRIX.md`；不得沿用历史 run 替代 current-commit 证据。
+1. F-01、同提交 CI、differential nightly 与 Full Formal 已在 `b055105`
+   上执行通过，run ID 已写入本报告与支持矩阵。
+2. 逐行重评 `SUPPORT_MATRIX.md`，只在完整证据链闭合后升级；流水线全绿
+   本身不自动等于 `Fully supported`。
+3. 升级仍依赖 Node.js 20 的 pinned actions，并验证 Node.js 24 原生执行。
 4. `v1.7.1` 已发布且 tag 不改写；发布资格证据应追加到新的修复 SHA，不能
    倒推声称 tag 本身已经通过后来才运行的门禁。
 
 ### 中期（Phase 2：证据链闭合，2-3 周）
 
-4. 选择 5-8 个核心构造（bool、$rose/$fell/$stable/$changed、##1、simple |->、[*3]、first_match、disable iff），补齐 current-HEAD 证据链，逐行升级为 Fully supported
-5. wheel 构建和 clean-install smoke 验证
-6. SUPPORT_MATRIX 中核心 rows 证据从 missing/pending 升级为 present
+4. 选择 5-8 个核心构造（bool、$rose/$fell/$stable/$changed、##1、simple |->、[*3]、first_match、disable iff），补齐逐构造证据链，再逐行升级为 Fully supported
+5. 将 41 个有效 mutation survivors 和 31 个未覆盖候选转为定向回归
+6. 为 multi-clock 引入 acknowledged handshake/toggle、异步时钟比仿真与 CDC sign-off
 
 ### 长期（按需求拉动）
 
@@ -368,9 +368,15 @@ RISK-01 纪律：预言机和参考监控器必须与 RTL 实现结构独立。�
 ## 风险登记册
 
 语言实现风险 RISK-00 至 RISK-06 已闭环或降级。本轮新增的制品完整性、
-CI 工具漂移、差分构建缓存和状态文档漂移均已在本地修复；唯一未闭环项
-是“远端 current-commit 复验”，它是证据门禁，不应被描述成已经通过。
+CI 工具漂移、差分构建缓存、状态文档漂移和 nightly 干净 checkout 问题
+均已修复并取得同提交远端证据。仍未闭环的是逐构造证据链、mutation
+survivors、bounded-liveness 证明边界、multi-clock CDC，以及 Actions
+Node.js 20 运行时迁移警告。
 
 ## 竞争定位
 
-sva2verilog 在"可综合 SVA 监控器"赛道（对标商用 emulator Palladium/ZeBu）覆盖约 95%+ 实际断言场景。开源世界几乎无对手，学术界唯一系统性同类是 MBAC（Boulé & Zilic）。永久边界：无界活性（理论不可综合）、CDC 结构验证（独立工具品类）、多线程局部变量（ROI 为负）。
+sva2verilog 聚焦“可综合 SVA 监控器”这一窄赛道，但当前没有公开、可复现
+的工业 assertion corpus，不能量化声称覆盖 95% 的真实断言场景，也不应
+声称“唯一同类”。可审计的定位应以 `SUPPORT_MATRIX.md` 的逐构造边界为准。
+明确边界包括无界活性、CDC/亚稳态、复杂局部变量与未建模的 IEEE 1800
+语义；商业工具对比需要独立 corpus 和交叉工具结果后再下结论。

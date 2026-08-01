@@ -9,13 +9,13 @@
 
 sva2rtl has a strong validation base, but it should not yet be described as fully
 industrial-grade. Release v1.7.1 contains the semantic and release-gate fixes
-from the independent-reference audit. On 2026-08-01, same-base remote run
-`30649226848` passed lint, formal smoke, coverage, Python 3.14/package, all
-Icarus axes, and both macOS Verilator axes. Its three Linux Verilator-dependent
-jobs failed before tests because Ubuntu 24.04 requires the separate `libfl-dev`
-package for `FlexLexer.h`; F-01 fixes that dependency locally and awaits a new
-same-commit remote run. Full Formal and nightly differential are additionally
-blocked by the GitHub account payment/spending-limit state.
+from the independent-reference audit. On 2026-08-01, post-release baseline
+`b055105` completed same-commit CI (`30683023280`), differential nightly
+(`30683026683`), and Full Formal (`30683026438`) successfully. F-01's Linux
+`FlexLexer.h` dependency fix is therefore remote-verified. A second clean-checkout
+nightly defect—missing parent creation for nested pytest `--basetemp` and hidden
+failure artifacts excluded from upload—was reproduced, regression-tested, fixed,
+and included in that same green baseline.
 The compiler also fixed several real semantic defects that were found only after
 non-circular formal references were introduced.
 
@@ -32,35 +32,31 @@ dimensions.
 
 Current project state:
 
-- Version state: v1.7.1 released at `8b5c063`; remote `main` base `243b839`
-  adds self-diagnosing JUnit execution-budget errors.
-- Local branch state: F-01 adds Ubuntu `libfl-dev` and a `FlexLexer.h` fail-fast
-  probe on top of the remote base; it is not yet a remote evidence baseline.
+- Version state: v1.7.1 released at `8b5c063`; executable/workflow qualification
+  baseline `b055105` includes the post-release F-01 and nightly artifact fixes.
 - Historical remote state: GitHub Actions run
   [28931676000](https://github.com/VeriSymbolic-AI/sva2verilog/actions/runs/28931676000)
   completed successfully for commit
   `674cea1adf15dade7b664b76912b015c8da04614`.
-- Current-base remote Icarus result: Ubuntu Python 3.12 records 1292 passed and
-  183 skipped by tool/marker selection; the JUnit budget passed and no failure
-  or error was recorded.
-- Current-base remote Verilator result: macOS Python 3.12 records 169 passed and
-  one Icarus-specific skip; the equivalent Ubuntu axes did not reach tests.
+- Current remote Icarus result: all four Linux/macOS Python 3.12/3.13 axes
+  executed and passed their JUnit budgets in run `30683023280`.
+- Current remote Verilator result: all four Linux/macOS Python 3.12/3.13 axes
+  executed and passed in run `30683023280`.
 - Generated RTL gates: local Yosys synthesis and strict Verilator lint pass all
   107 synthesis/lint cases, plus 26 representative top-contract checks, for
   133 passed.
-- Simulation coverage: Icarus is green on Ubuntu/macOS and Verilator is green
-  on macOS for commit `243b839`; Linux Verilator requires an F-01 rerun.
-- Formal coverage: current-base formal smoke records 3/3 passed. The latest full
-  local file set records 125 passed and one documented liveness xfail;
-  historical evidence includes 62 non-circular BMC
-  equivalence checks and Phase 10 bounded/full-contract/k-induction slices.
+- Simulation coverage: Icarus and Verilator are green on Ubuntu/macOS for
+  baseline `b055105`.
+- Formal coverage: formal smoke passed in CI and all six remote Full Formal
+  shards passed in run `30683026438`. The latest local file set records 125
+  passed and one documented liveness xfail; historical evidence includes 62
+  non-circular BMC equivalence checks and Phase 10 bounded/full-contract/
+  k-induction slices.
 - Static quality: ruff and mypy strict were green in the latest verification run.
-- Python compatibility and distribution: current-base Python 3.14 records 1122
-  passed and 126 tool/marker skips; wheel/sdist out-of-tree smoke passed.
-- CI: run `30649226848` is partially green but release-blocking overall. The
-  Linux Flex header dependency is fixed locally; the latest scheduled nightly
-  run `30610818023` and Full Formal run `30262616745` did not start because
-  GitHub reported an account payment/spending-limit block.
+- Python compatibility and distribution: the Python 3.14 broad axis and
+  wheel/sdist out-of-tree smoke passed in run `30683023280`.
+- CI: all 13 jobs in run `30683023280` passed. Differential nightly run
+  `30683026683` and all six Full Formal shards in run `30683026438` passed.
 - Fresh local qualification (2026-08-01): full Icarus 1473 passed / 1 skipped /
   1 xfailed; generated RTL 133 passed; Full Formal 125 passed / 1 documented
   strict-liveness xfail; branch coverage 86.31%; Python 3.14 broad non-simulation
@@ -69,7 +65,7 @@ Current project state:
 - Fresh differential and distribution evidence: Icarus and Verilator fast each
   record 16 passed; date seed `20260801` slow sweeps each record 1 passed with
   64 Hypothesis examples; wheel/sdist out-of-tree smoke passed under Python 3.12
-  and 3.14. These are local results, not substitutes for scheduled remote runs.
+  and 3.14. The remote scheduled/manual workflow results are recorded above.
 
 Recent hardening already completed:
 
@@ -134,10 +130,10 @@ for commit `674cea1adf15dade7b664b76912b015c8da04614` completed successfully.
 The run records success for lint, all four Icarus matrix axes, all four
 Verilator matrix axes, and the `formal smoke` job.
 
-This closes the external reproducibility blocker only for that historical commit.
-The 2026-07-22 hardening worktree still requires a new same-commit remote run.
-It does not claim that the complete SymbiYosys proof sweep has been published;
-that evidence remains assigned to the manual/scheduled `Full Formal` workflow.
+This closed the external reproducibility blocker only for that historical commit.
+The later 2026-08-01 baseline `b055105` now has its own same-commit CI,
+differential nightly, and six-shard Full Formal records listed in the executive
+summary. Neither baseline is used as proof for a different source commit.
 
 Done evidence:
 
@@ -611,14 +607,19 @@ The immediate next work should be:
 2. Add missing real source E2E fixtures called out by `SUPPORT_MATRIX.md`. **(Done 2026-07-11: 12 fixtures added, all slang v11 compat gaps closed.)**
 3. Fix boolean expression semantic modelling. **(Done in Phase 9 — structured BoolNode IR, independent evaluator.)**
 4. Add arbitrary-start and arbitrary-disable formal harnesses. **(Done in Phase 10.)**
-5. Record a current-commit generated-RTL CI run with Verilator lint executing
-   rather than locally skipping. **Configured, not yet evidenced.**
-6. Commit and push the 2026-07-22 hardening worktree, trigger all remote gates,
-   and confirm a full green baseline before promoting support rows.
-7. Add k-induction proofs for additional small finite-state templates.
-8. Upgrade coverage threshold from 82% toward 95%.
-9. FPGA prototype (FUT-03) — demand-pulled.
-10. C++ rewrite v2 (FUT-04) — demand-pulled.
+5. Record a current-commit generated-RTL CI run with Verilator lint executing.
+   **Done in run `30683023280`.**
+6. Keep CI, nightly, and Full Formal run IDs tied to the exact executable/workflow
+   baseline. **Done for `b055105`; do not attribute these runs to the release tag.**
+7. Convert the 41 mutation survivors and 31 uncovered candidates into targeted
+   semantic regressions, prioritizing importer/composer boundaries.
+8. Add k-induction proofs for additional small finite-state templates and make
+   the bounded-liveness xfail boundary explicit per construct.
+9. Replace the multi-clock 2-DFF level crossing with an acknowledged event
+   protocol, then add asynchronous ratio tests and CDC sign-off evidence.
+10. Upgrade Node.js 20-targeting pinned actions to native Node.js 24 versions.
+11. FPGA prototype (FUT-03) — demand-pulled.
+12. C++ rewrite v2 (FUT-04) — demand-pulled.
 
 Do not expand the supported SVA surface before these items are complete. The
 project's credibility depends more on proof quality for the claimed subset than

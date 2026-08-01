@@ -2,16 +2,17 @@
 
 Released: 2026-07-31
 
-> Post-release qualification update (2026-08-01): CI run
-> [`30649226848`](https://github.com/VeriSymbolic-AI/sva2verilog/actions/runs/30649226848)
-> passed lint, formal smoke, coverage, Python 3.14/package, all Icarus axes, and
-> both macOS Verilator axes. Its three Linux Verilator-dependent jobs failed
-> before tests because Ubuntu 24.04 requires the separately packaged
-> `FlexLexer.h` from `libfl-dev`. The dependency is fixed after the release tag
-> and requires a new same-commit remote run. Nightly and Full Formal also remain
-> blocked by the repository account payment/spending-limit state. Consequently,
-> v1.7.1 remains a corrective distribution, not a fully qualified remote
-> baseline, and the support matrix keeps 0 rows at `Fully supported`.
+> Post-release qualification update (2026-08-01): executable/workflow baseline
+> `b055105` passed CI run
+> [`30683023280`](https://github.com/VeriSymbolic-AI/sva2verilog/actions/runs/30683023280),
+> differential nightly run
+> [`30683026683`](https://github.com/VeriSymbolic-AI/sva2verilog/actions/runs/30683026683),
+> and all six shards of Full Formal run
+> [`30683026438`](https://github.com/VeriSymbolic-AI/sva2verilog/actions/runs/30683026438).
+> This closes the post-release same-commit execution gap and remotely verifies
+> F-01. It does not rewrite the `v1.7.1` tag or automatically promote construct
+> rows: the support matrix keeps 0 rows at `Fully supported` pending row-specific
+> evidence-chain closure.
 
 Fresh local post-release qualification on 2026-08-01 passed the full Icarus
 suite (1473 passed / 1 skipped / 1 xfailed), generated RTL (133 passed), Full
@@ -19,8 +20,9 @@ Formal (125 passed / 1 documented strict-liveness xfail), Python 3.14 broad
 non-simulation tests (1247 passed / 1 xfailed), branch coverage (86.31%), both
 simulator differential fast/slow sweeps, Python mutation (260/301, 86.4%), RTL
 template mutation (11/11), and Python 3.12/3.14 out-of-tree distribution smoke.
-This is local bounded evidence; it does not replace the missing same-commit
-remote Linux, scheduled nightly, or Full Formal records.
+These local counts are complemented by the same-commit remote records above;
+neither local nor remote workflow success removes the stated formal and CDC
+boundaries.
 
 This is a correctness release. It supersedes v1.7.0, which contained
 full-contract semantic defects in twelve monitor templates that were found by a
@@ -98,5 +100,7 @@ Local, this commit:
 | ruff | 0 errors |
 | mypy --strict | 0 errors |
 
-Remote gates require a same-commit run to be recorded. Verilator evidence is
-configured but had not been confirmed on this commit at the time of writing.
+Post-release remote qualification is recorded for baseline `b055105` in CI run
+`30683023280`, differential nightly run `30683026683`, and Full Formal run
+`30683026438`. These runs validate the post-release baseline, not the immutable
+`v1.7.1` tag itself.

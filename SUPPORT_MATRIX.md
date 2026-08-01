@@ -14,16 +14,21 @@ Historical baseline: run
 for commit `674cea1adf15dade7b664b76912b015c8da04614` completed successfully on
 2026-07-08 — lint, all Icarus/Verilator matrix axes, and formal smoke.
 
-Current v1.7.1 post-release qualification: CI run
-[`30649226848`](https://github.com/VeriSymbolic-AI/sva2verilog/actions/runs/30649226848)
-for commit `243b839454cd26ceee0a5d2b24fb969fa7484226` passed lint, formal smoke,
-coverage, Python 3.14/package, every Icarus axis, and both macOS Verilator axes.
-The generated-RTL job and both Ubuntu Verilator axes failed before tests because
-Ubuntu 24.04 lacked the separately packaged `FlexLexer.h`. F-01 adds
-`libfl-dev` plus an explicit header probe locally; it remains `pending-remote`
-until a new commit executes those Linux gates. Historical or partial green
-evidence is not substituted for the missing gate. Yosys synthesis is
-complementary structural evidence, not an equivalent replacement for Verilator.
+Current v1.7.1 post-release qualification baseline: commit
+`b0551057a66badf1008e6146528a1a448d5063bf` completed all three remote gates:
+
+- CI run [`30683023280`](https://github.com/VeriSymbolic-AI/sva2verilog/actions/runs/30683023280):
+  all 13 jobs passed, including all eight dual-platform / dual-Python /
+  dual-simulator axes and generated RTL synthesis/lint.
+- Differential nightly run [`30683026683`](https://github.com/VeriSymbolic-AI/sva2verilog/actions/runs/30683026683):
+  Icarus, Verilator, and full mutation jobs passed.
+- Full Formal run [`30683026438`](https://github.com/VeriSymbolic-AI/sva2verilog/actions/runs/30683026438):
+  all six formal shards passed.
+
+F-01 is therefore remote-verified. The nightly run also exposed a clean-checkout
+artifact-root defect that was reproduced by a workflow regression and fixed in
+the same baseline. Yosys synthesis remains complementary structural evidence,
+not an equivalent replacement for Verilator or formal equivalence.
 
 Fresh local qualification on 2026-08-01 records full Icarus 1473 passed /
 1 skipped / 1 xfailed, generated RTL 133 passed, Full Formal 125 passed /
@@ -31,8 +36,16 @@ Fresh local qualification on 2026-08-01 records full Icarus 1473 passed /
 non-simulation 1247 passed / 1 xfailed, and dual-backend fast/slow differential
 passes. Python mutation is 260/301 killed (86.4%, with 41 survivors and 31
 uncovered candidates); reviewed RTL-template mutation is 11/11. These results
-strengthen local bounded evidence but do not close the missing same-commit remote
-Linux, nightly, or Full Formal gates.
+remain important local counts; the named same-commit remote runs above close the
+Linux, nightly, and Full Formal execution gap.
+
+**Qualification overlay:** in the detailed row ledger below, legacy cell text
+such as `current-commit rerun pending`, `pending-remote`, or `current worktree
+has not been rerun remotely` is superseded for dual-simulator and generated-RTL
+execution by CI run `30683023280`. This overlay changes those remote-execution
+cells to `present`; it does not fill a row's independent-reference, proof-depth,
+real-source, rejection, CDC, or industrial-corpus gaps, and therefore does not
+change any support status by itself.
 
 ## Support Status Legend
 
@@ -44,11 +57,13 @@ Linux, nightly, or Full Formal gates.
 | Unsupported / rejected | Deliberately unsupported variant that should fail with explicit, actionable diagnostics and negative-test evidence where available. |
 
 Current v1.7 evidence: **0 construct rows are promoted to `Fully supported`**.
-The six strongest rows (`##N`, `[*N]`, sampled value functions, overlapping
-implication, `first_match`, and `disable iff`) retain broad historical and local
-evidence but are `Bounded evidence` until the current hardening commit completes
-the dual-simulator and generated-lint remote gates. The remaining rows stay at
-`Bounded evidence`, `Trusted boundary`, or `Unsupported / rejected` as listed.
+The same-commit dual-simulator, generated-lint, nightly, and Full Formal gates
+are now present. The six strongest rows (`##N`, `[*N]`, sampled value functions,
+overlapping implication, `first_match`, and `disable iff`) remain `Bounded
+evidence` until their row-specific real-source, independent-reference,
+full-contract/formal, and unsupported-variant links are individually audited.
+The remaining rows stay at `Bounded evidence`, `Trusted boundary`, or
+`Unsupported / rejected` as listed.
 
 ## Evidence Cell Legend
 
@@ -236,10 +251,9 @@ evidence, but they are not real-source evidence for `Fully supported` status.
 
 ## Evidence Status Summary
 
-- **0 rows Fully supported** in the current v1.7.1 qualification branch. The
-  strongest rows remain bounded until the F-01 fix passes the remote Linux
-  Verilator/generated-RTL gates on the same commit and remaining row-specific
-  evidence gaps are closed.
+- **0 rows Fully supported** in the current v1.7.1 qualification branch. F-01
+  and all same-commit remote workflow gates are closed; the strongest rows
+  remain bounded until their remaining row-specific evidence gaps are closed.
 - Real `.sv` source fixtures have been added for `[*N]`, `[*M:N]`, `[->N]`,
   `[=N]`, `$rose`, `$fell`, `$stable`, `$changed`, `$past`, `first_match`,
   `disable iff`, and named sequences via `tests/sv_fixtures/` and
@@ -252,10 +266,9 @@ evidence, but they are not real-source evidence for `Fully supported` status.
   `PROJECT_STATUS.md`.
 - Rows with local Yosys smoke evidence remain bounded until the rest of their
   evidence chain is complete.
-- Verilator simulation and generated-RTL lint evidence was confirmed green in
-  historical run `28931676000` and locally with pinned 5.028. Run
-  `30649226848` adds current-base macOS Verilator evidence but not Linux or
-  generated-RTL evidence; a new F-01 commit run is required. Yosys synthesis
-  does not replace this evidence.
+- Verilator simulation and generated-RTL lint are confirmed with pinned 5.028
+  on Linux and macOS in same-commit run `30683023280`; differential nightly and
+  Full Formal are recorded in runs `30683026683` and `30683026438`. Yosys
+  synthesis does not replace simulator or formal evidence.
 - Multi-clock support remains a `Trusted boundary`.
 - Rejected rows are positive evidence for rejection behavior only.
