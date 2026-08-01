@@ -28,15 +28,46 @@ Full Formal。后续纯文档提交只记录这些基线，不把文档 SHA 倒�
   通过；nightly run `30686818970` 的三个 job 通过；Full Formal run
   `30686820029` 的六个分片通过。该组运行实际使用 Node.js 24 actions，
   并覆盖最新 CDC 注入、oracle mutation 与测试隔离修复
-- 当前本地验证：完整 Icarus 1484 passed / 1 skipped / 1 xfailed，完整
-  Verilator simulation 169 passed / 1 个已知后端限定 skip，branch
-  coverage 86.31%，generated RTL 133 passed，Python 3.14 广泛轴 1247 passed /
-  1 xfailed；wheel/sdist 分别在 Python 3.12 和 3.14 仓库外冒烟通过
-- 变异与差分：当前分支 Python mutation 266/302（88.1%，另有 30 个未覆盖
+- 最新本地可执行基线：`79db15d`；完整 Icarus 1535 passed / 1 skipped /
+  1 xfailed，完整 Verilator simulation 173 passed / 1 个已知后端限定 skip，
+  branch coverage 86.70%，generated RTL 133 passed，Full Formal 126 passed /
+  1 xfailed，Python 3.14 选择轴 1179/1179 passed；wheel/sdist 隔离冒烟通过
+- 变异与差分：当前分支 Python mutation 296/318（93.1%，另有 36 个未覆盖
   候选）、RTL template mutation 12/12；Icarus/Verilator fast 各 16 passed，
-  date-seeded slow 各 1 passed（每项 64 examples）；远端 nightly 已通过
+  date-seeded slow 各 1 passed。`79db15d` 尚无同提交远端证据，不能沿用
+  `1841ed4` 的历史远端绿灯
 - 支持状态权威：`SUPPORT_MATRIX.md` 记录逐构造支持边界、证据完整度和降级原因；README / SUPPORTED_CONSTRUCTS 只作概览和解释
 - 工业级验证缺口：已记录在 `INDUSTRIAL_VALIDATION_GAPS.md`，包含当前进展、P0/P1/P2 严重度、修复计划和 fully-supported 定义标准
+
+## 2026-08-01 深度审查后续高优先级修复
+
+本轮以“是否仍可能出现不可置信 PASS、静默丢失或验证门禁空绿”为判断标准，
+继续关闭了五组问题：
+
+- `9a240bd`：NFA 接受线程及时释放；死亡 attempt 只失败一次；满槽新请求不再
+  静默丢弃，而是置位 sticky `overflow_flag` 并 fail-closed。
+- `eba6e12`：sampled-value 函数仅接受普通标量标识符，向量、选择表达式、
+  复杂表达式、可选 sampled 参数和非法 `$past` 深度均明确拒绝；保留端口名
+  通过确定性 `dut_*` 别名隔离。
+- `3e7f9e8`：行为预言机在层次入口统一处理 `disable_i`，递归清空叶子和组合
+  状态，避免外部 disable 后旧状态泄漏到新 attempt。
+- `253137c`：CI 通过/跳过预算按真实隔离环境校准，skip 原因采用白名单；
+  未知原因导致门禁失败，Formal 选择由显式 marker 保证可审计。
+- `79db15d`：新增语义路由、状态保持、层次 implication、NFA 分配和多时钟
+  边沿等 mutation-sensitive 回归；四个模块分别执行 100%/95%/90%/86%
+  的独立变异下限，禁止总分掩盖单模块薄弱。
+
+完整本地证据采集于可执行提交 `79db15d`：Icarus 1535 passed / 1 skipped /
+1 xfailed；Verilator 173 passed / 1 backend-specific skipped；Full Formal
+126 passed / 1 bounded-liveness xfailed；generated RTL 133/133；coverage
+86.70%；Python 3.14 1179/1179；双后端 nightly differential fast/slow 全部
+通过；Python mutation 296/318，RTL template mutation 12/12；ruff、strict
+mypy、发行包隔离 smoke 和 whitespace 检查通过。
+
+当前没有新发现的本地可复现 P0。尚未关闭的高优先级事项是：新提交的
+同提交远端 CI/nightly/Full Formal；multi-clock acknowledged event-transfer
+协议；真实工程 filelist/include/define/library/top/parameter 编译上下文；以及
+逐构造证据链。`SUPPORT_MATRIX.md` 因此继续保持 0 个 Fully supported。
 
 ## 2026-08-01 v1.7.1 发布后资格审计
 
@@ -73,7 +104,10 @@ Full Formal 125 passed / 1 个已记录 strict-liveness xfail。同一基线
 `30686820029` 也全部通过。该证据补充而不倒推改写 `b055105` 的历史记录，
 也不自动升级任何 Fully supported 行。
 
-### 当前本地资格证据（2026-08-01）
+### `1841ed4` 本地资格证据（历史基线）
+
+本节数字对应后续 `79db15d` 之前的历史基线；最新本地证据以上方“深度审查
+后续高优先级修复”为准。
 
 本地在最新高优先级修复分支上重新执行了完整门禁，而不是沿用 2026-07-26
 数字：ruff、mypy strict、冻结 lock、工作流 YAML、安装脚本语法和覆盖率下限
@@ -389,7 +423,8 @@ RISK-01 纪律：预言机和参考监控器必须与 RTL 实现结构独立。�
 ### 中期（Phase 2：证据链闭合，2-3 周）
 
 4. 选择 5-8 个核心构造（bool、$rose/$fell/$stable/$changed、##1、simple |->、[*3]、first_match、disable iff），补齐逐构造证据链，再逐行升级为 Fully supported
-5. 继续将剩余 36 个有效 mutation survivors 和 30 个未覆盖候选转为定向回归
+5. 继续将剩余 22 个有效 mutation survivors 和 36 个未覆盖候选转为定向回归，
+   优先处理仍有 15 个 survivor 的 importer
 6. 为 multi-clock 引入 acknowledged handshake/toggle、异步时钟比仿真与 CDC sign-off
 
 ### 长期（按需求拉动）
@@ -405,9 +440,10 @@ RISK-01 纪律：预言机和参考监控器必须与 RTL 实现结构独立。�
 CI 工具漂移、差分构建缓存、状态文档漂移和 nightly 干净 checkout 问题
 均已修复并取得同提交远端证据。最新审计又完成 Node.js 24 迁移、最小权限、
 测试隔离和部分 mutation 债务收敛，且已取得 `1841ed4` 的同提交远端证据。
-架构上仍未闭环的是逐构造证据链、mutation survivors、bounded-liveness
-证明边界，以及 multi-clock CDC 事件交付协议；此外还有非阻断的 cache/tap
-runner 注释需要降噪。
+架构上仍未闭环的是新可执行提交的同提交远端证据、逐构造证据链、22 个
+mutation survivors、bounded-liveness 证明边界、真实工程 frontend 上下文，
+以及 multi-clock CDC 事件交付协议；此外还有非阻断的 cache/tap runner
+注释需要降噪。
 
 ## 竞争定位
 

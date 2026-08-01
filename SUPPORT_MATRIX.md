@@ -42,17 +42,22 @@ Latest follow-on hardening baseline: commit
 - Full Formal run [`30686820029`](https://github.com/VeriSymbolic-AI/sva2verilog/actions/runs/30686820029):
   all six formal shards passed.
 
-Fresh local qualification on 2026-08-01 records full Icarus 1484 passed /
-1 skipped / 1 xfailed, generated RTL 133 passed, Full Formal 125 passed /
-1 documented strict-liveness xfail, branch coverage 86.31%, Python 3.14 broad
-non-simulation 1247 passed / 1 xfailed, and dual-backend fast/slow differential
-passes. A full local Verilator simulation axis also records 169 passed / 1 known
-backend-specific skip. Python mutation is 266/302 killed (88.1%, with 36
-survivors and 30 uncovered candidates); reviewed RTL-template mutation is 12/12.
-These results remain important local counts; the named `1841ed4` same-commit
-remote runs close the follow-on Linux, nightly, and Full Formal execution gap.
-They do not close per-construct independent-reference, proof-depth, CDC, or
-industrial-corpus gaps.
+The latest local executable qualification, commit `79db15d` on 2026-08-01,
+records full Icarus 1535 passed / 1 skipped / 1 xfailed, generated RTL 133/133,
+Full Formal 126 passed / 1 documented strict-liveness xfail, branch coverage
+86.70%, Python 3.14 selected non-simulation 1179/1179, and dual-backend
+fast/slow differential passes. A full local Verilator simulation axis records
+173 passed / 1 known backend-specific skip. Python mutation is 296/318 killed
+(93.1%, with 22 survivors and 36 uncovered candidates); reviewed RTL-template
+mutation is 12/12.
+
+These are local results for the changed executable. The named `1841ed4`
+same-commit remote runs remain valid historical evidence for that older
+executable, but do not qualify `79db15d` or the following documentation-only
+commit. CI, nightly, and Full Formal must run on the new exact commit before
+remote evidence is restored. Neither the local nor remote gates close
+per-construct independent-reference, proof-depth, CDC, or industrial-corpus
+gaps.
 
 **Qualification overlay:** in the detailed row ledger below, legacy cell text
 such as `current-commit rerun pending`, `pending-remote`, or `current worktree
