@@ -232,11 +232,36 @@ def test_multi_property_emits_all(runner: CliRunner, sv_file: Path) -> None:
                         return_value={"mod_a": _MOCK_SV_TEXT, "mod_b": _MOCK_SV_TEXT},
                     ):
                         with patch("sva2rtl.cli.write_output_dir"):
-                            result = runner.invoke(main, [str(sv_file)])
+                            result = runner.invoke(
+                                main,
+                                [str(sv_file), "--output", str(sv_file.parent / "out")],
+                            )
 
     assert result.exit_code == 0
     # compose should be called once per assertion (2 times)
     assert mock_compose.call_count == 2
+
+
+def test_multi_property_requires_explicit_output_directory(
+    runner: CliRunner, sv_file: Path
+) -> None:
+    """Multi-module builds never write implicitly into the current directory."""
+    node = BoolExpr(text="a", source_loc=_LOC)
+    assertions = [(node, _CLOCK, "a", "one"), (node, _CLOCK, "a", "two")]
+    mock_checker = MagicMock()
+    mock_checker.children = ()
+
+    with patch("sva2rtl.cli.invoke_slang", return_value=_MOCK_AST):
+        with patch("sva2rtl.cli.import_all_assertions", return_value=assertions):
+            with patch("sva2rtl.cli.compose", return_value=mock_checker):
+                with patch("sva2rtl.cli.optimize", return_value=mock_checker):
+                    with patch(
+                        "sva2rtl.cli.emit_all", return_value={"one": _MOCK_SV_TEXT}
+                    ):
+                        result = runner.invoke(main, [str(sv_file)])
+
+    assert result.exit_code == 2
+    assert "requires --output DIRECTORY" in result.output
 
 
 # ── Test 8: format_dump_ir shows source location ─────────────────────────

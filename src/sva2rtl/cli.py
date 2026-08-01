@@ -53,6 +53,10 @@ def _resolve_output_mode(
     Incompatible combinations raise click.UsageError.
     """
     if output is None:
+        if multi_prop:
+            raise click.UsageError(
+                "hierarchical or multi-assertion output requires --output DIRECTORY"
+            )
         return None
     if output.endswith("/"):
         return output
@@ -74,7 +78,13 @@ def _resolve_output_mode(
     "-o",
     type=click.Path(),
     default=None,
-    help="Output file path (default: stdout)",
+    help="Output file for one leaf, or directory for hierarchical/multi output",
+)
+@click.option(
+    "--force",
+    is_flag=True,
+    default=False,
+    help="Replace differing generated files that already exist",
 )
 @click.option(
     "--slang-path",
@@ -131,6 +141,7 @@ def _resolve_output_mode(
 def main(
     input_file: str,
     output: str | None,
+    force: bool,
     slang_path: str,
     dump_ast: bool,
     dump_ir: bool,
@@ -273,15 +284,17 @@ def main(
                 sys.exit(0)
 
             # HARDEN-07: resolve output mode
-            out_path_str = _resolve_output_mode(output, multi_prop=False)
+            out_path_str = _resolve_output_mode(
+                output, multi_prop=bool(checker_node.children)
+            )
             if checker_node.children:
                 modules = emit_all(checker_node, verilog_mode=verilog)
                 out_dir = Path(out_path_str) if out_path_str else Path(".")
-                write_output_dir(modules, out_dir)
+                write_output_dir(modules, out_dir, force=force)
             else:
                 sv_text = emit(checker_node, verilog_mode=verilog)
                 out_path = Path(out_path_str) if out_path_str else None
-                write_output(sv_text, out_path)
+                write_output(sv_text, out_path, force=force)
         else:
             # Multi-property: normalize all, optionally dump-ir for first
             normalized_assertions = []
@@ -348,7 +361,7 @@ def main(
                 # HARDEN-07: resolve output mode
                 out_path_str = _resolve_output_mode(output, multi_prop=True)
                 out_dir = Path(out_path_str) if out_path_str else Path(".")
-                write_output_dir(all_modules, out_dir)
+                write_output_dir(all_modules, out_dir, force=force)
 
         sys.exit(0)
 
@@ -367,6 +380,9 @@ def main(
     except SvaError as exc:
         click.echo(str(exc), err=True)
         sys.exit(1)
+
+    except click.UsageError:
+        raise
 
     except Exception as exc:  # noqa: BLE001
         click.echo(f"internal error: {exc}", err=True)

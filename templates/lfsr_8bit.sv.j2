@@ -1,4 +1,4 @@
-{% from '_macros.sv.j2' import port_decl with context %}
+{% from '_macros.sv.j2' import port_decl, always_block_header with context %}
 // 8-bit Galois LFSR — deterministic pseudo-random source for metastability
 // injection in the 2-DFF synchronizer (v1.4.2 Path Two).
 //
@@ -23,7 +23,7 @@ module {{ module_name }} #(
     logic [7:0] state;
     {% endif %}
 
-    always_ff @(posedge clk) begin
+{{ always_block_header(verilog_mode, "posedge", "clk") }}
         if (!rst_n)
             state <= (SEED == 8'h00) ? 8'hA5 : SEED;
         else
@@ -31,13 +31,23 @@ module {{ module_name }} #(
     end
 
     // Galois feedback: tap bits 6,5,4 XOR into feedback, shift right.
+{% if verilog_mode %}
+    function [7:0] _next_galois;
+        input [7:0] s;
+        reg fb;
+        begin
+{% else %}
     function automatic [7:0] _next_galois(input [7:0] s);
         logic fb;
+{% endif %}
         fb = s[0];
         _next_galois = {fb, s[7:1]};
         _next_galois[5] = s[6] ^ fb;   // tap at bit 6
         _next_galois[4] = s[5] ^ fb;   // tap at bit 5
         _next_galois[3] = s[4] ^ fb;   // tap at bit 4
+{% if verilog_mode %}
+        end
+{% endif %}
     endfunction
 
     // A maximal 8-bit LFSR visits each nonzero state exactly once per period.

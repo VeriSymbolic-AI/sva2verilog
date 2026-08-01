@@ -19,6 +19,7 @@ Design decisions:
 from __future__ import annotations
 
 import sys
+import tempfile
 from pathlib import Path
 
 from jinja2 import Environment, FileSystemLoader
@@ -250,7 +251,7 @@ def _emit_recursive(
     merge_module_outputs(results, {checker.module_name: str(tmpl.render(**ctx))})
 
 
-def write_output(sv_text: str, output_path: Path | None) -> None:
+def write_output(sv_text: str, output_path: Path | None, *, force: bool = False) -> None:
     """Write SystemVerilog text to a file or stdout.
 
     Parameters
@@ -266,10 +267,15 @@ def write_output(sv_text: str, output_path: Path | None) -> None:
         sys.stdout.write(sv_text)
         return
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(sv_text, encoding="utf-8")
+    _write_output_file(output_path, sv_text, force=force)
 
 
-def write_output_dir(modules: dict[str, str], output_dir: Path) -> None:
+def write_output_dir(
+    modules: dict[str, str],
+    output_dir: Path,
+    *,
+    force: bool = False,
+) -> None:
     """Write each module SV text to ``<output_dir>/<module_name>.sv``.
 
     Parameters
@@ -279,10 +285,48 @@ def write_output_dir(modules: dict[str, str], output_dir: Path) -> None:
     output_dir:
         Target directory.  Created (with parents) if it does not yet exist.
     """
+    if output_dir.exists() and not output_dir.is_dir():
+        raise SvaCompileError(message=f"output path is not a directory: {output_dir}")
+
+    conflicts = []
+    for module_name, sv_text in modules.items():
+        out_file = output_dir / f"{module_name}.sv"
+        if out_file.exists() and out_file.read_text(encoding="utf-8") != sv_text:
+            conflicts.append(out_file)
+    if conflicts and not force:
+        names = ", ".join(path.name for path in conflicts)
+        raise SvaCompileError(
+            message=f"refusing to overwrite existing generated files: {names}; use --force"
+        )
+
     output_dir.mkdir(parents=True, exist_ok=True)
     for module_name, sv_text in modules.items():
         out_file = output_dir / f"{module_name}.sv"
-        out_file.write_text(sv_text, encoding="utf-8")
+        _write_output_file(out_file, sv_text, force=force)
+
+
+def _write_output_file(path: Path, text: str, *, force: bool) -> None:
+    """Atomically write one output, allowing identical rebuilds without --force."""
+    if path.exists():
+        if not path.is_file():
+            raise SvaCompileError(message=f"output path is not a regular file: {path}")
+        if path.read_text(encoding="utf-8") == text:
+            return
+        if not force:
+            raise SvaCompileError(
+                message=f"refusing to overwrite existing file: {path}; use --force"
+            )
+    with tempfile.NamedTemporaryFile(
+        mode="w",
+        encoding="utf-8",
+        dir=path.parent,
+        prefix=f".{path.name}.",
+        suffix=".tmp",
+        delete=False,
+    ) as handle:
+        handle.write(text)
+        temp_path = Path(handle.name)
+    temp_path.replace(path)
 
 
 def emit_bind(

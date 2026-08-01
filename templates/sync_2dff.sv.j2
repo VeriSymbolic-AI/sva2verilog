@@ -1,4 +1,4 @@
-{% from '_macros.sv.j2' import port_decl with context %}
+{% from '_macros.sv.j2' import port_decl, always_block_header with context %}
 // ─────────────────────────────────────────────────────────────────────────────
 // TRUSTED COMPONENT: 2-DFF token synchronizer with optional metastability
 // injection (v1.4.2 Path Two).
@@ -57,7 +57,7 @@ module {{ module_name }} #(
     logic sync0_q, sync1_q;
     {% endif %}
 
-    always_ff @(posedge {{ dst_clock }}) begin
+{{ always_block_header(verilog_mode, "posedge", dst_clock) }}
         if (!rst_n || disable_i) begin
             sync0_q <= 1'b0;
             sync1_q <= 1'b0;
@@ -67,7 +67,6 @@ module {{ module_name }} #(
         end
     end
 
-{% raw %}
     // ── Optional deterministic metastability injection (v1.4.2 Path Two) ────
     // When META_ENABLE=1, an 8-bit Galois LFSR emits one event per 255-cycle
     // nonzero period and inverts the synchronizer output for that dst-clock
@@ -75,18 +74,19 @@ module {{ module_name }} #(
     // The result is identical in Verilator for the same LFSR_SEED.
     generate
         if (META_ENABLE) begin : gen_meta_inject
+{% if verilog_mode %}
+            wire lfsr_bit;
+{% else %}
             logic lfsr_bit;
-{% endraw %}
+{% endif %}
             lfsr_8bit #(.SEED(LFSR_SEED)) u_lfsr (
                 .clk({{ dst_clock }}),
                 .rst_n(rst_n),
                 .lfsr_out(lfsr_bit)
             );
-{% raw %}
             assign token_o = disable_i ? 1'b0 : (sync1_q ^ lfsr_bit);
         end else begin : gen_no_inject
             assign token_o = disable_i ? 1'b0 : sync1_q;
         end
     endgenerate
-{% endraw %}
 endmodule

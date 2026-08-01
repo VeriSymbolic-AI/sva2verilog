@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
+import subprocess
 from pathlib import Path
 from typing import cast
 
@@ -18,6 +20,7 @@ import pytest
 from sva2rtl.ast_importer import import_assertion
 from sva2rtl.composer import compose
 from sva2rtl.emitter import emit, emit_all
+from sva2rtl.ir import BoolExpr, ClockedSeq, ClockSpec, SeqConcat, SourceLoc
 from sva2rtl.normalizer import normalize
 
 # ── Paths ────────────────────────────────────────────────────────────────────
@@ -262,3 +265,71 @@ def test_verilog_mode_input_ports_no_type(fixture_name: str) -> None:
                     f"Module '{mod_name}': input port has 'logic' qualifier "
                     f"in Verilog-2001 mode: {stripped}"
                 )
+
+
+@pytest.mark.skipif(shutil.which("iverilog") is None, reason="iverilog not installed")
+def test_multiclock_verilog_2001_compiles_with_transitive_cdc_modules(
+    tmp_path: Path,
+) -> None:
+    """The multi-clock synchronizer and LFSR dependency are valid V2001."""
+    loc = SourceLoc("multiclock_v2001.sv", 1, 1)
+    clk1 = ClockSpec(edge="posedge", signal="clk1", source_loc=loc)
+    clk2 = ClockSpec(edge="posedge", signal="clk2", source_loc=loc)
+    node = SeqConcat(
+        elements=(
+            BoolExpr(text="a", source_loc=loc),
+            ClockedSeq(
+                clock=clk2,
+                body=BoolExpr(text="b", source_loc=loc),
+                source_loc=loc,
+            ),
+        ),
+        delays=((1, 1),),
+        source_loc=loc,
+    )
+    checker = compose(node, clk1, "multiclock_v2001", "a ##1 @(posedge clk2) b")
+    modules = emit_all(checker, verilog_mode=True)
+    source = "\n\n".join(modules.values())
+    source_path = tmp_path / "multiclock.v"
+    source_path.write_text(source, encoding="utf-8")
+
+    code_without_comments = "\n".join(
+        line.split("//")[0] for line in source.splitlines()
+    )
+    assert "always_ff" not in source
+    assert not re.search(r"\blogic\b", code_without_comments)
+    assert "function automatic" not in source
+    result = subprocess.run(
+        [
+            str(shutil.which("iverilog")),
+            "-g2001",
+            "-s",
+            checker.module_name,
+            "-o",
+            str(tmp_path / "multiclock.vvp"),
+            str(source_path),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+
+    verilator = shutil.which("verilator")
+    if verilator is not None:
+        lint = subprocess.run(
+            [
+                verilator,
+                "--lint-only",
+                "--language",
+                "1364-2001",
+                "-Wno-fatal",
+                "--top-module",
+                checker.module_name,
+                str(source_path),
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert lint.returncode == 0, lint.stderr

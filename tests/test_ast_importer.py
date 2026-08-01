@@ -593,6 +593,19 @@ def test_extract_source_loc_partial_fields() -> None:
     assert loc.line == 0
 
 
+def test_extract_source_loc_redacts_absolute_host_path() -> None:
+    """Diagnostics retain the filename without exposing host directories."""
+    loc = extract_source_loc(
+        {
+            "source_file": "/private/workstation/customer/design.sv",
+            "source_line": 4,
+            "source_column": 2,
+        }
+    )
+
+    assert loc == SourceLoc("design.sv", 4, 2)
+
+
 # ── UNSUPPORTED_KINDS_PHASE1 sanity check ────────────────────────────────
 
 

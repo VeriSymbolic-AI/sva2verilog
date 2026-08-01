@@ -20,6 +20,7 @@ from __future__ import annotations
 import logging
 import re
 from contextvars import ContextVar
+from pathlib import Path
 from typing import Any
 
 from sva2rtl.bool_semantics import render_bool_expr
@@ -557,6 +558,8 @@ def extract_source_loc(node: dict[str, Any]) -> SourceLoc:
     / ``0`` when fields are absent.
     """
     file = str(node.get("source_file_start") or node.get("source_file") or "<unknown>")
+    if Path(file).is_absolute():
+        file = Path(file).name
     line = int(node.get("source_line_start") or node.get("source_line") or 0)
     col = int(node.get("source_column_start") or node.get("source_column") or 0)
     return SourceLoc(file=file, line=line, col=col)

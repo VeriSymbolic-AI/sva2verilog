@@ -234,6 +234,27 @@ def test_write_output_to_stdout(capsys: pytest.CaptureFixture[str]) -> None:
     assert captured.out == sv
 
 
+def test_write_output_refuses_different_existing_file_without_force(tmp_path: Path) -> None:
+    """Generated output does not clobber a differing file by default."""
+    out_file = tmp_path / "monitor.sv"
+    out_file.write_text("user content\n", encoding="utf-8")
+
+    with pytest.raises(SvaCompileError, match="refusing to overwrite"):
+        write_output("generated\n", out_file)
+
+    assert out_file.read_text(encoding="utf-8") == "user content\n"
+
+
+def test_write_output_force_replaces_different_existing_file(tmp_path: Path) -> None:
+    """Explicit force permits an atomic replacement."""
+    out_file = tmp_path / "monitor.sv"
+    out_file.write_text("old\n", encoding="utf-8")
+
+    write_output("new\n", out_file, force=True)
+
+    assert out_file.read_text(encoding="utf-8") == "new\n"
+
+
 # ── Helpers for SeqConcat / delay tests ──────────────────────────────────────
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
@@ -428,6 +449,17 @@ def test_write_output_dir_creates_dir_if_missing(tmp_path: Path) -> None:
     write_output_dir(modules, new_dir)
     assert new_dir.is_dir()
     assert len(list(new_dir.iterdir())) == len(modules)
+
+
+def test_write_output_dir_preflights_all_conflicts(tmp_path: Path) -> None:
+    """A conflict prevents every module write, avoiding partial output sets."""
+    (tmp_path / "existing.sv").write_text("old\n", encoding="utf-8")
+    modules = {"fresh": "fresh\n", "existing": "new\n"}
+
+    with pytest.raises(SvaCompileError, match="existing.sv"):
+        write_output_dir(modules, tmp_path)
+
+    assert not (tmp_path / "fresh.sv").exists()
 
 
 def test_merge_module_outputs_rejects_conflicting_duplicate_name() -> None:
