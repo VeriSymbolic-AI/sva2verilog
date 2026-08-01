@@ -106,6 +106,12 @@ class SVABehavioralSim:
 
         return self._attempt_fired
 
+    def disable_reset(self) -> None:
+        """Clear evaluation state while preserving sticky attempt evidence."""
+        attempt_fired = self._attempt_fired
+        self.reset()
+        self._attempt_fired = attempt_fired
+
     def tick(self, signals: dict[str, bool]) -> dict[str, bool]:
         """Advance the model by one clock cycle.
 
@@ -126,9 +132,7 @@ class SVABehavioralSim:
         """
         # ── Synchronous disable: mirrors disable_i in the RTL templates ──────
         if bool(signals.get("disable", False)):
-            attempt_fired = self._attempt_fired
-            self.reset()
-            self._attempt_fired = attempt_fired
+            self.disable_reset()
             return {"active": False, "pass": False, "fail": False, "overflow": False}
 
         if self._kind in ("delay_fixed", "delay_range"):
@@ -655,9 +659,21 @@ class _HierarchicalSim:
             self._build_oracles(child)
 
     def tick(self, signals: dict[str, bool]) -> dict[str, bool]:
-        return self._tick_node(self._root, signals)
+        cycle = dict(signals)
+        cycle["disable"] = bool(signals.get("disable", False)) or bool(
+            signals.get("disable_i", False)
+        )
+        return self._tick_node(self._root, cycle)
 
     def _tick_node(self, node: CheckerNode, signals: dict[str, bool]) -> dict[str, bool]:
+        # Normalize the public RTL ``disable_i`` contract once at the hierarchy
+        # boundary and enforce it for every leaf and composite.  Previously
+        # several dispatch paths dropped the disable key before reaching their
+        # stateful oracle, allowing stale state and delayed verdicts to leak.
+        if bool(signals.get("disable", False)):
+            self._reset_subtree(node)
+            return {"pass": False, "fail": False, "active": False, "overflow": False}
+
         tname = node.template_name
         if tname == "bool_expr" and "bool_semantic" in node.params:
             return self._tick_bool_expr_semantic(node, signals)
@@ -801,13 +817,30 @@ class _HierarchicalSim:
         return self._tick_node(body, signals)
 
     def _reset_subtree(self, node: CheckerNode) -> None:
-        """Reset all leaf oracles in a checker subtree."""
+        """Reset leaf and composite oracle state throughout a checker subtree."""
         tname = node.template_name
         if tname in _LEAF_TEMPLATES:
             oracle = self._leaf_oracles.get(node.module_name)
             if oracle is not None:
-                oracle.reset()
+                oracle.disable_reset()
             self._bool_leaf_state.pop(node.module_name, None)
+
+        # Composite oracle state is stored lazily in dictionaries keyed by the
+        # generated module name.  Clear every applicable map so disable_iff and
+        # external disable have the same state-reset boundary as emitted RTL.
+        for state_attr in (
+            "_fm_locked",
+            "_or_state",
+            "_and_state",
+            "_se_state",
+            "_sa_state",
+            "_until_state",
+            "_nfa_state",
+            "_impl_ant_q",
+        ):
+            state_map = getattr(self, state_attr, None)
+            if state_map is not None:
+                state_map.pop(node.module_name, None)
         for child in node.children:
             self._reset_subtree(child)
 
@@ -826,6 +859,10 @@ class _HierarchicalSim:
         key = node.module_name
         if not hasattr(self, "_fm_locked"):
             self._fm_locked: dict[str, bool] = {}
+
+        if signals.get("disable", False):
+            self._fm_locked.pop(key, None)
+            return {"pass": False, "fail": False, "active": False, "overflow": False}
 
         # Reset lock on new start (new evaluation window)
         if signals.get("start", False):

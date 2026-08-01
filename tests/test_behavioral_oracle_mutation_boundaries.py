@@ -188,3 +188,50 @@ def test_property_nfa_cannot_fail_before_any_attempt() -> None:
     )
 
     assert all(not output["fail"] for output in outputs)
+
+
+def test_external_disable_i_resets_sampled_leaf_state() -> None:
+    node = _hierarchy_node(
+        "rose",
+        "rose_external_disable",
+        {"depth": "1"},
+        observed_signal="sig",
+    )
+
+    outputs = simulate_checker_hierarchy(
+        node,
+        [
+            {"start": True, "sig": False},
+            {"start": False, "sig": True, "disable_i": True},
+            {"start": True, "sig": True},
+        ],
+    )
+
+    assert outputs[1] == {
+        "pass": False,
+        "fail": False,
+        "active": False,
+        "overflow": False,
+    }
+    assert outputs[2]["pass"] is True
+
+
+def test_external_disable_i_cancels_pending_composite_verdict() -> None:
+    node = _hierarchy_node(
+        "s_eventually",
+        "eventually_external_disable",
+        {"lo": "0", "hi": "2"},
+        observed_signal="p",
+    )
+
+    outputs = simulate_checker_hierarchy(
+        node,
+        [
+            {"start": True, "p": False},
+            {"start": False, "p": False, "disable_i": True},
+            {"start": False, "p": False},
+            {"start": False, "p": False},
+        ],
+    )
+
+    assert all(not output["pass"] and not output["fail"] for output in outputs[1:])
