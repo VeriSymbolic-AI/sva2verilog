@@ -14,10 +14,13 @@ tools/audit/probe_multiclock_ast.py).
 from __future__ import annotations
 
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 import pytest
 
 from sva2rtl.ast_importer import import_assertion
+from sva2rtl.composer import compose
+from sva2rtl.emitter import emit_all
 from sva2rtl.errors import SvaCompileError, UnsupportedConstruct
 from sva2rtl.frontend import invoke_slang
 from sva2rtl.ir import (
@@ -29,22 +32,55 @@ from sva2rtl.ir import (
 )
 from sva2rtl.normalizer import normalize
 
-
 ROOT = Path(__file__).parents[1]
 
 
-def _import(prop: str) -> SVANode:
-    """Import an inline multi-clock property and return its root IR node."""
-    src = Path("/tmp/_mc_test.sv")
+def _write_property_source(directory: str, prop: str) -> Path:
+    """Write one isolated slang input file for a multi-clock property."""
+    src = Path(directory) / "property.sv"
     src.write_text(
         "module m(input logic clk1, clk2, clk3, a, b, c);\n"
         f"  ap: assert property ({prop});\n"
         "endmodule\n",
         encoding="utf-8",
     )
-    ast = invoke_slang(src, "slang")
-    node, _clock, _text, _label = import_assertion(ast)
+    return src
+
+
+def _import(prop: str) -> SVANode:
+    """Import an inline multi-clock property and return its root IR node."""
+    with TemporaryDirectory(prefix="sva2rtl-multiclock-") as directory:
+        ast = invoke_slang(_write_property_source(directory, prop), "slang")
+        node, _clock, _text, _label = import_assertion(ast)
     return node
+
+
+def _compose_property(prop: str) -> CheckerNode:
+    """Compile one isolated multi-clock property through composition."""
+    with TemporaryDirectory(prefix="sva2rtl-multiclock-") as directory:
+        ast = invoke_slang(_write_property_source(directory, prop), "slang")
+        node, clock, text, label = import_assertion(ast)
+    return compose(normalize(node), clock, label, text)
+
+
+def test_inline_source_paths_are_isolated(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Each frontend call owns its source path and removes it afterwards."""
+    source_paths: list[Path] = []
+    real_invoke_slang = invoke_slang
+
+    def recording_invoke(source_path: Path, executable: str) -> dict[str, object]:
+        source_paths.append(source_path)
+        return real_invoke_slang(source_path, executable)
+
+    monkeypatch.setattr(f"{__name__}.invoke_slang", recording_invoke)
+    _import("@(posedge clk1) a ##1 @(posedge clk2) b")
+    _import("@(posedge clk1) b ##1 @(posedge clk2) c")
+
+    assert len(source_paths) == 2
+    assert source_paths[0] != source_paths[1]
+    assert all(not source_path.exists() for source_path in source_paths)
 
 
 def _find_clocked(node: SVANode) -> list[ClockedSeq]:
@@ -101,21 +137,7 @@ def test_two_clock_implication_consequent_clocked() -> None:
 
 def test_two_clock_implication_composes() -> None:
     """Multi-clock implication composes to mc_seq_top with ant+sync+con children."""
-    from sva2rtl.ast_importer import import_assertion as ia  # noqa: F811
-    from sva2rtl.composer import compose  # noqa: F811
-    from sva2rtl.frontend import invoke_slang as isl  # noqa: F811
-
-    src = Path("/tmp/_mc_impl_t.sv")
-    src.write_text(
-        "module m(input logic clk1, clk2, a, b);\n"
-        "  ap: assert property (@(posedge clk1) a |=> @(posedge clk2) b);\n"
-        "endmodule\n",
-        encoding="utf-8",
-    )
-    ast = isl(src, "slang")
-    node, clock, text, label = ia(ast)
-    node = normalize(node)
-    ck = compose(node, clock, label, text)
+    ck = _compose_property("@(posedge clk1) a |=> @(posedge clk2) b")
     assert ck.template_name == "mc_seq_top"
     assert ck.params["clocks"] == "clk1,clk2"
     assert len(ck.children) == 3  # ant + sync + con
@@ -123,22 +145,9 @@ def test_two_clock_implication_composes() -> None:
 
 def test_multi_stage_composes() -> None:
     """3-clock chain composes with two syncs and per-domain sub-checkers."""
-    from sva2rtl.ast_importer import import_assertion as ia  # noqa: F811
-    from sva2rtl.composer import compose  # noqa: F811
-    from sva2rtl.frontend import invoke_slang as isl  # noqa: F811
-
-    src = Path("/tmp/_mc_3s_t.sv")
-    src.write_text(
-        "module m(input logic clk1, clk2, clk3, a, b, c);\n"
-        "  ap: assert property (@(posedge clk1) a ##1 @(posedge clk2) b "
-        "##1 @(posedge clk3) c);\n"
-        "endmodule\n",
-        encoding="utf-8",
+    ck = _compose_property(
+        "@(posedge clk1) a ##1 @(posedge clk2) b ##1 @(posedge clk3) c"
     )
-    ast = isl(src, "slang")
-    node, clock, text, label = ia(ast)
-    node = normalize(node)
-    ck = compose(node, clock, label, text)
     syncs = [c for c in _all_children(ck) if c.template_name == "sync_2dff"]
     assert len(syncs) >= 2, f"expected 2+ syncs, got {len(syncs)}"
 
@@ -188,22 +197,7 @@ def test_normalize_clocked_seq_idempotent() -> None:
 
 def test_sync_2dff_instantiated_in_multi_clock_output() -> None:
     """Multi-clock emit includes the 2-DFF synchronizer module."""
-    from sva2rtl.ast_importer import import_assertion as ia  # noqa: F811
-    from sva2rtl.composer import compose  # noqa: F811
-    from sva2rtl.emitter import emit_all  # noqa: F811
-    from sva2rtl.frontend import invoke_slang as isl  # noqa: F811
-
-    src = Path("/tmp/_mc_struct.sv")
-    src.write_text(
-        "module m(input logic clk1, clk2, a, b);\n"
-        "  ap: assert property (@(posedge clk1) a ##1 @(posedge clk2) b);\n"
-        "endmodule\n",
-        encoding="utf-8",
-    )
-    ast = isl(src, "slang")
-    node, clock, text, label = ia(ast)
-    node = normalize(node)
-    ck = compose(node, clock, label, text)
+    ck = _compose_property("@(posedge clk1) a ##1 @(posedge clk2) b")
     modules = emit_all(ck)
     # The sync_2dff module MUST be present in the emitted set.
     sync_mods = [m for m in modules if "TRUSTED COMPONENT" in modules[m]]
@@ -221,22 +215,7 @@ def test_sync_2dff_instantiated_in_multi_clock_output() -> None:
 
 def test_multi_clock_top_exposes_and_enforces_standard_contract() -> None:
     """Multi-clock output must not bypass start/disable/anti-vacuity ports."""
-
-    from sva2rtl.ast_importer import import_assertion as ia  # noqa: F811
-    from sva2rtl.composer import compose  # noqa: F811
-    from sva2rtl.emitter import emit_all  # noqa: F811
-    from sva2rtl.frontend import invoke_slang as isl  # noqa: F811
-
-    src = Path("/tmp/_mc_contract.sv")
-    src.write_text(
-        "module m(input logic clk1, clk2, a, b);\n"
-        "  ap: assert property (@(posedge clk1) a ##1 @(posedge clk2) b);\n"
-        "endmodule\n",
-        encoding="utf-8",
-    )
-    ast = isl(src, "slang")
-    node, clock, text, label = ia(ast)
-    checker = compose(normalize(node), clock, label, text)
+    checker = _compose_property("@(posedge clk1) a ##1 @(posedge clk2) b")
     modules = emit_all(checker)
     top_sv = modules[checker.module_name]
     sync_sv = next(
@@ -265,22 +244,7 @@ def test_sync_latency_2_dst_cycles() -> None:
         "sync1_q <= sync0_q",
         "token_o = disable_i ? 1'b0 : sync1_q",
     )
-    from sva2rtl.ast_importer import import_assertion as ia  # noqa: F811
-    from sva2rtl.composer import compose  # noqa: F811
-    from sva2rtl.emitter import emit_all  # noqa: F811
-    from sva2rtl.frontend import invoke_slang as isl  # noqa: F811
-
-    src = Path("/tmp/_mc_sync2.sv")
-    src.write_text(
-        "module m(input logic clk1, clk2, a, b);\n"
-        "  ap: assert property (@(posedge clk1) a ##1 @(posedge clk2) b);\n"
-        "endmodule\n",
-        encoding="utf-8",
-    )
-    ast = isl(src, "slang")
-    node, clock, text, label = ia(ast)
-    node = normalize(node)
-    ck = compose(node, clock, label, text)
+    ck = _compose_property("@(posedge clk1) a ##1 @(posedge clk2) b")
     modules = emit_all(ck)
     sync_sv = [v for v in modules.values() if "TRUSTED COMPONENT" in v][0]
     for pattern in check:
