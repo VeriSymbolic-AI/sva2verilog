@@ -30,14 +30,18 @@ artifact-root defect that was reproduced by a workflow regression and fixed in
 the same baseline. Yosys synthesis remains complementary structural evidence,
 not an equivalent replacement for Verilator or formal equivalence.
 
-Fresh local qualification on 2026-08-01 records full Icarus 1473 passed /
+Fresh local qualification on 2026-08-01 records full Icarus 1484 passed /
 1 skipped / 1 xfailed, generated RTL 133 passed, Full Formal 125 passed /
 1 documented strict-liveness xfail, branch coverage 86.31%, Python 3.14 broad
 non-simulation 1247 passed / 1 xfailed, and dual-backend fast/slow differential
-passes. Python mutation is 260/301 killed (86.4%, with 41 survivors and 31
-uncovered candidates); reviewed RTL-template mutation is 11/11. These results
-remain important local counts; the named same-commit remote runs above close the
-Linux, nightly, and Full Formal execution gap.
+passes. A full local Verilator simulation axis also records 169 passed / 1 known
+backend-specific skip. Python mutation is 266/302 killed (88.1%, with 36
+survivors and 30 uncovered candidates); reviewed RTL-template mutation is 12/12.
+These results remain important local counts; the named same-commit remote runs
+above close the
+historical Linux, nightly, and Full Formal execution gap. The follow-on Node.js
+24 workflow and semantic hardening changes still require new same-commit remote
+runs before they can replace that baseline.
 
 **Qualification overlay:** in the detailed row ledger below, legacy cell text
 such as `current-commit rerun pending`, `pending-remote`, or `current worktree

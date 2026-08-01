@@ -62,6 +62,13 @@ Current project state:
   strict-liveness xfail; branch coverage 86.31%; Python 3.14 broad non-simulation
   axis 1247 passed / 1 xfailed; ruff, mypy strict, frozen lock, workflow YAML,
   installer syntax, and coverage floors passed.
+- Follow-on high-priority audit qualification: full Icarus 1484 passed /
+  1 skipped / 1 xfailed; full Verilator simulation 169 passed / 1 known
+  backend-specific skip; generated RTL 133 passed; Full Formal 125 passed /
+  1 documented strict-liveness xfail; branch coverage remained 86.31%.
+  Checkout and uv setup actions now run on pinned native Node.js 24 releases,
+  all workflows declare read-only contents permission, and multi-clock tests use
+  isolated temporary sources. Remote same-commit qualification is still pending.
 - Fresh differential and distribution evidence: Icarus and Verilator fast each
   record 16 passed; date seed `20260801` slow sweeps each record 1 passed with
   64 Hypothesis examples; wheel/sdist out-of-tree smoke passed under Python 3.12
@@ -425,24 +432,24 @@ Done when:
 Current local evidence (rerun 2026-08-01):
 
 - `bool_semantics.py`: 15/15 killed (100%).
-- `behavioral_oracle.py`: 112/130 covered, valid mutants killed (86.2%);
-  19 uncovered candidates are reported separately.
+- `behavioral_oracle.py`: 118/131 covered, valid mutants killed (90.1%);
+  18 uncovered candidates are reported separately.
 - `composer.py`: 41/48 covered, valid mutants killed (85.4%); 4 uncovered
   candidates are reported separately.
 - `ast_importer.py`: 92/108 covered, valid mutants killed (85.2%); 8 uncovered
   candidates are reported separately.
-- Reviewed RTL template mutations: 11/11 killed, covering delay upper bounds,
+- Reviewed RTL template mutations: 12/12 killed, covering delay upper bounds,
   repetition counter state, counter width, non-overlap consequent wiring,
   sequence-OR failure polarity, both sequence-OR failure-retention latches,
-  multi-clock start wiring, multi-clock disable propagation, and implication
-  attempt accounting.
+  multi-clock start wiring, multi-clock disable propagation, one-shot CDC fault
+  injection, and implication attempt accounting.
 - Syntax-invalid mutants are excluded rather than counted as killed. Mutation
   candidates on lines the configured baseline never executes are also excluded
   from the percentage and exposed as explicit uncovered debt.
 - The scheduled mutation job runs all four Python modules separately at the
   85% threshold and the RTL template suite at a strict 100% threshold.
-- Across the four Python modules, 260/301 scored mutants were killed (86.4%).
-  Forty-one valid mutants survived and 31 candidates were uncovered, so this
+- Across the four Python modules, 266/302 scored mutants were killed (88.1%).
+  Thirty-six valid mutants survived and 30 candidates were uncovered, so this
   gate passes its current threshold but also exposes concrete test debt; it is
   not evidence that the selected semantic surfaces are exhaustive.
 
@@ -611,13 +618,15 @@ The immediate next work should be:
    **Done in run `30683023280`.**
 6. Keep CI, nightly, and Full Formal run IDs tied to the exact executable/workflow
    baseline. **Done for `b055105`; do not attribute these runs to the release tag.**
-7. Convert the 41 mutation survivors and 31 uncovered candidates into targeted
-   semantic regressions, prioritizing importer/composer boundaries.
+7. Continue converting the remaining 36 mutation survivors and 30 uncovered
+   candidates into targeted semantic regressions, prioritizing
+   importer/composer boundaries.
 8. Add k-induction proofs for additional small finite-state templates and make
    the bounded-liveness xfail boundary explicit per construct.
 9. Replace the multi-clock 2-DFF level crossing with an acknowledged event
    protocol, then add asynchronous ratio tests and CDC sign-off evidence.
 10. Upgrade Node.js 20-targeting pinned actions to native Node.js 24 versions.
+    **Implemented locally; same-commit remote qualification pending.**
 11. FPGA prototype (FUT-03) — demand-pulled.
 12. C++ rewrite v2 (FUT-04) — demand-pulled.
 
