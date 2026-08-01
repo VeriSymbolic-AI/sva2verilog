@@ -160,6 +160,17 @@ MUTATIONS: tuple[TemplateMutation, ...] = (
             "standard_contract",
         ),
     ),
+    TemplateMutation(
+        name="multiclock-meta-injection-must-be-one-shot",
+        template="templates/lfsr_8bit.sv.j2",
+        original="assign lfsr_out = (state == 8'h01);",
+        replacement="assign lfsr_out = state[0];",
+        pytest_args=(
+            "tests/test_multiclock.py",
+            "-k",
+            "meta_injection_is_one_pulse",
+        ),
+    ),
 )
 
 
