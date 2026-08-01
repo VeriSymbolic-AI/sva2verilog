@@ -42,22 +42,26 @@ Latest follow-on hardening baseline: commit
 - Full Formal run [`30686820029`](https://github.com/VeriSymbolic-AI/sva2verilog/actions/runs/30686820029):
   all six formal shards passed.
 
-The latest local executable qualification, commit `79db15d` on 2026-08-01,
-records full Icarus 1535 passed / 1 skipped / 1 xfailed, generated RTL 133/133,
-Full Formal 126 passed / 1 documented strict-liveness xfail, branch coverage
-86.70%, Python 3.14 selected non-simulation 1179/1179, and dual-backend
-fast/slow differential passes. A full local Verilator simulation axis records
-173 passed / 1 known backend-specific skip. Python mutation is 296/318 killed
-(93.1%, with 22 survivors and 36 uncovered candidates); reviewed RTL-template
-mutation is 12/12.
+The latest executable qualification, commit
+`de3f697cea34a64bae1e327d7b551dd0914e6151` on 2026-08-02, records full local
+Icarus 1553 passed / 1 skipped / 1 xfailed, generated RTL 133/133, Full Formal
+126 passed / 1 documented strict-liveness xfail, branch coverage 87.19%, Python
+3.14 selected non-simulation 1196/1196, and dual-backend fast/slow differential
+passes. The full local Verilator simulation selection records 174 passed / 2
+reviewed skips. F-11 code qualification records Python mutation 295/316 killed
+(93.4%, with 21 survivors and 36 uncovered candidates); reviewed RTL-template
+mutation remains 12/12.
 
-These are local results for the changed executable. The named `1841ed4`
-same-commit remote runs remain valid historical evidence for that older
-executable, but do not qualify `79db15d` or the following documentation-only
-commit. CI, nightly, and Full Formal must run on the new exact commit before
-remote evidence is restored. Neither the local nor remote gates close
-per-construct independent-reference, proof-depth, CDC, or industrial-corpus
-gaps.
+For the exact `de3f697` executable, differential nightly run
+[`30709827239`](https://github.com/VeriSymbolic-AI/sva2verilog/actions/runs/30709827239)
+passed all three jobs, and Full Formal run
+[`30709832382`](https://github.com/VeriSymbolic-AI/sva2verilog/actions/runs/30709832382)
+passed all six shards. CI run
+[`30709818712`](https://github.com/VeriSymbolic-AI/sva2verilog/actions/runs/30709818712)
+passed all 13 jobs, including all eight OS/Python/simulator axes, generated RTL,
+coverage, Formal smoke, lint, Python 3.14, and installed-distribution gates.
+Neither local nor remote gates close per-construct independent-reference,
+proof-depth, CDC, or industrial-corpus gaps.
 
 **Qualification overlay:** in the detailed row ledger below, legacy cell text
 such as `current-commit rerun pending`, `pending-remote`, or `current worktree
@@ -95,6 +99,25 @@ The remaining rows stay at `Bounded evidence`, `Trusted boundary`, or
 | planned | Explicit future-phase work; not counted as current evidence. |
 | N/A | Not applicable to this row, with rationale in notes where needed. |
 | trusted-boundary | Intentionally trusted/excluded proof domain; not a missing implementation bug. |
+
+## Structured Project Frontend Boundary
+
+F-11 is closed for the structured v1 compilation-context subset at `de3f697`.
+`SlangCompilationContext` and the CLI represent source files, `-F` filelists,
+include paths, defines, top modules, parameter overrides, library
+files/directories/extensions/order, and single-unit mode as validated argv. The
+compiler owns the AST-output options and does not expose a raw arbitrary-argument
+escape hatch. Nested elaborated instance bodies and two-state parameter constants
+are covered by real slang integration tests; a dedicated simulation regression
+executes filelist/include/define/top/parameter specialization through emitted RTL
+and compares Icarus and Verilator cycle outputs with the behavioral oracle.
+
+This frontend evidence is still bounded. Filelist contents are trusted compiler
+configuration, escaped identifiers and multiple colliding parameterized-instance
+labels fail closed, and no representative industrial project corpus yet covers
+nested filelists, ambiguous library resolution, or tool-specific option sets.
+These gaps do not invalidate the structured subset, but prevent broader project
+compatibility claims.
 
 ## Phase 10 Formal Evidence Ledger
 

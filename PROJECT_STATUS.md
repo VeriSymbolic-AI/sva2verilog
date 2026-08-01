@@ -1,6 +1,6 @@
 # sva2verilog 项目进展报告
 
-> 更新日期：2026-08-01
+> 更新日期：2026-08-02
 > 仓库：public GitHub repository
 > 当前版本：v1.7.1
 
@@ -9,8 +9,8 @@
 sva2verilog 是一个开源的 SystemVerilog Assertion (SVA) 到可综合 RTL
 监控器编译器。v1.7.1 已于 2026-07-31 发布，修复了 v1.7.0 的完整契约语义
 缺陷。发布后的首个可执行代码与工作流基线 `b055105` 已完成同提交远端资格
-闭环；最新高优先级加固基线 `1841ed4` 也已完成同提交 CI、nightly 与
-Full Formal。后续纯文档提交只记录这些基线，不把文档 SHA 倒推为新的
+闭环；后续高优先级加固与 F-11 真实工程 frontend 基线已经推进到
+`de3f697`。后续纯文档提交只记录可执行基线，不把文档 SHA 倒推为新的
 证明对象。
 
 - 发布状态：tag `v1.7.1` 指向 `8b5c063`；发布后资格基线为 `b055105`
@@ -28,16 +28,36 @@ Full Formal。后续纯文档提交只记录这些基线，不把文档 SHA 倒�
   通过；nightly run `30686818970` 的三个 job 通过；Full Formal run
   `30686820029` 的六个分片通过。该组运行实际使用 Node.js 24 actions，
   并覆盖最新 CDC 注入、oracle mutation 与测试隔离修复
-- 最新本地可执行基线：`79db15d`；完整 Icarus 1535 passed / 1 skipped /
-  1 xfailed，完整 Verilator simulation 173 passed / 1 个已知后端限定 skip，
-  branch coverage 86.70%，generated RTL 133 passed，Full Formal 126 passed /
-  1 xfailed，Python 3.14 选择轴 1179/1179 passed；wheel/sdist 隔离冒烟通过
-- 变异与差分：当前分支 Python mutation 296/318（93.1%，另有 36 个未覆盖
-  候选）、RTL template mutation 12/12；Icarus/Verilator fast 各 16 passed，
-  date-seeded slow 各 1 passed。`79db15d` 尚无同提交远端证据，不能沿用
-  `1841ed4` 的历史远端绿灯
+- 最新本地可执行基线：`de3f697`；完整 Icarus 1553 passed / 1 skipped /
+  1 xfailed，完整 Verilator simulation 174 passed / 2 个已审查 skip，branch
+  coverage 87.19%，generated RTL 133 passed，Full Formal 126 passed /
+  1 xfailed，Python 3.14 选择轴 1196/1196 passed；wheel/sdist 隔离冒烟通过
+- 变异与差分：F-11 代码基线的 Python mutation 295/316（93.4%，另有 36 个
+  未覆盖候选）、RTL template mutation 12/12；Icarus/Verilator fast 各
+  16 passed，date-seeded slow 各 1 passed。最终 `de3f697` 的同提交 CI
+  run `30709818712` 13/13、nightly run `30709827239` 3/3、Full Formal
+  run `30709832382` 6/6 全部通过
 - 支持状态权威：`SUPPORT_MATRIX.md` 记录逐构造支持边界、证据完整度和降级原因；README / SUPPORTED_CONSTRUCTS 只作概览和解释
 - 工业级验证缺口：已记录在 `INDUSTRIAL_VALIDATION_GAPS.md`，包含当前进展、P0/P1/P2 严重度、修复计划和 fully-supported 定义标准
+
+## 2026-08-02 F-11 真实工程 frontend 闭环
+
+- `dfe35bb` 新增不可变 `SlangCompilationContext` 与结构化 CLI：多源文件、
+  `-F` filelist、`-I` include、`-D` define、top、`-G` parameter、library
+  file/directory/extension/order 和 single-unit 均经类型、路径、标识符与控制
+  字符校验后以 argv 传递；不提供任意 `--slang-arg`，也不使用 shell。
+- slang 超时、缺失/畸形 AST 均转为明确编译错误；编译器自有的
+  `--ast-json` 参数最后追加，不能被调用方覆盖。
+- importer 递归进入 elaborated `InstanceBody`，按实例体维护声明上下文并
+  去重缓存体；两态 parameter 常量折叠为 IR 常量，不再被错误暴露为运行时
+  monitor 输入；四态 X/Z 继续 fail-closed。
+- `de3f697` 增加双 oracle 真实项目回归：用 filelist/include/define/top/`-G`
+  编译嵌套实例，完成 import → compose → optimize → emit，并在 Icarus 和
+  Verilator 上将 `active/pass/fail` 与独立 behavioral oracle 逐周期比较。
+
+F-11 的“缺少结构化项目上下文”已关闭，但这不是工业工程兼容性证明。
+filelist 内容仍是可信编译配置；escaped identifier、同标签的多参数化实例、
+复杂 library 解析冲突、工具专属参数和大型真实项目 corpus 尚未覆盖。
 
 ## 2026-08-01 深度审查后续高优先级修复
 
@@ -64,10 +84,11 @@ Full Formal。后续纯文档提交只记录这些基线，不把文档 SHA 倒�
 通过；Python mutation 296/318，RTL template mutation 12/12；ruff、strict
 mypy、发行包隔离 smoke 和 whitespace 检查通过。
 
-当前没有新发现的本地可复现 P0。尚未关闭的高优先级事项是：新提交的
-同提交远端 CI/nightly/Full Formal；multi-clock acknowledged event-transfer
-协议；真实工程 filelist/include/define/library/top/parameter 编译上下文；以及
-逐构造证据链。`SUPPORT_MATRIX.md` 因此继续保持 0 个 Fully supported。
+截至 `79db15d` 没有新发现的本地可复现 P0；该时点尚未关闭的 structured
+frontend 已在上方 2026-08-02 F-11 基线中实现。当前高优先级风险收敛为
+multi-clock acknowledged event-transfer 协议、工业 project corpus、
+逐构造证据链和剩余 mutation 债务。`SUPPORT_MATRIX.md` 因此继续保持
+0 个 Fully supported。
 
 ## 2026-08-01 v1.7.1 发布后资格审计
 
@@ -406,6 +427,8 @@ RISK-01 纪律：预言机和参考监控器必须与 RTL 实现结构独立。�
 - GitHub 托管 runner 仍会报告并行 uv cache reservation 冲突和预置
   Homebrew tap trust 提示；二者未影响本轮 job 结论，但属于待降噪的 P2 CI
   可维护性问题
+- F-11 已支持结构化多文件工程上下文，但大型真实工程、嵌套 filelist 变体、
+  library 冲突和多参数化实例标签消歧仍缺少公开、可复现的 corpus 证据
 
 ## 未来规划
 
@@ -423,8 +446,8 @@ RISK-01 纪律：预言机和参考监控器必须与 RTL 实现结构独立。�
 ### 中期（Phase 2：证据链闭合，2-3 周）
 
 4. 选择 5-8 个核心构造（bool、$rose/$fell/$stable/$changed、##1、simple |->、[*3]、first_match、disable iff），补齐逐构造证据链，再逐行升级为 Fully supported
-5. 继续将剩余 22 个有效 mutation survivors 和 36 个未覆盖候选转为定向回归，
-   优先处理仍有 15 个 survivor 的 importer
+5. 继续将剩余 21 个有效 mutation survivors 和 36 个未覆盖候选转为定向回归，
+   优先处理仍有 14 个 survivor 的 importer
 6. 为 multi-clock 引入 acknowledged handshake/toggle、异步时钟比仿真与 CDC sign-off
 
 ### 长期（按需求拉动）
@@ -440,10 +463,9 @@ RISK-01 纪律：预言机和参考监控器必须与 RTL 实现结构独立。�
 CI 工具漂移、差分构建缓存、状态文档漂移和 nightly 干净 checkout 问题
 均已修复并取得同提交远端证据。最新审计又完成 Node.js 24 迁移、最小权限、
 测试隔离和部分 mutation 债务收敛，且已取得 `1841ed4` 的同提交远端证据。
-架构上仍未闭环的是新可执行提交的同提交远端证据、逐构造证据链、22 个
-mutation survivors、bounded-liveness 证明边界、真实工程 frontend 上下文，
-以及 multi-clock CDC 事件交付协议；此外还有非阻断的 cache/tap runner
-注释需要降噪。
+架构上仍未闭环的是逐构造证据链、21 个 mutation survivors、
+bounded-liveness 证明边界、真实工程 corpus，以及 multi-clock CDC 事件
+交付协议；此外还有非阻断的 cache/tap runner 注释需要降噪。
 
 ## 竞争定位
 

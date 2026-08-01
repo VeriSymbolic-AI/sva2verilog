@@ -1,6 +1,6 @@
 # Industrial Validation Gap Plan
 
-> Date: 2026-08-01
+> Date: 2026-08-02
 > Scope: v1.7.1 post-release qualification and current `main`
 > Reader: future maintainer, external reviewer, or industrial user evaluating trust
 > Post-read action: decide and execute the next validation work needed before calling the project industrial-grade
@@ -23,6 +23,15 @@ workflow permissions, CDC injection correction, oracle mutation boundaries,
 and isolated multi-clock test sources.
 The compiler also fixed several real semantic defects that were found only after
 non-circular formal references were introduced.
+
+On 2026-08-02, executable baseline `de3f697` closed F-11 for a structured v1
+real-project frontend subset. Filelists, includes, defines, tops, parameter
+overrides, libraries, and single-unit mode now pass through a validated argv
+model; nested elaborated instances and parameter constants have real slang and
+dual-simulator/oracle regressions. This is useful project integration evidence,
+not an industrial-corpus claim: trusted filelist contents, escaped identifiers,
+instance-label collisions, complex library resolution, and tool-specific option
+sets remain outside the qualified subset.
 
 The remaining risk is not raw test count. The remaining risk is evidence-chain
 closure. For each supported construct, an external reviewer should be able to see
@@ -80,6 +89,13 @@ Current project state:
   record 16 passed; date seed `20260801` slow sweeps each record 1 passed with
   64 Hypothesis examples; wheel/sdist out-of-tree smoke passed under Python 3.12
   and 3.14. The remote scheduled/manual workflow results are recorded above.
+- F-11 local qualification at `de3f697`: full Icarus 1553 passed / 1 skipped /
+  1 xfailed; full Verilator simulation 174 passed / 2 reviewed skips; branch
+  coverage 87.19% with 1371 selected tests; generated RTL 133 passed; Full
+  Formal 126 passed / 1 documented xfail; Python 3.14 non-simulation selection
+  1196/1196. Same-commit nightly run `30709827239` and Full Formal run
+  `30709832382` passed; CI run `30709818712` also passed all 13 jobs, including
+  its four Verilator axes.
 
 Recent hardening already completed:
 
@@ -624,19 +640,22 @@ The immediate next work should be:
 5. Record a current-commit generated-RTL CI run with Verilator lint executing.
    **Done in run `30683023280`.**
 6. Keep CI, nightly, and Full Formal run IDs tied to the exact executable/workflow
-   baseline. **Done for `b055105` and `1841ed4`; do not attribute these runs to
-   the release tag or later documentation-only commits.**
-7. Continue converting the remaining 36 mutation survivors and 30 uncovered
-   candidates into targeted semantic regressions, prioritizing
-   importer/composer boundaries.
+   baseline. **Done for `b055105`, `1841ed4`, and `de3f697`; do not attribute
+   these runs to the release tag or later
+   documentation-only commits.**
+7. Continue converting the remaining 21 mutation survivors and 36 uncovered
+   candidates into targeted semantic regressions, prioritizing the 14 importer
+   survivors and then composer boundaries.
 8. Add k-induction proofs for additional small finite-state templates and make
    the bounded-liveness xfail boundary explicit per construct.
 9. Replace the multi-clock 2-DFF level crossing with an acknowledged event
    protocol, then add asynchronous ratio tests and CDC sign-off evidence.
 10. Upgrade Node.js 20-targeting pinned actions to native Node.js 24 versions.
     **Done and remotely qualified at `1841ed4`.**
-11. FPGA prototype (FUT-03) — demand-pulled.
-12. C++ rewrite v2 (FUT-04) — demand-pulled.
+11. Build a versioned frontend corpus with nested filelists, conflicting library
+    resolution, repeated parameterized instances, and deterministic diagnostics.
+12. FPGA prototype (FUT-03) — demand-pulled.
+13. C++ rewrite v2 (FUT-04) — demand-pulled.
 
 Do not expand the supported SVA surface before these items are complete. The
 project's credibility depends more on proof quality for the claimed subset than
