@@ -20,21 +20,27 @@ jobs:
         include:
           - suite: optimizer-and-templates
             files: tests/test_formal_passes.py tests/test_formal_templates.py
+            min-passed: 35
             max-skipped: 0
           - suite: sva-core
             files: tests/test_formal_sva_equiv.py
+            min-passed: 63
             max-skipped: 0
           - suite: nfa-composition
             files: tests/test_v151_nfa_bmc.py
+            min-passed: 12
             max-skipped: 0
           - suite: nfa-overlap-implication
             files: tests/test_v151_p2_bmc.py::TestOverlapImplNfaMiter
+            min-passed: 3
             max-skipped: 0
           - suite: nfa-nonoverlap-implication
             files: tests/test_v151_p2_bmc.py::TestNonoverlapImplNfaMiter
+            min-passed: 3
             max-skipped: 0
           - suite: kinduction
             files: tests/test_formal_kinduction.py
+            min-passed: 10
             # One strict xfail documents the bounded-liveness induction boundary.
             max-skipped: 1
 
@@ -78,4 +84,4 @@ jobs:
       - name: Enforce formal shard execution budget
         run: >
           uv run python tools/ci/check_junit.py formal-results.xml
-          --min-passed 1 --max-skipped ${{ matrix.max-skipped }}
+          --min-passed ${{ matrix.min-passed }} --max-skipped ${{ matrix.max-skipped }}

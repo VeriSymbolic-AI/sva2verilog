@@ -18,7 +18,7 @@ _FIX = Path(__file__).resolve().parents[2] / "tests/fixtures"
 
 def build(name: str) -> tuple[CheckerNode, str]:
     ast = json.loads((_FIX / f"{name}.json").read_text())
-    node, clock, label, text = import_assertion(ast)
+    node, clock, text, label = import_assertion(ast)
     node = normalize(node)
     return optimize(compose(node, clock, label, text)), text
 

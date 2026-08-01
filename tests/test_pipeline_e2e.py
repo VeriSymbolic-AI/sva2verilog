@@ -60,19 +60,24 @@ def test_e2e_bool_assert(tmp_path: Path) -> None:
 
 
 @requires_slang
-def test_e2e_delay_assert_rejected() -> None:
+def test_e2e_delay_assert_rejected(tmp_path: Path) -> None:
     """Full pipeline on delay_assert.sv exits 0 (SequenceConcat is now supported).
 
     ``a ##1 b`` (SequenceConcat) produces valid RTL via the token-passing
     architecture.  This verifies the full pipeline succeeds.
     """
     runner = CliRunner()
-    result = runner.invoke(main, [str(_FIXTURES / "delay_assert.sv")])
+    output_dir = tmp_path / "delay_modules"
+    result = runner.invoke(
+        main,
+        [str(_FIXTURES / "delay_assert.sv"), "--output", str(output_dir)],
+    )
 
     assert result.exit_code == 0, (
         f"Expected exit_code 0 for delay_assert.sv (SequenceConcat supported), "
         f"got {result.exit_code}.\nOutput: {result.output}"
     )
+    assert list(output_dir.glob("*.sv"))
 
 
 # ── Test 3: generated SV compiles with iverilog ───────────────────────────

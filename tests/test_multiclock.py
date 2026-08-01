@@ -195,10 +195,18 @@ def test_normalize_clocked_seq_idempotent() -> None:
 # ── B4.1 structural checks ──────────────────────────────────────────────────
 
 
+def test_multiclock_emission_requires_explicit_experimental_opt_in() -> None:
+    """The lossy level-synchronizer path is fail-closed by default."""
+    checker = _compose_property("@(posedge clk1) a ##1 @(posedge clk2) b")
+
+    with pytest.raises(UnsupportedConstruct, match="experimental multi-clock CDC"):
+        emit_all(checker)
+
+
 def test_sync_2dff_instantiated_in_multi_clock_output() -> None:
     """Multi-clock emit includes the 2-DFF synchronizer module."""
     ck = _compose_property("@(posedge clk1) a ##1 @(posedge clk2) b")
-    modules = emit_all(ck)
+    modules = emit_all(ck, allow_experimental_multiclock=True)
     # The sync_2dff module MUST be present in the emitted set.
     sync_mods = [m for m in modules if "TRUSTED COMPONENT" in modules[m]]
     assert len(sync_mods) == 1, f"expected 1 sync_2dff module, got {sync_mods}"
@@ -216,7 +224,7 @@ def test_sync_2dff_instantiated_in_multi_clock_output() -> None:
 def test_multi_clock_top_exposes_and_enforces_standard_contract() -> None:
     """Multi-clock output must not bypass start/disable/anti-vacuity ports."""
     checker = _compose_property("@(posedge clk1) a ##1 @(posedge clk2) b")
-    modules = emit_all(checker)
+    modules = emit_all(checker, allow_experimental_multiclock=True)
     top_sv = modules[checker.module_name]
     sync_sv = next(
         source for source in modules.values() if "TRUSTED COMPONENT" in source
@@ -245,7 +253,7 @@ def test_sync_latency_2_dst_cycles() -> None:
         "token_o = disable_i ? 1'b0 : sync1_q",
     )
     ck = _compose_property("@(posedge clk1) a ##1 @(posedge clk2) b")
-    modules = emit_all(ck)
+    modules = emit_all(ck, allow_experimental_multiclock=True)
     sync_sv = [v for v in modules.values() if "TRUSTED COMPONENT" in v][0]
     for pattern in check:
         assert pattern in sync_sv, f"sync module must contain: {pattern}"

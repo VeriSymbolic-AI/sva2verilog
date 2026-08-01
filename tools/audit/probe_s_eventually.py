@@ -25,7 +25,7 @@ def build(prop: str) -> CheckerNode:
     tmp = Path("/tmp/_se_probe.sv")
     tmp.write_text(sv, encoding="utf-8")
     ast = invoke_slang(tmp, "slang")
-    node, clock, label, text = import_assertion(ast)
+    node, clock, text, label = import_assertion(ast)
     node = normalize(node)
     return compose(node, clock, label, text)
 

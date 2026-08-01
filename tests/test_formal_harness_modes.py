@@ -7,6 +7,11 @@ formal BMC/prove tests opt into.
 
 from __future__ import annotations
 
+from pathlib import Path
+
+import pytest
+
+import sva2rtl.formal_equiv as formal_equiv
 from sva2rtl.formal_equiv import (
     FormalHarnessConfig,
     FormalOutputContract,
@@ -188,3 +193,51 @@ def test_cover_probe_requests_emit_reachability_checks() -> None:
     assert "cover_probe_disable: cover (m_disabled);" in harness
     assert "cover_probe_overflow: cover (m_ovf);" in harness
     assert "cover_probe_overlap: cover (formal_start && m_active);" in harness
+
+
+def test_formal_harness_preserves_observed_vector_widths() -> None:
+    """Formal free inputs use the same packed width as the generated monitor."""
+    harness = build_harness(
+        "dut_mon",
+        (("data", "data"),),
+        "data != 4'b0011",
+        has_overflow_flag=False,
+        signal_widths={"data": 4},
+    )
+
+    assert "input logic [3:0] data," in harness
+
+
+def test_required_cover_failure_downgrades_proof_to_unknown(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A proof PASS cannot mask an unreachable required cover probe."""
+    outcomes = iter(
+        [
+            (0, "PASS 0 0\n", False),
+            (1, "FAIL 2 0\n", False),
+        ]
+    )
+    monkeypatch.setattr(formal_equiv, "_run_sby_with_timeout", lambda *_a, **_k: next(outcomes))
+
+    passed, output = formal_equiv._run_sby_plan(
+        tmp_path,
+        stem="miter",
+        primary_mode="prove",
+        depth=12,
+        timeout=30,
+        script_reads="read -sv harness.sv",
+        files_block="harness.sv",
+        required_covers=("pass",),
+    )
+
+    assert not passed
+    assert output.startswith("UNKNOWN: required cover reachability failed")
+    assert "mode cover" in (tmp_path / "miter_cover.sby").read_text(encoding="utf-8")
+
+
+def test_status_parser_rejects_pass_as_substring() -> None:
+    """Status parsing cannot accept words such as BYPASS as formal PASS."""
+    assert formal_equiv._sby_reported_pass("PASS 0 0")
+    assert not formal_equiv._sby_reported_pass("BYPASS 0 0")

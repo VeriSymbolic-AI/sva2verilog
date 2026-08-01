@@ -22,7 +22,7 @@ _FIX = Path(__file__).resolve().parents[2] / "tests/fixtures/implication_bitvec.
 
 def build() -> dict[str, str]:
     ast = json.loads(_FIX.read_text())
-    node, clock, label, text = import_assertion(ast)
+    node, clock, text, label = import_assertion(ast)
     node = normalize(node)
     checker = optimize(compose(node, clock, label, text))
     return emit_all(checker)

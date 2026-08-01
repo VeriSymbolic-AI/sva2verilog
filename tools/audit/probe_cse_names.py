@@ -32,7 +32,7 @@ def _report(tag: str, mods: dict[str, str]) -> None:
 
 
 ast = json.loads(_FIX.read_text())
-node, clock, label, text = import_assertion(ast)
+node, clock, text, label = import_assertion(ast)
 node = normalize(node)
 comp = compose(node, clock, label, text)
 _report("UNOPTIMIZED", emit_all(comp))

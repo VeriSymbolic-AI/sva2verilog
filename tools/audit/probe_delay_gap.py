@@ -26,7 +26,7 @@ from sva2rtl.optimizer import optimize
 
 def build_and_emit(fixture: str) -> tuple[str, dict[str, str], list[str]]:
     ast = json.loads((Path("tests/fixtures") / f"{fixture}.json").read_text())
-    node, clock, label, text = import_assertion(ast)
+    node, clock, text, label = import_assertion(ast)
     node = normalize(node)
     ck = optimize(compose(node, clock, label, text))
     mods = emit_all(ck)

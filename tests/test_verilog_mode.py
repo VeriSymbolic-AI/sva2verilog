@@ -288,7 +288,11 @@ def test_multiclock_verilog_2001_compiles_with_transitive_cdc_modules(
         source_loc=loc,
     )
     checker = compose(node, clk1, "multiclock_v2001", "a ##1 @(posedge clk2) b")
-    modules = emit_all(checker, verilog_mode=True)
+    modules = emit_all(
+        checker,
+        verilog_mode=True,
+        allow_experimental_multiclock=True,
+    )
     source = "\n\n".join(modules.values())
     source_path = tmp_path / "multiclock.v"
     source_path.write_text(source, encoding="utf-8")

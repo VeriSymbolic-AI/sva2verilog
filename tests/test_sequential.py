@@ -118,7 +118,7 @@ def test_bitvec_sequence_consequent_implication_accepted() -> None:
     (v1.7 LANG-03), eliminating the legacy bv_q correctness defect (BUG-IMPL-01).
     """
     ast = json.loads((_FIXTURES / "implication_bitvec.json").read_text())
-    node, clock, label, text = import_assertion(ast)
+    node, clock, text, label = import_assertion(ast)
     checker = compose(node, clock, label, text)
     assert checker is not None
 

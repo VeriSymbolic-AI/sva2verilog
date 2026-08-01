@@ -1,6 +1,6 @@
 # sva2rtl — SVA to Synthesizable RTL Monitor Compiler
 
-An open-source compiler that transforms SystemVerilog Assertion (SVA) properties into synthesizable hardware monitor modules. Generated monitors can be simulated with Verilator/Icarus Verilog or synthesized to FPGA. No mature open-source tool exists in this space — sva2rtl fills a critical gap in the EDA toolchain.
+A source-available compiler that transforms SystemVerilog Assertion (SVA) properties into synthesizable hardware monitor modules. Generated monitors can be simulated with Verilator/Icarus Verilog or synthesized to FPGA. The code is available under BSL-1.1 and changes to Apache-2.0 on the date stated in [LICENSE](LICENSE).
 
 ## What It Does
 
@@ -14,15 +14,13 @@ sva2rtl takes SVA properties/sequences as input and generates correct, area-effi
 
 ## Installation
 
-```bash
-pip install sva2rtl
-```
-
-Or with uv:
+The package is not currently published on PyPI. Install the tagged source directly:
 
 ```bash
-uv pip install sva2rtl
+python -m pip install "sva2rtl @ git+https://github.com/VeriSymbolic-AI/sva2verilog.git@main"
 ```
+
+For development, clone the repository and use the locked environment shown below.
 
 ### Prerequisites
 
@@ -37,22 +35,23 @@ slang --version
 
 ## Quick Start
 
-Compile an SVA property to a SystemVerilog monitor:
+Compile one boolean leaf to a SystemVerilog file:
 
 ```bash
-sva2rtl input.sv -o monitor.sv
+sva2rtl bool_property.sv -o monitor.sv
 ```
 
 Generate Verilog-2001 compatible output:
 
 ```bash
-sva2rtl input.sv --verilog -o monitor.v
+sva2rtl bool_property.sv --verilog -o monitor.v
 ```
 
-Compile a specific property from a file with multiple assertions:
+Hierarchical properties and files with multiple assertions require an explicit output directory:
 
 ```bash
-sva2rtl input.sv --property req_ack_prop -o monitor.sv
+sva2rtl input.sv -o generated/
+sva2rtl input.sv --property req_ack_prop -o generated_req_ack/
 ```
 
 ## Supported SVA Constructs
@@ -105,13 +104,18 @@ boundaries, and verification evidence, see
 | `until` | Weak until (safety) | `a until b` |
 | `until_with` | Weak until-with (safety) | `a until_with b` |
 
-### Multi-clock Properties (v1.4.1)
+### Experimental Multi-clock Properties (v1.4.1)
 
 | Mode | Description | Example |
 |------|-------------|---------|
 | Multi-clock sequence | Per-domain sub-checkers + 2-DFF sync | `@(clk1) a ##1 @(clk2) b` |
 | Multi-clock implication | Antecedent sync → consequent | `@(clk1) a \|=> @(clk2) b` |
 | Multi-stage chaining | Transitive domain composition | `@(clk1) ... ##1 @(clk2) ... ##1 @(clk3) ...` |
+
+Multi-clock output is fail-closed by default because the current 2-DFF level
+synchronizer can miss narrow events or coalesce multiple events. Generate it
+only for bounded experiments with `--experimental-multiclock`; this is not a
+CDC sign-off claim.
 
 Unbounded liveness (`s_eventually a`, unbounded `always a`) and the strong
 `s_until` / `s_until_with` forms are rejected at compile time — they are not
@@ -127,8 +131,10 @@ use [SUPPORT_MATRIX.md](SUPPORT_MATRIX.md).
 
 | Flag | Description |
 |------|-------------|
-| `--output`, `-o` | Output file path (default: stdout) |
+| `--output`, `-o` | Leaf output file, or required directory for hierarchical/multi output |
+| `--force` | Replace differing generated files; without it, output is no-clobber |
 | `--verilog` | Emit Verilog-2001 compatible output |
+| `--experimental-multiclock` | Explicitly opt into the lossy prototype CDC path |
 | `--property`, `-p` | Select a specific property by name |
 | `--slang-path` | Path to slang binary (if not on PATH) |
 | `--dump-ast` | Dump slang AST JSON and exit |
@@ -159,8 +165,8 @@ module sva_monitor_<name> (
 
 ```bash
 git clone https://github.com/VeriSymbolic-AI/sva2verilog.git
-cd sva2rtl
-uv sync --dev
+cd sva2verilog
+uv sync --dev --frozen
 ```
 
 Run tests:
@@ -274,8 +280,9 @@ boundaries are deliberate:
 
 - Unbounded liveness (`s_eventually a` without a range) is rejected at compile
   time; it is not realizable on finite state.
-- Multi-clock equivalence is a *trusted boundary*. Full clock-domain-crossing
-  and metastability proof is a separate tool category and is out of scope.
+- Multi-clock generation is disabled unless explicitly opted into as an
+  experiment. Its 2-DFF level synchronizer remains a *trusted boundary*: full
+  event delivery, clock-domain-crossing, and metastability proof are out of scope.
 - k-induction does not converge for every operator family. Where it does not,
   the row remains BMC-bounded and says so; a non-converging induction step is
   recorded as a known boundary rather than waived.
@@ -394,8 +401,10 @@ If sva2rtl is useful in academic work, please cite it as software:
 
 Licensed under the Business Source License 1.1 (BSL-1.1).
 
-- Free for individual, academic, and evaluation use
-- Commercial production use by organizations with >$10M annual revenue requires a license
+- Copying, modification, redistribution, and non-production use are permitted
+- Production use is permitted by the Additional Use Grant unless it offers the
+  work to third parties on a hosted or embedded basis competitive with the licensor
+- Uses outside those terms require an alternative license or must cease
 - Converts to Apache License 2.0 on 2030-05-29
 
 See [LICENSE](LICENSE) for full terms.

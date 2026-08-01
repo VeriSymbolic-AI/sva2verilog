@@ -71,7 +71,7 @@ def _phase10_prove_timeout() -> int:
 
 def _build(name: str) -> CheckerNode:
     ast = json.loads((_FIXTURES / f"{name}.json").read_text(encoding="utf-8"))
-    node, clock, label, text = import_assertion(ast)
+    node, clock, text, label = import_assertion(ast)
     node = normalize(node)
     checker = optimize(compose(node, clock, label, text))
     return checker

@@ -40,7 +40,7 @@ for name in CANDIDATES:
         print(f"\n### {name}: (no json)")
         continue
     ast = json.loads(p.read_text())
-    node, clock, label, text = import_assertion(ast)
+    node, clock, text, label = import_assertion(ast)
     node = normalize(node)
     try:
         checker = optimize(compose(node, clock, label, text))

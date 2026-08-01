@@ -50,7 +50,7 @@ _FIXTURES = Path(__file__).parent / "fixtures"
 
 def _build(name: str) -> CheckerNode:
     ast = json.loads((_FIXTURES / f"{name}.json").read_text(encoding="utf-8"))
-    node, clock, label, text = import_assertion(ast)
+    node, clock, text, label = import_assertion(ast)
     node = normalize(node)
     checker = optimize(compose(node, clock, label, text))
     return checker
@@ -628,7 +628,7 @@ class TestImplicationSvaEquiv:
         config = FormalHarnessConfig(
             start_mode="single_shot",
             output_contract=FormalOutputContract.full_monitor(include_overflow=True),
-            covers=("pass", "fail", "overlap", "overflow"),
+            covers=("pass", "fail"),
         )
         passed, output = run_sva_miter_check(
             checker,
@@ -638,6 +638,27 @@ class TestImplicationSvaEquiv:
             config=config,
         )
         assert passed, f"a |-> b full-contract BMC depth 15 FAILED:\n{output[-2500:]}"
+
+    def test_overlap_is_reachable_with_arbitrary_start(self) -> None:
+        """Overlap cover uses a start model that can actually reach it."""
+        checker = _build("implication_overlap")
+        config = FormalHarnessConfig(
+            start_mode="arbitrary_start",
+            output_contract=FormalOutputContract.full_monitor(include_overflow=True),
+            assumptions=("start is low while reset is asserted",),
+            # overflow_flag is part of the equality contract above, but is
+            # unreachable by construction for this one-cycle consequent.
+            covers=("overlap",),
+            overlap="bounded",
+        )
+        passed, output = run_sva_miter_check(
+            checker,
+            _implication_overlap_contract_ref_module("ref_impl_overlap_reachability"),
+            "ref_impl_overlap_reachability",
+            depth=15,
+            config=config,
+        )
+        assert passed, f"a |-> b overlap reachability FAILED:\n{output[-2500:]}"
 
     def test_nonoverlap_equiv(self) -> None:
         checker = _build("implication_nonoverlap")  # a |=> b
@@ -1114,12 +1135,12 @@ def _ref_disable_iff(name: str) -> str:
     """
     return f"""
 module {name} (
-    input  logic clk, rst_n, start, a, b,
+    input  logic clk, rst_n, start, dut_rst_n, a, b,
     output logic pass, fail
 );
     logic prev_a_q, prev_b_q;
     always_ff @(posedge clk) begin
-        if (!rst_n) begin
+        if (!rst_n || !dut_rst_n) begin
             prev_a_q <= 1'b0;
             prev_b_q <= 1'b0;
         end else begin
@@ -1127,8 +1148,8 @@ module {name} (
             prev_b_q <= start & b;
         end
     end
-    assign pass = rst_n & prev_a_q & prev_b_q;
-    assign fail = rst_n & prev_a_q & ~prev_b_q;
+    assign pass = rst_n & dut_rst_n & prev_a_q & prev_b_q;
+    assign fail = rst_n & dut_rst_n & prev_a_q & ~prev_b_q;
 endmodule
 """
 
@@ -1137,12 +1158,12 @@ def _ref_disable_iff_with_disable(name: str) -> str:
     """Independent reference for ``disable iff`` with incoming disable_i variable."""
     return f"""
 module {name} (
-    input  logic clk, rst_n, start, a, b, disable_i,
+    input  logic clk, rst_n, start, dut_rst_n, a, b, disable_i,
     output logic pass, fail
 );
     logic prev_a_q, prev_b_q;
     always_ff @(posedge clk) begin
-        if (!rst_n || disable_i) begin
+        if (!rst_n || !dut_rst_n || disable_i) begin
             prev_a_q <= 1'b0;
             prev_b_q <= 1'b0;
         end else begin
@@ -1150,8 +1171,8 @@ module {name} (
             prev_b_q <= start & b;
         end
     end
-    assign pass = rst_n & !disable_i & prev_a_q & prev_b_q;
-    assign fail = rst_n & !disable_i & prev_a_q & ~prev_b_q;
+    assign pass = rst_n & dut_rst_n & !disable_i & prev_a_q & prev_b_q;
+    assign fail = rst_n & dut_rst_n & !disable_i & prev_a_q & ~prev_b_q;
 endmodule
 """
 

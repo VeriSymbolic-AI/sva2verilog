@@ -1361,6 +1361,10 @@ def _compose_disable_iff(
         "sva2rtl_version": __version__,
         "original_text": original_text,
     }
+    if isinstance(node.condition, BoolExpr) and node.condition.expr is not None:
+        params["cond_semantic"] = serialize_bool_expr(
+            rename_bool_signals(node.condition.expr, _bool_expr_aliases(node.condition))
+        )
 
     return CheckerNode(
         template_name="disable_iff_top",

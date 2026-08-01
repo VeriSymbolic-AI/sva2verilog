@@ -264,6 +264,39 @@ def test_multi_property_requires_explicit_output_directory(
     assert "requires --output DIRECTORY" in result.output
 
 
+def test_experimental_multiclock_flag_is_threaded_to_emitter(
+    runner: CliRunner, sv_file: Path
+) -> None:
+    """CLI opt-in reaches the emitter boundary explicitly."""
+    node = BoolExpr(text="a", source_loc=_LOC)
+    checker = MagicMock()
+    checker.children = (MagicMock(),)
+
+    with patch("sva2rtl.cli.invoke_slang", return_value=_MOCK_AST):
+        with patch(
+            "sva2rtl.cli.import_all_assertions",
+            return_value=[(node, _CLOCK, "a", "multi")],
+        ):
+            with patch("sva2rtl.cli.compose", return_value=checker):
+                with patch("sva2rtl.cli.optimize", return_value=checker):
+                    with patch(
+                        "sva2rtl.cli.emit_all", return_value={"multi": _MOCK_SV_TEXT}
+                    ) as mock_emit_all:
+                        with patch("sva2rtl.cli.write_output_dir"):
+                            result = runner.invoke(
+                                main,
+                                [
+                                    str(sv_file),
+                                    "--output",
+                                    str(sv_file.parent / "out"),
+                                    "--experimental-multiclock",
+                                ],
+                            )
+
+    assert result.exit_code == 0
+    assert mock_emit_all.call_args.kwargs["allow_experimental_multiclock"] is True
+
+
 # ── Test 8: format_dump_ir shows source location ─────────────────────────
 
 

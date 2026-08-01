@@ -149,14 +149,16 @@ def test_ci_and_nightly_enforce_test_execution_budgets() -> None:
     formal = FORMAL_WORKFLOW.read_text(encoding="utf-8")
 
     assert ci.count("tools/ci/check_junit.py") == 6
-    assert "--min-passed 1200 --max-skipped 200" in ci
-    assert "--min-passed 160 --max-skipped 1" in ci
-    assert "--min-passed 130 --max-skipped 0" in ci
+    assert "--min-passed 1350 --max-skipped 140" in ci
+    assert "--min-passed 170 --max-skipped 1" in ci
+    assert "--min-passed 133 --max-skipped 0" in ci
     assert "--min-passed 3 --max-skipped 0" in ci
-    assert "--min-passed 900 --max-skipped 200" in ci
+    assert "--min-passed 1100 --max-skipped 150" in ci
     assert nightly.count("tools/ci/check_junit.py") == 4
     assert formal.count("tools/ci/check_junit.py") == 1
     assert "max-skipped: 1" in formal
+    assert "min-passed: 63" in formal
+    assert "--min-passed ${{ matrix.min-passed }}" in formal
     assert "--max-skipped ${{ matrix.max-skipped }}" in formal
 
 
@@ -222,3 +224,14 @@ def test_readme_describes_the_implemented_optimizer() -> None:
     assert "DFA minimization" not in readme
     assert "Hopcroft" not in readme
     assert "Constant folding" in readme
+
+
+def test_readme_distribution_license_and_cdc_claims_match_repository_truth() -> None:
+    readme = README.read_text(encoding="utf-8")
+
+    assert "A source-available compiler" in readme
+    assert "not currently published on PyPI" in readme
+    assert "pip install sva2rtl\n" not in readme
+    assert ">$10M" not in readme
+    assert "--experimental-multiclock" in readme
+    assert "not a\nCDC sign-off claim" in readme

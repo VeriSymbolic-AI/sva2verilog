@@ -24,7 +24,7 @@ from pathlib import Path
 
 from jinja2 import Environment, FileSystemLoader
 
-from sva2rtl.errors import SvaCompileError
+from sva2rtl.errors import SvaCompileError, UnsupportedConstruct
 from sva2rtl.ir import CheckerNode
 
 
@@ -157,6 +157,7 @@ def emit_all(
     template_dir: Path | None = None,
     *,
     verilog_mode: bool = False,
+    allow_experimental_multiclock: bool = False,
 ) -> dict[str, str]:
     """Render a hierarchical ``CheckerNode`` tree into one SV string per module.
 
@@ -180,6 +181,17 @@ def emit_all(
         Ordered mapping of ``{module_name: sv_text}`` for every unique module
         in the hierarchy.  The top-level checker is last.
     """
+    if _has_multiclock_boundary(checker) and not allow_experimental_multiclock:
+        raise UnsupportedConstruct(
+            message=(
+                "multi-clock generation uses an unacknowledged 2-DFF level "
+                "synchronizer that can miss or coalesce events; explicitly opt "
+                "in only for bounded experiments"
+            ),
+            construct_name="experimental multi-clock CDC",
+            source_loc=checker.source_loc,
+        )
+
     env = _make_env(template_dir)
     results: dict[str, str] = {}
     _emit_recursive(checker, env, results, verilog_mode=verilog_mode)
@@ -190,6 +202,12 @@ def emit_all(
     _ensure_deps(checker, env, results, verilog_mode=verilog_mode)
 
     return results
+
+
+def _has_multiclock_boundary(checker: CheckerNode) -> bool:
+    if checker.template_name in {"mc_seq_top", "sync_2dff"}:
+        return True
+    return any(_has_multiclock_boundary(child) for child in checker.children)
 
 
 def _ensure_deps(

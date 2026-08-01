@@ -52,7 +52,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
-from sva2rtl.emitter import emit_all
+from sva2rtl.emitter import emit_all, observed_signal_widths
 from sva2rtl.ir import CheckerNode
 
 _LOG = logging.getLogger(__name__)
@@ -359,6 +359,28 @@ def _render_cover_probes(
     return "\n".join(lines)
 
 
+def _required_covers(
+    config: FormalHarnessConfig,
+    *,
+    has_overflow_flag: bool,
+) -> tuple[FormalCoverName, ...]:
+    """Return cover probes that actually exist in the rendered harness."""
+    return tuple(
+        cover
+        for cover in config.covers
+        if cover != "overflow" or has_overflow_flag
+    )
+
+
+def _sby_reported_pass(output: str) -> bool:
+    """Recognize PASS as a standalone status token, not an arbitrary substring."""
+    for line in output.splitlines():
+        tokens = line.replace("(", " ").replace(")", " ").replace(",", " ").split()
+        if "PASS" in tokens:
+            return True
+    return False
+
+
 def _run_sby_with_timeout(
     cmd: list[str],
     *,
@@ -387,6 +409,90 @@ def _run_sby_with_timeout(
         return -1, (stdout or "") + "\n" + (stderr or ""), True
 
 
+def _sby_project_text(
+    *,
+    mode: str,
+    depth: int,
+    script_reads: str,
+    files_block: str,
+) -> str:
+    return f"""\
+[options]
+mode {mode}
+depth {depth}
+
+[engines]
+smtbmc z3
+
+[script]
+{script_reads}
+prep -top harness
+
+[files]
+{files_block}
+"""
+
+
+def _run_sby_plan(
+    work: Path,
+    *,
+    stem: str,
+    primary_mode: str,
+    depth: int,
+    timeout: int,
+    script_reads: str,
+    files_block: str,
+    required_covers: tuple[FormalCoverName, ...],
+) -> tuple[bool, str]:
+    """Run proof/BMC first, then require a separate reachability cover task."""
+    primary_path = work / f"{stem}.sby"
+    primary_path.write_text(
+        _sby_project_text(
+            mode=primary_mode,
+            depth=depth,
+            script_reads=script_reads,
+            files_block=files_block,
+        ),
+        encoding="utf-8",
+    )
+    returncode, output, timed_out = _run_sby_with_timeout(
+        ["sby", "-f", primary_path.name],
+        cwd=str(work),
+        timeout=timeout,
+    )
+    if timed_out:
+        return False, f"ERROR: sby {stem} check timed out after {timeout}s\n{output}"
+    if returncode != 0 or not _sby_reported_pass(output):
+        return False, output
+    if not required_covers:
+        return True, output
+
+    cover_path = work / f"{stem}_cover.sby"
+    cover_path.write_text(
+        _sby_project_text(
+            mode="cover",
+            depth=depth,
+            script_reads=script_reads,
+            files_block=files_block,
+        ),
+        encoding="utf-8",
+    )
+    cover_rc, cover_output, cover_timed_out = _run_sby_with_timeout(
+        ["sby", "-f", cover_path.name],
+        cwd=str(work),
+        timeout=timeout,
+    )
+    covers = ", ".join(required_covers)
+    combined = f"{output}\n\n=== required cover task ({covers}) ===\n{cover_output}"
+    if cover_timed_out:
+        return False, (
+            f"UNKNOWN: required cover reachability timed out after {timeout}s\n{combined}"
+        )
+    if cover_rc != 0 or not _sby_reported_pass(cover_output):
+        return False, f"UNKNOWN: required cover reachability failed ({covers})\n{combined}"
+    return True, combined
+
+
 def build_harness(
     monitor_top: str,
     observed_signals: tuple[tuple[str, str], ...],
@@ -394,6 +500,7 @@ def build_harness(
     *,
     clock: str = "clk",
     has_overflow_flag: bool = True,
+    signal_widths: dict[str, int] | None = None,
     config: FormalHarnessConfig | None = None,
 ) -> str:
     """Build a SymbiYosys harness asserting ``M.fail == reference_expr``.
@@ -418,8 +525,12 @@ def build_harness(
         SystemVerilog harness module text.
     """
     harness_config = config or FormalHarnessConfig.equivalence_default()
+    widths = signal_widths or {}
     input_decls = "\n".join(
-        f"    input logic {port}," for port, _ in observed_signals
+        f"    input logic "
+        f"{'[' + str(widths.get(port, 1) - 1) + ':0] ' if widths.get(port, 1) > 1 else ''}"
+        f"{port},"
+        for port, _ in observed_signals
     )
     extra_input_decls = _render_extra_input_decls(harness_config)
     port_conns = " ".join(f".{port}({port})," for port, _ in observed_signals)
@@ -500,6 +611,7 @@ def build_miter_harness(
     clock: str = "clk",
     has_overflow_flag: bool = True,
     compare: str = "pass",
+    signal_widths: dict[str, int] | None = None,
     config: FormalHarnessConfig | None = None,
 ) -> str:
     """Build a miter harness comparing the monitor against a REFERENCE MONITOR.
@@ -540,8 +652,12 @@ def build_miter_harness(
         harness_config,
         has_overflow_flag=has_overflow_flag,
     )
+    widths = signal_widths or {}
     input_decls = "\n".join(
-        f"    input logic {port}," for port, _ in observed_signals
+        f"    input logic "
+        f"{'[' + str(widths.get(port, 1) - 1) + ':0] ' if widths.get(port, 1) > 1 else ''}"
+        f"{port},"
+        for port, _ in observed_signals
     )
     extra_input_decls = _render_extra_input_decls(harness_config)
     port_conns = " ".join(f".{port}({port})," for port, _ in observed_signals)
@@ -638,6 +754,9 @@ def run_sva_miter_check(
     monitor_top = monitor_root.module_name
     top_sv = modules.get(monitor_top, "")
     has_ovf = "overflow_flag" in top_sv
+    harness_config = config or FormalHarnessConfig.miter_default(
+        compare=compare,  # type: ignore[arg-type]
+    )
 
     harness = build_miter_harness(
         monitor_top,
@@ -647,7 +766,8 @@ def run_sva_miter_check(
         clock=clock,
         has_overflow_flag=has_ovf,
         compare=compare,
-        config=config,
+        signal_widths=observed_signal_widths(monitor_root),
+        config=harness_config,
     )
 
     with tempfile.TemporaryDirectory(prefix="sva2rtl_miter_") as tmpdir:
@@ -664,32 +784,19 @@ def run_sva_miter_check(
 
         script_reads = "\n".join(read_lines)
         files_block = "\n".join(file_lines)
-        sby_text = f"""\
-[options]
-mode {mode}
-depth {depth}
-
-[engines]
-smtbmc z3
-
-[script]
-{script_reads}
-prep -top harness
-
-[files]
-{files_block}
-"""
-        (work / "miter.sby").write_text(sby_text)
-
-        returncode, output, timed_out = _run_sby_with_timeout(
-            ["sby", "-f", "miter.sby"],
-            cwd=str(work),
+        return _run_sby_plan(
+            work,
+            stem="miter",
+            primary_mode=mode,
+            depth=depth,
             timeout=timeout,
+            script_reads=script_reads,
+            files_block=files_block,
+            required_covers=_required_covers(
+                harness_config,
+                has_overflow_flag=has_ovf,
+            ),
         )
-        if timed_out:
-            return False, f"ERROR: sby miter check timed out after {timeout}s\n{output}"
-        passed = returncode == 0 and "PASS" in output
-        return passed, output
 
 
 def run_sva_equiv_check(
@@ -746,6 +853,7 @@ def run_sva_equiv_check(
     # emitted top-module text directly to stay robust to template changes.
     top_sv = modules.get(monitor_top, "")
     has_ovf = "overflow_flag" in top_sv
+    harness_config = config or FormalHarnessConfig.equivalence_default()
 
     harness = build_harness(
         monitor_top,
@@ -753,7 +861,8 @@ def run_sva_equiv_check(
         reference_expr,
         clock=clock,
         has_overflow_flag=has_ovf,
-        config=config,
+        signal_widths=observed_signal_widths(monitor_root),
+        config=harness_config,
     )
     if helper_regs:
         # Insert helper regs just after the dut instantiation closing line.
@@ -778,37 +887,19 @@ def run_sva_equiv_check(
         script_reads = "\n".join(read_lines)
         files_block = "\n".join(file_lines)
 
-        # k-induction: SymbiYosys "prove" mode runs BMC (base case) + k-induction
-        # (inductive step). A PASS here is a COMPLETE proof (all reachable states).
-        # The engine is always smtbmc with z3 — sby internally handles prove mode by
-        # splitting into basecase and induction tasks.
-        sby_text = f"""\
-[options]
-mode {mode}
-depth {depth}
-
-[engines]
-smtbmc z3
-
-[script]
-{script_reads}
-prep -top harness
-
-[files]
-{files_block}
-"""
-        (work / "equiv.sby").write_text(sby_text)
-
-        returncode, output, timed_out = _run_sby_with_timeout(
-            ["sby", "-f", "equiv.sby"],
-            cwd=str(work),
+        return _run_sby_plan(
+            work,
+            stem="equiv",
+            primary_mode=mode,
+            depth=depth,
             timeout=timeout,
+            script_reads=script_reads,
+            files_block=files_block,
+            required_covers=_required_covers(
+                harness_config,
+                has_overflow_flag=has_ovf,
+            ),
         )
-        if timed_out:
-            return False, f"ERROR: sby equivalence check timed out after {timeout}s\n{output}"
-        # sby returns 0 on PASS, non-zero on FAIL/ERROR.
-        passed = returncode == 0 and "PASS" in output
-        return passed, output
 
 
 def run_sva_equiv_prove(

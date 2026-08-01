@@ -71,7 +71,7 @@ def _b(text: str) -> BoolExpr:
 
 def _build_json_fixture(name: str) -> CheckerNode:
     ast = json.loads((_FIXTURES / name).read_text(encoding="utf-8"))
-    node, clock, label, text = import_assertion(ast)
+    node, clock, text, label = import_assertion(ast)
     node = normalize(node)
     return optimize(compose(node, clock, label if label is not None else "synth", text))
 
@@ -340,7 +340,11 @@ def emit_generated_case(
 ) -> EmittedMonitorCase:
     """Build and emit one generated monitor case."""
     checker = case.build()
-    modules = emit_all(checker, verilog_mode=verilog_mode)
+    modules = emit_all(
+        checker,
+        verilog_mode=verilog_mode,
+        allow_experimental_multiclock=(case.case_id == "multiclock_boundary"),
+    )
     return EmittedMonitorCase(case=case, top_module=checker.module_name, modules=modules)
 
 

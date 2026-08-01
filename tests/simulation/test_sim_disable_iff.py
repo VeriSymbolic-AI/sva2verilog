@@ -54,6 +54,23 @@ def _build_checker() -> CheckerNode:
     return compose(node, clock, label, text)
 
 
+def _bind_observed_aliases(
+    checker: CheckerNode,
+    stimulus: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Drive generated aliases from the original DUT signal names."""
+    bound: list[dict[str, Any]] = []
+    for cycle in stimulus:
+        values = dict(cycle)
+        for port, dut_signal in checker.observed_signals:
+            if port == dut_signal:
+                continue
+            default: bool | int = dut_signal == "rst_n"
+            values[port] = values.get(dut_signal, default)
+        bound.append(values)
+    return bound
+
+
 # ── Run helper ────────────────────────────────────────────────────────────────
 
 
@@ -64,6 +81,7 @@ def _run_stimulus(
     simulator: str = "iverilog",
 ) -> list[dict]:
     """Compile and run stimulus through the disable_iff RTL, return outputs."""
+    stimulus = _bind_observed_aliases(checker, stimulus)
     modules = emit_all(checker)
     extra_inputs = extra_inputs_from_checker(checker)
     clock_signal = checker.params["clock_signal"]
@@ -234,6 +252,7 @@ def test_condition_disable_gates_body(tmp_path: Path, simulator: str) -> None:
         {"start": False, "a": False, "b": False, "rst_n": False},
         {"start": False, "a": False, "b": False, "rst_n": True},
     ]
+    stimulus = _bind_observed_aliases(checker, stimulus)
 
     if simulator == "verilator":
         extra_inputs = extra_inputs_from_checker(checker)
@@ -315,6 +334,7 @@ module tb;
         .clk(clk),
         .rst_n    (rst_n),
         .start    (start),
+        .dut_rst_n(rst_n),
         .a(a),
         .b(b),
         .disable_i     (disable_i),
@@ -386,6 +406,7 @@ class TestDisableIffOracleCrosscheck:
             {"start": False, "a": False, "b": False},
             {"start": False, "a": False, "b": False},
         ]
+        stimulus = _bind_observed_aliases(checker, stimulus)
         modules = emit_all(checker)
         extra_inputs = extra_inputs_from_checker(checker)
         clock_signal = checker.params["clock_signal"]
@@ -424,6 +445,7 @@ class TestDisableIffOracleCrosscheck:
             {"start": True, "a": True, "b": False, "disable_i": True},
             {"start": False, "a": False, "b": False, "disable_i": True},
         ]
+        stimulus = _bind_observed_aliases(checker, stimulus)
         modules = emit_all(checker)
         extra_inputs = extra_inputs_from_checker(checker)
         clock_signal = checker.params["clock_signal"]

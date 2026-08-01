@@ -772,16 +772,25 @@ class _HierarchicalSim:
         body = node.children[0] if node.children else None
         if body is None:
             return {"pass": False, "fail": False, "active": False, "overflow": False}
-        cond_text = node.params.get("cond_expr", "")
-        cond_sigs = _re_oracle.findall(r"\b([a-zA-Z_]\w*)\b", cond_text)
-        if cond_sigs:
-            is_negated = cond_text.lstrip().startswith(("!", "~"))
-            if is_negated:
-                cond_val = any(not signals.get(s, False) for s in cond_sigs)
-            else:
-                cond_val = all(signals.get(s, False) for s in cond_sigs)
+        cond_semantic = node.params.get("cond_semantic")
+        if cond_semantic is not None:
+            cond_val = bool(eval_bool_expr(deserialize_bool_expr(cond_semantic), signals))
         else:
-            cond_val = signals.get("cond", False)
+            # Compatibility path for legacy / hand-built CheckerNodes. New
+            # compiler output always carries structured ``cond_semantic`` so
+            # aliases, comparisons and compound expressions are not inferred
+            # from fragile generated text.
+            cond_text = node.params.get("cond_expr", "")
+            cond_sigs = _re_oracle.findall(r"\b([a-zA-Z_]\w*)\b", cond_text)
+            if cond_sigs:
+                unwrapped = cond_text.lstrip(" (\t\r\n")
+                is_negated = unwrapped.startswith(("!", "~"))
+                if is_negated:
+                    cond_val = any(not signals.get(s, False) for s in cond_sigs)
+                else:
+                    cond_val = all(signals.get(s, False) for s in cond_sigs)
+            else:
+                cond_val = signals.get("cond", False)
 
         disable_i = signals.get("disable_i", False)
         effective_disable = bool(disable_i) or cond_val

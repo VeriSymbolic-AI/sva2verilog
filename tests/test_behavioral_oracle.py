@@ -672,3 +672,43 @@ def test_hierarchical_disable_iff_gates_outputs() -> None:
     stim = [{"start": True, "cond": True}]
     out = simulate_checker_hierarchy(tree, stim)
     assert not out[0]["pass"], "cond true gates output"
+
+
+def test_hierarchical_disable_iff_uses_structured_aliased_condition() -> None:
+    """Structured semantics make parenthesized reserved-port aliases exact."""
+    loc = SourceLoc("test.sv", 1, 1)
+    body = CheckerNode(
+        template_name="bool_expr",
+        module_name="sva_body",
+        params={},
+        observed_signals=(),
+        source_loc=loc,
+        children=(),
+    )
+    condition = BoolUnary(
+        op="not",
+        operand=BoolIdent(name="dut_rst_n", width=1, source_loc=loc),
+        source_loc=loc,
+    )
+    tree = CheckerNode(
+        template_name="disable_iff_top",
+        module_name="sva_top",
+        params={
+            "cond_expr": "(!dut_rst_n)",
+            "cond_semantic": serialize_bool_expr(condition),
+        },
+        observed_signals=(("dut_rst_n", "rst_n"),),
+        source_loc=loc,
+        children=(body,),
+    )
+
+    out = simulate_checker_hierarchy(
+        tree,
+        [
+            {"start": True, "dut_rst_n": True},
+            {"start": True, "dut_rst_n": False},
+        ],
+    )
+
+    assert out[0]["pass"] is True
+    assert out[1] == {"pass": False, "fail": False, "active": False, "overflow": False}

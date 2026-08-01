@@ -44,7 +44,7 @@ _FIXTURES = Path(__file__).parent / "fixtures"
 def _build_from_fixture(name: str, *, optimize_flag: bool = True) -> CheckerNode:
     """Load a fixture JSON, compile to CheckerNode with/without optimization."""
     ast = json.loads((_FIXTURES / f"{name}.json").read_text(encoding="utf-8"))
-    node, clock, label, original_text = import_assertion(ast)
+    node, clock, original_text, label = import_assertion(ast)
     node = normalize(node)
     checker = compose(node, clock, label, original_text)
     if optimize_flag:

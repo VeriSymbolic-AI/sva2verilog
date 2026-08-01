@@ -56,7 +56,7 @@ endmodule
 
 def main() -> None:
     ast = json.loads(Path("tests/fixtures/delay_fixed.json").read_text())
-    node, clock, label, text = import_assertion(ast)
+    node, clock, text, label = import_assertion(ast)
     node = normalize(node)
     ck = optimize(compose(node, clock, label, text))
 

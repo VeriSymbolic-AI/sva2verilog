@@ -293,13 +293,15 @@ The following operators remain unsupported or deliberately rejected:
 
 ### Multi-clock support (v1.4.1 Part B — Path One: trusted 2-DFF synchronizer)
 
-The compiler accepts a bounded multi-clock subset using a split-and-synchronize
-compilation approach (Gawanmeh & Tahar, 2009): each `@(clk_i)` sub-sequence is compiled to
+With explicit `--experimental-multiclock` opt-in, the compiler accepts a bounded
+multi-clock subset using a split-and-synchronize compilation approach (Gawanmeh
+& Tahar, 2009): each `@(clk_i)` sub-sequence is compiled to
 a single-clock checker in its own clock domain, reusing the full Tier 1/2/3
 generation pipeline. Cross-domain `##1` boundaries are connected through a
 2-DFF level synchronizer (`templates/sync_2dff.sv.j2`, TRUSTED COMPONENT).
-This is accepted syntax and generated structure, not a claim of reliable
-cross-domain event delivery.
+The default emission path rejects these forms after composition. The opt-in is
+accepted syntax and generated structure, not a claim of reliable cross-domain
+event delivery or CDC sign-off.
 
 **Supported subset** (equals the SVA standard's allowed multi-clock forms):
 - `@(posedge clk1) seq1 ##1 @(posedge clk2) seq2` (multi-clock sequence)

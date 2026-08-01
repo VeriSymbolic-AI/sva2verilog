@@ -125,6 +125,12 @@ def _resolve_output_mode(
     help="Emit Verilog-2001 compatible output instead of SystemVerilog",
 )
 @click.option(
+    "--experimental-multiclock",
+    is_flag=True,
+    default=False,
+    help="Allow prototype multi-clock CDC output that may lose/coalesce events",
+)
+@click.option(
     "--no-optimize",
     is_flag=True,
     default=False,
@@ -148,6 +154,7 @@ def main(
     dump_tree: bool,
     property_name: str | None,
     verilog: bool,
+    experimental_multiclock: bool,
     no_optimize: bool,
     verify_flag: bool,
 ) -> None:
@@ -288,7 +295,11 @@ def main(
                 output, multi_prop=bool(checker_node.children)
             )
             if checker_node.children:
-                modules = emit_all(checker_node, verilog_mode=verilog)
+                modules = emit_all(
+                    checker_node,
+                    verilog_mode=verilog,
+                    allow_experimental_multiclock=experimental_multiclock,
+                )
                 out_dir = Path(out_path_str) if out_path_str else Path(".")
                 write_output_dir(modules, out_dir, force=force)
             else:
@@ -351,7 +362,11 @@ def main(
                     )
                     continue
 
-                modules = emit_all(checker_node, verilog_mode=verilog)
+                modules = emit_all(
+                    checker_node,
+                    verilog_mode=verilog,
+                    allow_experimental_multiclock=experimental_multiclock,
+                )
                 merge_module_outputs(all_modules, modules)
 
             if dump_tree:
