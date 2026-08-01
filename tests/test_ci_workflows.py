@@ -197,6 +197,16 @@ def test_core_actions_use_pinned_native_node24_releases() -> None:
     assert "astral-sh/setup-uv@e4db8464a088ece1b920f60402e813ea4de65b8f" not in workflow_text
 
 
+def test_workflows_declare_least_privilege_token_permissions() -> None:
+    """Read-only validation workflows must not inherit repository write access."""
+
+    for path in (*WORKFLOWS, FORMAL_WORKFLOW):
+        workflow = path.read_text(encoding="utf-8")
+        assert "\npermissions:\n  contents: read\n" in workflow, path.name
+        assert "contents: write" not in workflow
+        assert "actions: write" not in workflow
+
+
 def test_support_claims_do_not_reuse_historical_remote_evidence() -> None:
     matrix = SUPPORT_MATRIX.read_text(encoding="utf-8")
     status = PROJECT_STATUS.read_text(encoding="utf-8")

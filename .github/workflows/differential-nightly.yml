@@ -9,6 +9,9 @@ on:
     - cron: "0 4 * * *"
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   differential-slow-iverilog:
     name: differential slow sweep (iverilog)
