@@ -61,6 +61,15 @@ Current project state:
   Linux Flex header dependency is fixed locally; the latest scheduled nightly
   run `30610818023` and Full Formal run `30262616745` did not start because
   GitHub reported an account payment/spending-limit block.
+- Fresh local qualification (2026-08-01): full Icarus 1473 passed / 1 skipped /
+  1 xfailed; generated RTL 133 passed; Full Formal 125 passed / 1 documented
+  strict-liveness xfail; branch coverage 86.31%; Python 3.14 broad non-simulation
+  axis 1247 passed / 1 xfailed; ruff, mypy strict, frozen lock, workflow YAML,
+  installer syntax, and coverage floors passed.
+- Fresh differential and distribution evidence: Icarus and Verilator fast each
+  record 16 passed; date seed `20260801` slow sweeps each record 1 passed with
+  64 Hypothesis examples; wheel/sdist out-of-tree smoke passed under Python 3.12
+  and 3.14. These are local results, not substitutes for scheduled remote runs.
 
 Recent hardening already completed:
 
@@ -417,7 +426,7 @@ Done when:
 - Critical modules have explicit coverage targets.
 - Mutation score is high enough to catch common timing, gating, and polarity bugs.
 
-Current local evidence (2026-07-26):
+Current local evidence (rerun 2026-08-01):
 
 - `bool_semantics.py`: 15/15 killed (100%).
 - `behavioral_oracle.py`: 112/130 covered, valid mutants killed (86.2%);
@@ -436,6 +445,10 @@ Current local evidence (2026-07-26):
   from the percentage and exposed as explicit uncovered debt.
 - The scheduled mutation job runs all four Python modules separately at the
   85% threshold and the RTL template suite at a strict 100% threshold.
+- Across the four Python modules, 260/301 scored mutants were killed (86.4%).
+  Forty-one valid mutants survived and 31 candidates were uncovered, so this
+  gate passes its current threshold but also exposes concrete test debt; it is
+  not evidence that the selected semantic surfaces are exhaustive.
 
 #### Width, type, and bit-select support is weak
 

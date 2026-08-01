@@ -20,13 +20,16 @@ Verilator 安装修复；因此本地结果不能替代下一次同提交远端�
   Python 3.14 非仿真轴为 1122 passed / 126 skipped
 - F-01 本地修复：Ubuntu 安装器补充 `libfl-dev` 并在源码编译前检查
   `/usr/include/FlexLexer.h`；尚需新 SHA 的 Ubuntu Actions 证实
-- 形式化验证：同 SHA formal smoke 3/3 通过；本地历史 Full Formal 文件集
+- 形式化验证：同 SHA formal smoke 3/3 通过；当前本地 Full Formal 文件集
   为 125 passed / 1 个严格 liveness xfail，不能冒充当前远端 Full Formal
 - nightly / Full Formal：最近运行仍停在旧提交 `8e7af87`，且 job 因账户
   payment/spending-limit 限制未启动；当前 SHA 没有可用的 nightly/full 证据
-- 变异与差分：最近完整本地证据仍为 Python mutation 260/301（86.4%）、
-  RTL template mutation 11/11，以及双后端 fast/slow 差分；都需要在当前
-  修复 SHA 上重新形成 scheduled evidence
+- 当前本地验证：完整 Icarus 1473 passed / 1 skipped / 1 xfailed，branch
+  coverage 86.31%，generated RTL 133 passed，Python 3.14 广泛轴 1247 passed /
+  1 xfailed；wheel/sdist 分别在 Python 3.12 和 3.14 仓库外冒烟通过
+- 变异与差分：当前分支 Python mutation 260/301（86.4%，另有 31 个未覆盖
+  候选）、RTL template mutation 11/11；Icarus/Verilator fast 各 16 passed，
+  date-seeded slow 各 1 passed（每项 64 examples）；scheduled evidence 仍缺失
 - 支持状态权威：`SUPPORT_MATRIX.md` 记录逐构造支持边界、证据完整度和降级原因；README / SUPPORTED_CONSTRUCTS 只作概览和解释
 - 工业级验证缺口：已记录在 `INDUSTRIAL_VALIDATION_GAPS.md`，包含当前进展、P0/P1/P2 严重度、修复计划和 fully-supported 定义标准
 
@@ -41,6 +44,23 @@ Ubuntu 24.04 将 Verilator 所需的 C++ Flex header 放在推荐包 `libfl-dev`
 闭环的工业基线”。在 Linux Verilator、generated RTL、nightly differential
 和 Full Formal 对同一修复 SHA 全绿前，支持矩阵保持 0 个 Fully supported。
 多时钟电平同步器的事件丢失/合并风险仍是独立的架构级 Trusted boundary。
+
+### 当前本地资格证据（2026-08-01）
+
+本地在 F-01/F-02 修复分支上重新执行了完整门禁，而不是沿用 2026-07-26
+数字：ruff、mypy strict、冻结 lock、工作流 YAML、安装脚本语法和覆盖率下限
+均通过；Icarus 全套为 1473 passed / 1 skipped / 1 xfailed，generated RTL
+为 133 passed，Full Formal 为 125 passed / 1 个已记录的 strict-liveness
+xfail。Python 3.14 非仿真广泛轴为 1247 passed / 1 xfailed。双后端差分
+fast 各 16 passed，日期 seed `20260801` 的 slow 各 1 passed，每项内部运行
+64 个 Hypothesis examples。branch coverage 为 86.31%。v1.7.1 wheel/sdist
+在仓库外分别用 Python 3.12、3.14 安装、调用 CLI、生成 RTL 并通过 Icarus。
+
+当前分支重新执行的 Python mutation 为 260/301 killed（86.4%）：
+`bool_semantics.py` 15/15、`behavioral_oracle.py` 112/130、`composer.py`
+41/48、`ast_importer.py` 92/108；另有 31 个未覆盖候选不计入分母，41 个
+有效变异仍存活。RTL 模板 mutation 为 11/11。门槛通过不等于没有测试债务，
+存活变异和未覆盖候选应作为后续定向回归输入。
 
 ## 2026-07-26 完整契约与发布门禁加固（历史快照）
 

@@ -25,6 +25,15 @@ until a new commit executes those Linux gates. Historical or partial green
 evidence is not substituted for the missing gate. Yosys synthesis is
 complementary structural evidence, not an equivalent replacement for Verilator.
 
+Fresh local qualification on 2026-08-01 records full Icarus 1473 passed /
+1 skipped / 1 xfailed, generated RTL 133 passed, Full Formal 125 passed /
+1 documented strict-liveness xfail, branch coverage 86.31%, Python 3.14 broad
+non-simulation 1247 passed / 1 xfailed, and dual-backend fast/slow differential
+passes. Python mutation is 260/301 killed (86.4%, with 41 survivors and 31
+uncovered candidates); reviewed RTL-template mutation is 11/11. These results
+strengthen local bounded evidence but do not close the missing same-commit remote
+Linux, nightly, or Full Formal gates.
+
 ## Support Status Legend
 
 | Status | Meaning |

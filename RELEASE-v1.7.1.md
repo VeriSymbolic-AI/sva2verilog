@@ -13,6 +13,15 @@ Released: 2026-07-31
 > v1.7.1 remains a corrective distribution, not a fully qualified remote
 > baseline, and the support matrix keeps 0 rows at `Fully supported`.
 
+Fresh local post-release qualification on 2026-08-01 passed the full Icarus
+suite (1473 passed / 1 skipped / 1 xfailed), generated RTL (133 passed), Full
+Formal (125 passed / 1 documented strict-liveness xfail), Python 3.14 broad
+non-simulation tests (1247 passed / 1 xfailed), branch coverage (86.31%), both
+simulator differential fast/slow sweeps, Python mutation (260/301, 86.4%), RTL
+template mutation (11/11), and Python 3.12/3.14 out-of-tree distribution smoke.
+This is local bounded evidence; it does not replace the missing same-commit
+remote Linux, scheduled nightly, or Full Formal records.
+
 This is a correctness release. It supersedes v1.7.0, which contained
 full-contract semantic defects in twelve monitor templates that were found by a
 subsequent independent-reference audit. Users of v1.7.0 should upgrade.
