@@ -16,6 +16,11 @@ from the independent-reference audit. On 2026-08-01, post-release baseline
 nightly defect—missing parent creation for nested pytest `--basetemp` and hidden
 failure artifacts excluded from upload—was reproduced, regression-tested, fixed,
 and included in that same green baseline.
+The follow-on hardening baseline `1841ed4` also completed same-commit CI
+(`30686814681`), differential nightly (`30686818970`), and Full Formal
+(`30686820029`). These runs cover the Node.js 24 action migration, read-only
+workflow permissions, CDC injection correction, oracle mutation boundaries,
+and isolated multi-clock test sources.
 The compiler also fixed several real semantic defects that were found only after
 non-circular formal references were introduced.
 
@@ -33,7 +38,8 @@ dimensions.
 Current project state:
 
 - Version state: v1.7.1 released at `8b5c063`; executable/workflow qualification
-  baseline `b055105` includes the post-release F-01 and nightly artifact fixes.
+  baseline `b055105` includes the post-release F-01 and nightly artifact fixes;
+  follow-on hardening baseline `1841ed4` has its own three green remote gates.
 - Historical remote state: GitHub Actions run
   [28931676000](https://github.com/VeriSymbolic-AI/sva2verilog/actions/runs/28931676000)
   completed successfully for commit
@@ -68,7 +74,8 @@ Current project state:
   1 documented strict-liveness xfail; branch coverage remained 86.31%.
   Checkout and uv setup actions now run on pinned native Node.js 24 releases,
   all workflows declare read-only contents permission, and multi-clock tests use
-  isolated temporary sources. Remote same-commit qualification is still pending.
+  isolated temporary sources. Same-commit CI run `30686814681`, differential
+  nightly run `30686818970`, and Full Formal run `30686820029` all passed.
 - Fresh differential and distribution evidence: Icarus and Verilator fast each
   record 16 passed; date seed `20260801` slow sweeps each record 1 passed with
   64 Hypothesis examples; wheel/sdist out-of-tree smoke passed under Python 3.12
@@ -617,7 +624,8 @@ The immediate next work should be:
 5. Record a current-commit generated-RTL CI run with Verilator lint executing.
    **Done in run `30683023280`.**
 6. Keep CI, nightly, and Full Formal run IDs tied to the exact executable/workflow
-   baseline. **Done for `b055105`; do not attribute these runs to the release tag.**
+   baseline. **Done for `b055105` and `1841ed4`; do not attribute these runs to
+   the release tag or later documentation-only commits.**
 7. Continue converting the remaining 36 mutation survivors and 30 uncovered
    candidates into targeted semantic regressions, prioritizing
    importer/composer boundaries.
@@ -626,7 +634,7 @@ The immediate next work should be:
 9. Replace the multi-clock 2-DFF level crossing with an acknowledged event
    protocol, then add asynchronous ratio tests and CDC sign-off evidence.
 10. Upgrade Node.js 20-targeting pinned actions to native Node.js 24 versions.
-    **Implemented locally; same-commit remote qualification pending.**
+    **Done and remotely qualified at `1841ed4`.**
 11. FPGA prototype (FUT-03) — demand-pulled.
 12. C++ rewrite v2 (FUT-04) — demand-pulled.
 

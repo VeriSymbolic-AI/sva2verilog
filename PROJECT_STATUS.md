@@ -8,8 +8,10 @@
 
 sva2verilog 是一个开源的 SystemVerilog Assertion (SVA) 到可综合 RTL
 监控器编译器。v1.7.1 已于 2026-07-31 发布，修复了 v1.7.0 的完整契约语义
-缺陷。发布后的可执行代码与工作流基线 `b055105` 已完成同提交远端资格
-闭环；后续文档提交只记录该基线，不把文档 SHA 倒推为新的证明对象。
+缺陷。发布后的首个可执行代码与工作流基线 `b055105` 已完成同提交远端资格
+闭环；最新高优先级加固基线 `1841ed4` 也已完成同提交 CI、nightly 与
+Full Formal。后续纯文档提交只记录这些基线，不把文档 SHA 倒推为新的
+证明对象。
 
 - 发布状态：tag `v1.7.1` 指向 `8b5c063`；发布后资格基线为 `b055105`
 - 主 CI：run `30683023280` 全部 13 个 job 通过，包括 8 个
@@ -22,6 +24,10 @@ sva2verilog 是一个开源的 SystemVerilog Assertion (SVA) 到可综合 RTL
 - nightly differential：run `30683026683` 的 Icarus、Verilator 与完整
   mutation 三个 job 全部通过；干净 checkout 暴露的 `.artifacts` 父目录
   缺失问题已先由回归测试复现，再在同一基线中修复并远端验证
+- 最新同提交资格：`1841ed4` 的主 CI run `30686814681` 全部 13 个 job
+  通过；nightly run `30686818970` 的三个 job 通过；Full Formal run
+  `30686820029` 的六个分片通过。该组运行实际使用 Node.js 24 actions，
+  并覆盖最新 CDC 注入、oracle mutation 与测试隔离修复
 - 当前本地验证：完整 Icarus 1484 passed / 1 skipped / 1 xfailed，完整
   Verilator simulation 169 passed / 1 个已知后端限定 skip，branch
   coverage 86.31%，generated RTL 133 passed，Python 3.14 广泛轴 1247 passed /
@@ -45,7 +51,7 @@ nightly 干净 checkout 中发现 pytest 嵌套 `--basetemp` 缺少父目录，�
 逐构造的真实 source、独立 oracle、formal 深度/无界性与拒绝边界缺口。
 多时钟电平同步器的事件丢失/合并风险仍是独立的架构级 Trusted boundary。
 
-### 后续高优先级审计修复（本地已验证，远端待执行）
+### 后续高优先级审计修复（本地与同提交远端均已验证）
 
 - 修正可选 CDC 亚稳态注入器：由 LFSR 最低位导致的约 1/2 周期翻转，改为
   最大长度 255 周期非零序列中仅一次脉冲；零 seed 也被强制映射到非零状态。
@@ -62,9 +68,10 @@ nightly 干净 checkout 中发现 pytest 嵌套 `--basetemp` 缺少父目录，�
 最新本地门禁全部通过：ruff、mypy strict、冻结 lock 与 workflow YAML；
 完整 Icarus 1484 passed / 1 skipped / 1 xfailed；完整 Verilator simulation
 169 passed / 1 skipped；branch coverage 86.31%；generated RTL 133 passed；
-Full Formal 125 passed / 1 个已记录 strict-liveness xfail。该组新修复尚未
-取得同提交远端 CI/nightly/Full Formal run ID，因此暂不替代上文 `b055105`
-的远端证据，也不升级任何 Fully supported 行。
+Full Formal 125 passed / 1 个已记录 strict-liveness xfail。同一基线
+`1841ed4` 的远端 CI `30686814681`、nightly `30686818970` 与 Full Formal
+`30686820029` 也全部通过。该证据补充而不倒推改写 `b055105` 的历史记录，
+也不自动升级任何 Fully supported 行。
 
 ### 当前本地资格证据（2026-08-01）
 
@@ -361,7 +368,10 @@ RISK-01 纪律：预言机和参考监控器必须与 RTL 实现结构独立。�
 - K-state budget (>32) 和 CDC 边界是 NFA 引擎仅存的拒绝路径
 - 本机与远端均已使用 Verilator 5.028 完成 simulation、generated lint 与
   differential；workflow actions 已迁移到固定提交的 Node.js 24 原生版本，
-  但最新提交仍需取得远端运行证据
+  并已在 `1841ed4` 的三条远端工作流中执行通过
+- GitHub 托管 runner 仍会报告并行 uv cache reservation 冲突和预置
+  Homebrew tap trust 提示；二者未影响本轮 job 结论，但属于待降噪的 P2 CI
+  可维护性问题
 
 ## 未来规划
 
@@ -371,8 +381,8 @@ RISK-01 纪律：预言机和参考监控器必须与 RTL 实现结构独立。�
    上执行通过，run ID 已写入本报告与支持矩阵。
 2. 逐行重评 `SUPPORT_MATRIX.md`，只在完整证据链闭合后升级；流水线全绿
    本身不自动等于 `Fully supported`。
-3. Node.js 24 原生 pinned actions 与最小 token 权限已落地；待同提交远端
-   workflow 验证后关闭运行环境迁移风险。
+3. Node.js 24 原生 pinned actions 与最小 token 权限已落地，并在
+   `1841ed4` 的三条同提交远端 workflow 中通过。
 4. `v1.7.1` 已发布且 tag 不改写；发布资格证据应追加到新的修复 SHA，不能
    倒推声称 tag 本身已经通过后来才运行的门禁。
 
@@ -394,9 +404,10 @@ RISK-01 纪律：预言机和参考监控器必须与 RTL 实现结构独立。�
 语言实现风险 RISK-00 至 RISK-06 已闭环或降级。本轮新增的制品完整性、
 CI 工具漂移、差分构建缓存、状态文档漂移和 nightly 干净 checkout 问题
 均已修复并取得同提交远端证据。最新审计又完成 Node.js 24 迁移、最小权限、
-测试隔离和部分 mutation 债务收敛，但仍待同提交远端执行。架构上仍未闭环
-的是逐构造证据链、mutation survivors、bounded-liveness 证明边界，以及
-multi-clock CDC 事件交付协议。
+测试隔离和部分 mutation 债务收敛，且已取得 `1841ed4` 的同提交远端证据。
+架构上仍未闭环的是逐构造证据链、mutation survivors、bounded-liveness
+证明边界，以及 multi-clock CDC 事件交付协议；此外还有非阻断的 cache/tap
+runner 注释需要降噪。
 
 ## 竞争定位
 

@@ -30,6 +30,18 @@ artifact-root defect that was reproduced by a workflow regression and fixed in
 the same baseline. Yosys synthesis remains complementary structural evidence,
 not an equivalent replacement for Verilator or formal equivalence.
 
+Latest follow-on hardening baseline: commit
+`1841ed40a149ef6971225fe00255e9587d5995ae` completed all three remote gates:
+
+- CI run [`30686814681`](https://github.com/VeriSymbolic-AI/sva2verilog/actions/runs/30686814681):
+  all 13 jobs passed, including the eight dual-platform simulator axes and
+  generated RTL gates under the pinned Node.js 24 actions.
+- Differential nightly run [`30686818970`](https://github.com/VeriSymbolic-AI/sva2verilog/actions/runs/30686818970):
+  Icarus and Verilator fast/slow differential plus the full Python and 12/12
+  RTL-template mutation sweeps passed.
+- Full Formal run [`30686820029`](https://github.com/VeriSymbolic-AI/sva2verilog/actions/runs/30686820029):
+  all six formal shards passed.
+
 Fresh local qualification on 2026-08-01 records full Icarus 1484 passed /
 1 skipped / 1 xfailed, generated RTL 133 passed, Full Formal 125 passed /
 1 documented strict-liveness xfail, branch coverage 86.31%, Python 3.14 broad
@@ -37,11 +49,10 @@ non-simulation 1247 passed / 1 xfailed, and dual-backend fast/slow differential
 passes. A full local Verilator simulation axis also records 169 passed / 1 known
 backend-specific skip. Python mutation is 266/302 killed (88.1%, with 36
 survivors and 30 uncovered candidates); reviewed RTL-template mutation is 12/12.
-These results remain important local counts; the named same-commit remote runs
-above close the
-historical Linux, nightly, and Full Formal execution gap. The follow-on Node.js
-24 workflow and semantic hardening changes still require new same-commit remote
-runs before they can replace that baseline.
+These results remain important local counts; the named `1841ed4` same-commit
+remote runs close the follow-on Linux, nightly, and Full Formal execution gap.
+They do not close per-construct independent-reference, proof-depth, CDC, or
+industrial-corpus gaps.
 
 **Qualification overlay:** in the detailed row ledger below, legacy cell text
 such as `current-commit rerun pending`, `pending-remote`, or `current worktree
