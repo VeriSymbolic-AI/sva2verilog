@@ -8,9 +8,20 @@ from sva2rtl.composer import (
     _nfa_reachable_states,
     _render_multi_state_d_body,
     _render_state_d_body,
+    _try_lift_operand,
     compose,
 )
-from sva2rtl.ir import BoolExpr, ClockSpec, PropBoundedAlways, SeqConcat, SourceLoc
+from sva2rtl.ir import (
+    BoolExpr,
+    ClockedSeq,
+    ClockSpec,
+    PropBoundedAlways,
+    PropImplication,
+    SeqConcat,
+    SeqIntersect,
+    SignalFunc,
+    SourceLoc,
+)
 
 _LOC = SourceLoc("composer_boundaries.sv", 1, 1)
 
@@ -103,3 +114,66 @@ def test_bounded_always_positive_upper_bound_sizes_counter() -> None:
     )
 
     assert checker.params["cnt_width"] == "4"
+
+
+def test_multiclock_delay_before_switch_preserves_root_negedge() -> None:
+    root_clock = ClockSpec(edge="negedge", signal="clk1", source_loc=_LOC)
+    switched = ClockedSeq(
+        clock=ClockSpec(edge="posedge", signal="clk2", source_loc=_LOC),
+        body=_bool("b"),
+        source_loc=_LOC,
+    )
+    node = SeqConcat(
+        elements=(_bool("a"), switched),
+        delays=((1, 1),),
+        source_loc=_LOC,
+    )
+
+    checker = compose(node, root_clock, "multiclock_negedge", "a ##1 @(posedge clk2) b")
+    first_delay = next(
+        child for child in checker.children if child.template_name == "concat_delay"
+    )
+
+    assert first_delay.params["clock_signal"] == "clk1"
+    assert first_delay.params["clock_edge"] == "negedge"
+
+
+def test_implication_nfa_thread_allocator_never_expands_past_four_slots() -> None:
+    consequence = SeqConcat(
+        elements=(_bool("b"), _bool("c")),
+        delays=((2, 2),),
+        source_loc=_LOC,
+    )
+    node = PropImplication(
+        antecedent=_bool("a"),
+        consequent=consequence,
+        overlapping=True,
+        source_loc=_LOC,
+    )
+
+    checker = compose(
+        node,
+        ClockSpec(edge="posedge", signal="clk", source_loc=_LOC),
+        "thread_budget",
+        "a |-> b ##2 c",
+    )
+
+    assert checker.params["nfa_thread_slots"] == "4"
+    assert checker.children[0].params["nfa_thread_slots"] == "4"
+
+
+def test_nested_intersect_lift_fails_closed_when_exactly_one_side_is_unsupported() -> None:
+    operand = SeqIntersect(
+        left=_bool("a"),
+        right=SignalFunc(func_name="rose", signal="b", source_loc=_LOC),
+        source_loc=_LOC,
+    )
+
+    lifted = _try_lift_operand(
+        operand,
+        ClockSpec(edge="posedge", signal="clk", source_loc=_LOC),
+        "one_invalid_side",
+        "a intersect $rose(b)",
+    )
+
+    assert lifted is None

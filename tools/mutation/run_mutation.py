@@ -81,6 +81,12 @@ MUTATION_TARGETS: dict[str, list[str]] = {
 }
 
 TARGET_KILL_RATE = 0.85
+MODULE_KILL_RATE_FLOORS: dict[str, float] = {
+    "bool_semantics.py": 1.00,
+    "behavioral_oracle.py": 0.95,
+    "composer.py": 0.90,
+    "ast_importer.py": 0.86,
+}
 
 # ── Mutation operators ────────────────────────────────────────────────────
 
@@ -142,10 +148,10 @@ class MutationVisitor(ast.NodeTransformer):
         self.mutations.append(
             Mutation(
                 module=self.module_name,
-                line_no=node.lineno,
-                col_offset=node.col_offset,
-                end_line_no=node.end_lineno,
-                end_col_offset=node.end_col_offset,
+                line_no=int(getattr(node, "lineno")),
+                col_offset=int(getattr(node, "col_offset")),
+                end_line_no=int(getattr(node, "end_lineno")),
+                end_col_offset=int(getattr(node, "end_col_offset")),
                 original=original,
                 mutated=mutated,
                 operator=operator,
@@ -371,11 +377,15 @@ def run_module(filepath: Path, module_name: str, sample_n: int = 0) -> ModuleRep
     return report
 
 
-def mutation_exit_code(total: int, killed: int) -> int:
+def mutation_exit_code(
+    total: int,
+    killed: int,
+    target: float = TARGET_KILL_RATE,
+) -> int:
     """Return a failing status when a non-empty sweep misses its quality target."""
     if total == 0:
         return 0
-    return 0 if killed / total >= TARGET_KILL_RATE else 1
+    return 0 if killed / total >= target else 1
 
 
 def main() -> int:
@@ -430,9 +440,11 @@ def main() -> int:
     for r in reports:
         bar = "█" * int(r.kill_rate * 20) + "░" * (20 - int(r.kill_rate * 20))
         valid_total = r.killed + r.survived
+        target = MODULE_KILL_RATE_FLOORS.get(r.module, TARGET_KILL_RATE)
         print(
             f"  {r.module:30s} {bar} {r.kill_rate:.0%} "
-            f"({r.killed}/{valid_total}; invalid={r.invalid}; uncovered={r.uncovered})"
+            f"({r.killed}/{valid_total}; floor={target:.0%}; "
+            f"invalid={r.invalid}; uncovered={r.uncovered})"
         )
 
     print(f"\n  OVERALL: {total_killed}/{total_mut} = {total_killed / max(total_mut, 1):.1%}")
@@ -447,11 +459,21 @@ def main() -> int:
                 print(f"    [{r.module}:{s.line_no}] {s.operator}")
                 print(f"      {s.original[:80]}")
 
-    print(f"\n  Target kill rate: {TARGET_KILL_RATE:.0%}")
+    print(f"\n  Default kill-rate floor: {TARGET_KILL_RATE:.0%}")
+    all_modules_pass = True
     if total_mut > 0:
-        status = "PASS" if mutation_exit_code(total_mut, total_killed) == 0 else "BELOW TARGET"
+        all_modules_pass = all(
+            mutation_exit_code(
+                report.killed + report.survived,
+                report.killed,
+                MODULE_KILL_RATE_FLOORS.get(report.module, TARGET_KILL_RATE),
+            )
+            == 0
+            for report in reports
+        )
+        status = "PASS" if all_modules_pass else "BELOW MODULE FLOOR"
         print(f"  Status: {status}")
-    return mutation_exit_code(total_mut, total_killed)
+    return 0 if all_modules_pass else 1
 
 
 if __name__ == "__main__":

@@ -35,6 +35,15 @@ def test_mutation_exit_code_enforces_target(
     assert run_mutation.mutation_exit_code(total, killed) == expected
 
 
+def test_mutation_exit_code_accepts_module_specific_floor() -> None:
+    assert run_mutation.mutation_exit_code(100, 90, target=0.90) == 0
+    assert run_mutation.mutation_exit_code(100, 89, target=0.90) == 1
+
+
+def test_every_semantic_module_has_an_explicit_kill_rate_floor() -> None:
+    assert set(run_mutation.MUTATION_TARGETS) == set(run_mutation.MODULE_KILL_RATE_FLOORS)
+
+
 def test_run_tests_uses_an_isolated_bytecode_cache(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

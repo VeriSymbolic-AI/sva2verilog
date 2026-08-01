@@ -2,7 +2,13 @@
 
 from __future__ import annotations
 
-from sva2rtl.behavioral_oracle import SVABehavioralSim, simulate_checker_hierarchy
+import pytest
+
+from sva2rtl.behavioral_oracle import (
+    SVABehavioralSim,
+    _eval_nfa_guard,
+    simulate_checker_hierarchy,
+)
 from sva2rtl.ir import CheckerNode, SourceLoc
 
 _LOC = SourceLoc("mutation-boundary.sv", 1, 1)
@@ -14,6 +20,7 @@ def _hierarchy_node(
     params: dict[str, str],
     *,
     observed_signal: str | None = None,
+    children: tuple[CheckerNode, ...] = (),
 ) -> CheckerNode:
     observed = () if observed_signal is None else ((observed_signal, observed_signal),)
     return CheckerNode(
@@ -22,7 +29,7 @@ def _hierarchy_node(
         params=params,
         observed_signals=observed,
         source_loc=_LOC,
-        children=(),
+        children=children,
     )
 
 
@@ -235,3 +242,186 @@ def test_external_disable_i_cancels_pending_composite_verdict() -> None:
     )
 
     assert all(not output["pass"] and not output["fail"] for output in outputs[1:])
+
+
+def test_concat_only_first_child_receives_external_start() -> None:
+    first = _hierarchy_node("rose", "concat_first", {"depth": "1"}, observed_signal="a")
+    second = _hierarchy_node("rose", "concat_second", {"depth": "1"}, observed_signal="b")
+    top = _hierarchy_node(
+        "seq_concat_top",
+        "concat_start_routing",
+        {},
+        children=(first, second),
+    )
+
+    outputs = simulate_checker_hierarchy(
+        top,
+        [{"start": True, "a": False, "b": True}],
+    )
+
+    assert outputs[0]["pass"] is False
+
+
+def test_first_match_waits_for_delayed_body_completion_before_locking() -> None:
+    body = _hierarchy_node(
+        "delay_fixed",
+        "first_match_delayed_body",
+        {"delay_min": "2", "delay_max": "2"},
+    )
+    top = _hierarchy_node(
+        "first_match_top",
+        "first_match_delayed",
+        {},
+        children=(body,),
+    )
+
+    outputs = simulate_checker_hierarchy(
+        top,
+        [{"start": True}, {"start": False}, {"start": False}],
+    )
+
+    assert outputs[0]["pass"] is False
+    assert outputs[1]["pass"] is True
+
+
+def test_first_match_suppresses_later_completions_in_same_range() -> None:
+    body = _hierarchy_node(
+        "delay_range",
+        "first_match_ranged_body",
+        {"delay_min": "2", "delay_max": "3"},
+    )
+    top = _hierarchy_node(
+        "first_match_top",
+        "first_match_ranged",
+        {},
+        children=(body,),
+    )
+
+    outputs = simulate_checker_hierarchy(
+        top,
+        [{"start": True}, {"start": False}, {"start": False}],
+    )
+
+    assert [output["pass"] for output in outputs] == [False, True, False]
+
+
+@pytest.mark.parametrize("early_side", ["left", "right"])
+def test_prop_or_retains_early_failure_until_other_side_finishes(early_side: str) -> None:
+    immediate = _hierarchy_node(
+        "rose",
+        f"or_immediate_{early_side}",
+        {"depth": "1"},
+        observed_signal="a",
+    )
+    delayed = _hierarchy_node(
+        "s_eventually",
+        f"or_delayed_{early_side}",
+        {"lo": "0", "hi": "1"},
+        observed_signal="b",
+    )
+    children = (immediate, delayed) if early_side == "left" else (delayed, immediate)
+    top = _hierarchy_node("prop_or", f"or_latched_{early_side}", {}, children=children)
+
+    outputs = simulate_checker_hierarchy(
+        top,
+        [
+            {"start": True, "a": False, "b": False},
+            {"start": False, "a": False, "b": False},
+            {"start": False, "a": False, "b": False},
+        ],
+    )
+
+    assert [output["fail"] for output in outputs] == [False, False, True]
+
+
+def test_prop_or_clears_latched_failures_before_next_attempt() -> None:
+    immediate = _hierarchy_node(
+        "rose", "or_clear_immediate", {"depth": "1"}, observed_signal="a"
+    )
+    delayed = _hierarchy_node(
+        "s_eventually",
+        "or_clear_delayed",
+        {"lo": "0", "hi": "1"},
+        observed_signal="b",
+    )
+    top = _hierarchy_node(
+        "prop_or", "or_clear_after_verdict", {}, children=(immediate, delayed)
+    )
+
+    outputs = simulate_checker_hierarchy(
+        top,
+        [
+            {"start": True, "a": False, "b": False},
+            {"start": False, "a": False, "b": False},
+            {"start": False, "a": False, "b": False},
+            {"start": True, "a": False, "b": False},
+        ],
+    )
+
+    assert outputs[2]["fail"] is True
+    assert outputs[3]["fail"] is False
+
+
+def test_prop_and_retains_early_pass_until_other_side_finishes() -> None:
+    immediate = _hierarchy_node(
+        "stable",
+        "and_immediate",
+        {"depth": "1"},
+        observed_signal="a",
+    )
+    delayed = _hierarchy_node(
+        "s_eventually",
+        "and_delayed",
+        {"lo": "1", "hi": "1"},
+        observed_signal="b",
+    )
+    top = _hierarchy_node("prop_and", "and_latched", {}, children=(immediate, delayed))
+
+    outputs = simulate_checker_hierarchy(
+        top,
+        [
+            {"start": True, "a": False, "b": False},
+            {"start": False, "a": False, "b": True},
+            {"start": False, "a": False, "b": False},
+        ],
+    )
+
+    assert outputs[2]["pass"] is True
+
+
+def test_hierarchical_implication_requires_two_children_and_evaluates_both() -> None:
+    antecedent = _hierarchy_node(
+        "delay_fixed", "imp_ant", {"delay_min": "0", "delay_max": "0"}
+    )
+    consequent = _hierarchy_node(
+        "delay_fixed", "imp_cons", {"delay_min": "0", "delay_max": "0"}
+    )
+    top = _hierarchy_node(
+        "overlap_bitvec",
+        "hierarchical_implication",
+        {"bv_width": "1"},
+        children=(antecedent, consequent),
+    )
+
+    outputs = simulate_checker_hierarchy(top, [{"start": True}])
+
+    assert outputs[0]["pass"] is True
+
+
+def test_sampled_leaf_uses_observed_port_name_instead_of_fallback() -> None:
+    node = _hierarchy_node("rose", "named_observed", {"depth": "1"}, observed_signal="data")
+
+    outputs = simulate_checker_hierarchy(
+        node,
+        [
+            {"start": True, "data": False},
+            {"start": True, "data": True},
+        ],
+    )
+
+    assert outputs[1]["pass"] is True
+
+
+def test_nfa_guard_rejects_missing_closing_parenthesis() -> None:
+    with pytest.raises(ValueError, match="unbalanced parens"):
+        _eval_nfa_guard("(a", {"a": True})
