@@ -20,6 +20,9 @@
 {% for s in range(1, T) %}
     assign alloc[{{ s }}] = start & slot_free[{{ s }}] & ~(|alloc[{{ s }} - 1:0]);
 {% endfor %}
+    {{ signal_type(verilog_mode) }} overflow_flag_q;
+    wire overflow_event;
+    assign overflow_event = start & ~(|slot_free) & ~overflow_flag_q;
 
     // ── Per-slot combinational next-state logic ──────────────────────
     // Each slot_s_now merges the slot's state_q slice with the
@@ -47,25 +50,29 @@
     assign any_pass = |({{ '{' }}state_d{{ '}' }} & {{ nfa_states }}'b{{ nfa_accept_bits }});
 {% else %}
     wire [{{ T }} - 1:0] slot_pass;
+    wire [{{ T }} - 1:0] slot_live;
+    wire [{{ T }} - 1:0] slot_fail;
+    wire [STATE_BITS-1:0] state_live_d;
 {% for s in range(T) %}
     assign slot_pass[{{ s }}] = |({{ '{' }}state_d[{{ (s + 1) * K - 1 }}:{{ s * K }}]{{ '}' }} & {{ nfa_states }}'b{{ nfa_accept_bits }});
+    assign slot_live[{{ s }}] = alloc[{{ s }}] | (|state_q[{{ (s + 1) * K - 1 }}:{{ s * K }}]);
+    assign slot_fail[{{ s }}] = slot_live[{{ s }}]
+                              & (state_d[{{ (s + 1) * K - 1 }}:{{ s * K }}] == {{ nfa_states }}'d0)
+                              & ~slot_pass[{{ s }}];
+    assign state_live_d[{{ (s + 1) * K - 1 }}:{{ s * K }}] = slot_pass[{{ s }}]
+        ? {{ nfa_states }}'d0
+        : state_d[{{ (s + 1) * K - 1 }}:{{ s * K }}];
 {% endfor %}
     assign any_pass = |slot_pass;
 {% endif %}
-    assign pass_d = any_pass & attempt_fired_q;
+    assign pass_d = any_pass;
 
     // fail_d: property NFAs fail on dead-end after attempt_fired.
     //   Multi-thread: fail when attempt_fired AND all slots are zero
     //   state (no active threads) AND no pass.
     {{ wire_type(verilog_mode) }} fail_d;
 {% if nfa_kind == "property" %}
-    wire all_dead;
-{% if T == 1 %}
-    assign all_dead = (state_d == {{ nfa_states }}'d0);
-{% else %}
-    assign all_dead = (state_d == {{ nfa_states }}'d0);
-{% endif %}
-    assign fail_d = attempt_fired_q & all_dead & ~pass_d;
+    assign fail_d = |slot_fail;
 {% else %}
     assign fail_d = 1'b0;
 {% endif %}
@@ -73,22 +80,32 @@
     // ── Registered outputs (always block) ────────────────────────────
 {{ always_block_header(verilog_mode, clock_edge, clock_signal) }}
         if (!rst_n || disable_i) begin
-            state_q <= {{ nfa_states }}'d0;
+            state_q <= {STATE_BITS{1'b0}};
             active_q <= 1'b0;
             pass_q <= 1'b0;
             fail_q <= 1'b0;
             disabled_q <= 1'b0;
+            overflow_flag_q <= 1'b0;
+        end else if (overflow_flag_q || overflow_event) begin
+            state_q <= {STATE_BITS{1'b0}};
+            active_q <= 1'b0;
+            pass_q <= 1'b0;
+            fail_q <= 1'b0;
+            disabled_q <= 1'b0;
+            overflow_flag_q <= 1'b1;
         end else begin
-            state_q <= state_d;
-            active_q <= |state_d;
+            state_q <= state_live_d;
+            active_q <= |state_live_d;
             pass_q <= pass_d;
             fail_q <= fail_d;
             disabled_q <= 1'b0;
+            overflow_flag_q <= 1'b0;
         end
     end
 
-    assign active = disable_i ? 1'b0 : active_q;
-    assign pass = disable_i ? 1'b0 : pass_q;
-    assign fail = disable_i ? 1'b0 : fail_q;
+    assign active = disable_i ? 1'b0 : (overflow_flag_q ? 1'b0 : active_q);
+    assign pass = disable_i ? 1'b0 : (overflow_flag_q ? 1'b0 : pass_q);
+    assign fail = disable_i ? 1'b0 : (overflow_flag_q ? 1'b1 : fail_q);
+    assign overflow_flag = disable_i ? 1'b0 : overflow_flag_q;
     assign attempt_fired = attempt_fired_q;
     assign disabled_o = disable_i;

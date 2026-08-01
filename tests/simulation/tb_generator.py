@@ -54,7 +54,9 @@ from sva2rtl.ir import CheckerNode
 
 # ── Templates with overflow_flag output port ──────────────────────────────────
 
-TEMPLATES_WITH_OVERFLOW = frozenset({"overlap_bitvec", "nonoverlap"})
+TEMPLATES_WITH_OVERFLOW = frozenset(
+    {"overlap_bitvec", "nonoverlap", "nfa_generic", "implication_nfa"}
+)
 
 
 # ── Public helpers ────────────────────────────────────────────────────────────
@@ -205,24 +207,18 @@ def generate_testbench(
         _w(f"        @(posedge {clock_signal});")
         if capture_contract and has_overflow_flag:
             _w(
-                "        $display(\"%b %b %b %b %b %b\","
+                '        $display("%b %b %b %b %b %b",'
                 " active, pass_out, fail_out, attempt_fired, disabled_o, overflow_flag);"
             )
         elif capture_contract:
             _w(
-                "        $display(\"%b %b %b %b %b\","
+                '        $display("%b %b %b %b %b",'
                 " active, pass_out, fail_out, attempt_fired, disabled_o);"
             )
         elif has_overflow_flag:
-            _w(
-                "        $display(\"%b %b %b %b\","
-                " active, pass_out, fail_out, overflow_flag);"
-            )
+            _w('        $display("%b %b %b %b", active, pass_out, fail_out, overflow_flag);')
         else:
-            _w(
-                "        $display(\"%b %b %b\","
-                " active, pass_out, fail_out);"
-            )
+            _w('        $display("%b %b %b", active, pass_out, fail_out);')
         if i < len(stimulus) - 1:
             # Move to negedge for next stimulus (skip for last cycle)
             _w(f"        @(negedge {clock_signal});")
@@ -294,24 +290,27 @@ def run_simulation(
 
     if simulator == "iverilog":
         return _run_simulation_iverilog(
-            module_name, sv_sources, tb_code, work_dir=work_dir,
+            module_name,
+            sv_sources,
+            tb_code,
+            work_dir=work_dir,
             has_overflow_flag=has_overflow_flag,
             capture_contract=capture_contract,
         )
     elif simulator == "verilator":
         if stimulus is None:
-            raise ValueError(
-                "stimulus is required when simulator='verilator'"
-            )
+            raise ValueError("stimulus is required when simulator='verilator'")
         if extra_inputs is None:
-            raise ValueError(
-                "extra_inputs is required when simulator='verilator'"
-            )
+            raise ValueError("extra_inputs is required when simulator='verilator'")
         return _run_simulation_verilator(
-            module_name, sv_sources, tb_code, work_dir=work_dir,
+            module_name,
+            sv_sources,
+            tb_code,
+            work_dir=work_dir,
             has_overflow_flag=has_overflow_flag,
             capture_contract=capture_contract,
-            stimulus=stimulus, extra_inputs=extra_inputs,
+            stimulus=stimulus,
+            extra_inputs=extra_inputs,
             clock_signal=clock_signal,
         )
     else:
@@ -393,13 +392,16 @@ def _verilator_timing_flag(verilator: str) -> str:
     try:
         result = subprocess.run(
             [verilator, "--version"],
-            capture_output=True, text=True, timeout=10,
+            capture_output=True,
+            text=True,
+            timeout=10,
             check=False,
         )
     except (OSError, subprocess.TimeoutExpired):
         return "--timing"  # safest fallback
 
     import re
+
     m = re.search(r"Verilator\s+(\d+)\.(\d+)", result.stdout)
     if m is None:
         return "--timing"
@@ -489,11 +491,15 @@ def _run_simulation_verilator(
     sim_path = build_dir / "Vdut"
     compile_command = [
         verilator,
-        "--cc", "--exe", "--build",
+        "--cc",
+        "--exe",
+        "--build",
         "-Wno-fatal",
         "-Wall",
-        "--top-module", module_name,
-        "-o", str(sim_path),
+        "--top-module",
+        module_name,
+        "-o",
+        str(sim_path),
         str(dut_path),
         str(wrapper_path),
     ]
@@ -578,8 +584,8 @@ def _parse_output(
             continue
         row: dict[str, bool] = {
             "active": parts[0] == "1",
-            "pass":   parts[1] == "1",
-            "fail":   parts[2] == "1",
+            "pass": parts[1] == "1",
+            "fail": parts[2] == "1",
         }
         if capture_contract and len(parts) >= 5:
             row["attempt_fired"] = parts[3] == "1"

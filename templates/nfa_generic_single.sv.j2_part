@@ -25,15 +25,26 @@
     // ── Registered outputs (1-cycle latency start → pass) ────────────
     {{ signal_type(verilog_mode) }} active_q, pass_q, fail_q, disabled_q;
 
+    // A single-slot monitor cannot accept another start while its state
+    // is live.  Treat slot exhaustion as a visible, fail-closed condition
+    // instead of silently dropping the new attempt.
+    {{ signal_type(verilog_mode) }} overflow_flag_q;
+    wire overflow_event;
+    assign overflow_event = start & (|state_q) & ~overflow_flag_q;
+
     // pass_d: any state_d bit in the accept mask is set.
     {{ wire_type(verilog_mode) }} pass_d;
     assign pass_d = |({{ '{' }}state_d{{ '}' }} & {{ nfa_states }}'b{{ nfa_accept_bits }});
+    wire [{{ K - 1 }}:0] state_live_d;
+    assign state_live_d = pass_d ? {{ nfa_states }}'d0 : state_d;
 
     // fail_d: property NFAs fail on dead-end after attempt_fired.
     //   sequence NFAs never fail here (vacuous drop, per v1.5-ROADMAP G1.2).
     {{ wire_type(verilog_mode) }} fail_d;
 {% if nfa_kind == "property" %}
-    assign fail_d = attempt_fired_q & (state_d == {{ nfa_states }}'d0) & ~pass_d;
+    wire live_attempt;
+    assign live_attempt = start | (|state_q);
+    assign fail_d = live_attempt & (state_d == {{ nfa_states }}'d0) & ~pass_d;
 {% else %}
     assign fail_d = 1'b0;
 {% endif %}
@@ -45,20 +56,33 @@
             pass_q <= 1'b0;
             fail_q <= 1'b0;
             disabled_q <= 1'b0;
+            overflow_flag_q <= 1'b0;
+        end else if (overflow_flag_q || overflow_event) begin
+            state_q <= {{ nfa_states }}'d0;
+            active_q <= 1'b0;
+            pass_q <= 1'b0;
+            fail_q <= 1'b0;
+            disabled_q <= 1'b0;
+            overflow_flag_q <= 1'b1;
         end else begin
             // state_now already merged start-seed with state_q combi-
             // nationally, so state_d already reflects the "just-started"
             // attempt. Register state_d as the new state_q.
-            state_q <= state_d;
-            active_q <= |state_d;
+            // An accepting thread is complete.  Retire it immediately so
+            // the accept state cannot die one cycle later and emit a false
+            // failure verdict.
+            state_q <= state_live_d;
+            active_q <= |state_live_d;
             pass_q <= pass_d;
             fail_q <= fail_d;
             disabled_q <= 1'b0;
+            overflow_flag_q <= 1'b0;
         end
     end
 
-    assign active = disable_i ? 1'b0 : active_q;
-    assign pass = disable_i ? 1'b0 : pass_q;
-    assign fail = disable_i ? 1'b0 : fail_q;
+    assign active = disable_i ? 1'b0 : (overflow_flag_q ? 1'b0 : active_q);
+    assign pass = disable_i ? 1'b0 : (overflow_flag_q ? 1'b0 : pass_q);
+    assign fail = disable_i ? 1'b0 : (overflow_flag_q ? 1'b1 : fail_q);
+    assign overflow_flag = disable_i ? 1'b0 : overflow_flag_q;
     assign attempt_fired = attempt_fired_q;
     assign disabled_o = disable_i;

@@ -133,8 +133,16 @@ only stable-interface diagnostics such as intentionally unused public ports.
 
 **Updated 2026-07-26:** the gate also checks the standard top-level
 `rst_n/start/disable_i/active/pass/fail/attempt_fired/disabled_o` contract on
-all 26 representative generated monitors. The combined generated gate records
+all 26 representative generated monitors, plus `overflow_flag` on templates
+with bounded attempt allocators. The combined generated gate records
 **133 passed, 0 skipped** locally.
+
+**Updated 2026-08-01:** `nfa_generic` and `implication_nfa` now expose the
+optional `overflow_flag` contract. A start presented while all NFA thread slots
+are occupied is no longer silently dropped: overflow is sticky and fail-closed
+until reset or external disable. Accepting threads retire immediately, and a
+dead thread emits one failure verdict instead of repeatedly failing because the
+public `attempt_fired` evidence bit is sticky.
 
 Representative cases live in `tests/generated_rtl_cases.py`; Yosys tests live
 in `tests/test_synthesis_gates.py`; Verilator lint tests live in

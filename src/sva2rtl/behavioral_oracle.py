@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import re as _re_oracle
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, cast
 
 from sva2rtl.bool_semantics import deserialize_bool_expr, eval_bool_expr
 
@@ -1251,7 +1251,14 @@ class _HierarchicalSim:
 
         Fail semantics (per v1.5-ROADMAP G1.2 correction):
           sequence NFA: dead-end = vacuous no-match (fail = False).
-          property NFA: dead-end after attempt_fired without accept = fail.
+          property NFA: each live attempt fails exactly once when it reaches a
+          dead-end without accept.  Historical ``attempt_fired`` state is not
+          used for this decision because it is intentionally sticky.
+
+        Concurrency semantics mirror the bounded hardware implementation: each
+        configured NFA thread slot owns an independent active-state set.  A new
+        start with no free slot sets a sticky, fail-closed overflow verdict
+        until reset / disable.
 
         Guard evaluation is done by ``_eval_nfa_guard`` (recursive descent,
         independent of any RTL evaluator — this is the whole point of D2).
@@ -1266,8 +1273,10 @@ class _HierarchicalSim:
         st = self._nfa_state.setdefault(
             key,
             {
-                "active": frozenset(),
-                "attempt_fired": False,
+                "slots": tuple(
+                    frozenset() for _ in range(int(node.params.get("nfa_thread_slots", "1")))
+                ),
+                "overflow": False,
                 "o_pass": False,
                 "o_fail": False,
                 "o_active": False,
@@ -1277,35 +1286,64 @@ class _HierarchicalSim:
         # Registered outputs: emit what was scheduled last tick.
         out = {
             "pass": bool(st["o_pass"]),
-            "fail": bool(st["o_fail"]),
-            "active": bool(st["o_active"]),
-            "overflow": False,
+            "fail": bool(st["overflow"]) or bool(st["o_fail"]),
+            "active": False if bool(st["overflow"]) else bool(st["o_active"]),
+            "overflow": bool(st["overflow"]),
         }
 
-        # Compute new active set for this cycle.
-        active: set[int] = set(st["active"])  # type: ignore[call-overload]
+        disabled = bool(signals.get("disable", False)) or bool(signals.get("disable_i", False))
+        slot_count = int(node.params.get("nfa_thread_slots", "1"))
+        if disabled:
+            st["slots"] = tuple(frozenset() for _ in range(slot_count))
+            st["overflow"] = False
+            st["o_pass"] = False
+            st["o_fail"] = False
+            st["o_active"] = False
+            return {"pass": False, "fail": False, "active": False, "overflow": False}
+
+        if bool(st["overflow"]):
+            st["o_pass"] = False
+            st["o_fail"] = False
+            st["o_active"] = False
+            return out
+
+        stored_slots = cast(tuple[frozenset[int], ...], st["slots"])
+        slots = [set(slot) for slot in stored_slots]
+        allocated: int | None = None
         if signals.get("start", False):
-            active.add(0)
-            st["attempt_fired"] = True
+            allocated = next((i for i, slot in enumerate(slots) if not slot), None)
+            if allocated is None:
+                st["slots"] = tuple(frozenset() for _ in range(slot_count))
+                st["overflow"] = True
+                st["o_pass"] = False
+                st["o_fail"] = False
+                st["o_active"] = False
+                return out
 
-        next_active: set[int] = set()
-        for from_s, guard, to_s in transitions:
-            if from_s in active and _eval_nfa_guard(guard, signals):
-                next_active.add(to_s)
+        next_slots: list[frozenset[int]] = []
+        slot_passes: list[bool] = []
+        slot_failures: list[bool] = []
+        for index, prior in enumerate(slots):
+            active = set(prior)
+            if index == allocated:
+                active.add(0)
 
-        nxt_pass = bool(next_active & accept)
-        if nfa_kind == "property":
-            # Dead-end after attempt_fired without accept = fail.
-            nxt_fail = bool(st["attempt_fired"]) and (not next_active) and (not nxt_pass)
-        else:  # "sequence"
-            # Dead-end = vacuous no-match, NOT fail.
-            nxt_fail = False
+            next_active: set[int] = set()
+            for from_s, guard, to_s in transitions:
+                if from_s in active and _eval_nfa_guard(guard, signals):
+                    next_active.add(to_s)
+
+            passed = bool(next_active & accept)
+            failed = nfa_kind == "property" and bool(active) and not next_active and not passed
+            next_slots.append(frozenset() if passed else frozenset(next_active))
+            slot_passes.append(passed)
+            slot_failures.append(failed)
 
         # Schedule next-cycle outputs (1-cycle registered latency).
-        st["active"] = frozenset(next_active)
-        st["o_pass"] = nxt_pass
-        st["o_fail"] = nxt_fail
-        st["o_active"] = bool(next_active)
+        st["slots"] = tuple(next_slots)
+        st["o_pass"] = any(slot_passes)
+        st["o_fail"] = any(slot_failures)
+        st["o_active"] = any(next_slots)
         return out
 
     def _eval_operand(self, node: CheckerNode, signals: dict[str, bool]) -> bool:
@@ -1365,19 +1403,24 @@ class _HierarchicalSim:
         if not node.children:
             return {"pass": False, "fail": False, "active": False, "overflow": False}
 
+        disabled = bool(signals.get("disable", False)) or bool(signals.get("disable_i", False))
         ant_guard = str(node.params.get("ant_guard", "1'b0"))
         start = bool(signals.get("start", False))
-        ant_match = start and _eval_nfa_guard(ant_guard, signals)
+        ant_match = (not disabled) and start and _eval_nfa_guard(ant_guard, signals)
 
         overlapping = str(node.params.get("overlapping", "true")).lower() in ("true", "1", "yes")
         module = node.module_name
         if not hasattr(self, "_impl_ant_q"):
             self._impl_ant_q: dict[str, bool] = {}
-        if overlapping:
+        if disabled:
+            con_start = False
+            self._impl_ant_q[module] = False
+        elif overlapping:
             con_start = ant_match
         else:
             con_start = self._impl_ant_q.get(module, False)
-        self._impl_ant_q[module] = ant_match
+        if not disabled:
+            self._impl_ant_q[module] = ant_match
 
         con_signals = dict(signals)
         con_signals["start"] = con_start
@@ -1387,7 +1430,7 @@ class _HierarchicalSim:
             "pass": con_out["pass"],
             "fail": con_out["fail"],
             "active": con_out["active"],
-            "overflow": False,
+            "overflow": con_out["overflow"],
         }
 
 

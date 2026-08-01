@@ -155,11 +155,17 @@ module sva_monitor_<name> (
     output logic pass,          // Asserted for one cycle on property match
     output logic fail,          // Asserted for one cycle on property violation
     output logic active,        // High while evaluation is in progress
+    // Present on bounded-concurrency templates (including NFA implication):
+    output logic overflow_flag, // Sticky fail-closed slot-exhaustion verdict
     output logic attempt_fired, // Sticky: set high on first start; cleared only by reset
     input  logic disable_i,     // External disable condition
     output logic disabled_o     // Indicates monitor is disabled
 );
 ```
+
+`overflow_flag` remains asserted, forces `fail=1`, and suppresses
+`active/pass` until reset or `disable_i`. Templates without a bounded attempt
+allocator omit this optional port.
 
 ## Development
 

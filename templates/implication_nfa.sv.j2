@@ -20,6 +20,7 @@ module {{ module_name }} (
 {{ port_decl(verilog_mode, "output", "active") }},
 {{ port_decl(verilog_mode, "output", "pass") }},
 {{ port_decl(verilog_mode, "output", "fail") }},
+{{ port_decl(verilog_mode, "output", "overflow_flag") }},
 {{ port_decl(verilog_mode, "output", "attempt_fired") }},
 {{ port_decl(verilog_mode, "output", "disabled_o") }}
 );
@@ -36,14 +37,14 @@ module {{ module_name }} (
     assign ant_at_s = start & ({{ ant_guard }});
     {{ signal_type(verilog_mode) }} ant_s_q;
 {{ always_block_header(verilog_mode, clock_edge, clock_signal) }}
-        if (!rst_n) ant_s_q <= 1'b0;
+        if (!rst_n || disable_i) ant_s_q <= 1'b0;
         else        ant_s_q <= ant_at_s;
     end
     assign ant_match = ant_s_q;
 {% endif %}
 
     // ── Consequent NFA (property-kind, multi-thread) ──────────────────
-    {{ wire_type(verilog_mode) }} con_active, con_pass_w, con_fail_w, con_afired_w, con_disabled_w;
+    {{ wire_type(verilog_mode) }} con_active, con_pass_w, con_fail_w, con_overflow_w, con_afired_w, con_disabled_w;
     {{ children[0].module_name }} u_con (
         .{{ clock_signal }}({{ clock_signal }}),
         .rst_n    (rst_n),
@@ -55,6 +56,7 @@ module {{ module_name }} (
         .active        (con_active),
         .pass          (con_pass_w),
         .fail          (con_fail_w),
+        .overflow_flag (con_overflow_w),
         .attempt_fired (con_afired_w),
         .disabled_o    (con_disabled_w)
     );
@@ -64,9 +66,10 @@ module {{ module_name }} (
     // (state_q = 0) and pass/fail are 0. The NFA itself already registers
     // its outputs (pass_q, fail_q inside nfa_generic), so we wire them
     // directly without adding a second register.
-    assign active        = disable_i ? 1'b0 : con_active;
-    assign pass          = disable_i ? 1'b0 : con_pass_w;
+    assign active        = disable_i ? 1'b0 : (con_overflow_w ? 1'b0 : con_active);
+    assign pass          = disable_i ? 1'b0 : (con_overflow_w ? 1'b0 : con_pass_w);
     assign fail          = disable_i ? 1'b0 : con_fail_w;
+    assign overflow_flag = disable_i ? 1'b0 : con_overflow_w;
     assign disabled_o    = disable_i ? 1'b1 : con_disabled_w;
 
     // ── attempt_fired ────────────────────────────────────────────────

@@ -19,6 +19,7 @@ import pytest
 
 from sva2rtl.behavioral_oracle import simulate_checker_hierarchy
 from sva2rtl.composer import compose
+from sva2rtl.emitter import emit_all
 from sva2rtl.errors import UnsupportedConstruct
 from sva2rtl.ir import (
     BoolExpr,
@@ -52,7 +53,8 @@ class TestOverlapImplNfaCompile:
                 delays=((2, 2),),
                 source_loc=_LOC,
             ),
-            overlapping=True, source_loc=_LOC,
+            overlapping=True,
+            source_loc=_LOC,
         )
         c = compose(node, _CLK, None, "a |-> b ##2 c")
         assert c.template_name == "implication_nfa"
@@ -62,14 +64,26 @@ class TestOverlapImplNfaCompile:
         assert child.params["nfa_kind"] == "property"
         assert child.params["nfa_states"] == "4"
 
+        modules = emit_all(c)
+        top_rtl = modules[c.module_name]
+        child_rtl = modules[child.module_name]
+        assert "output  logic overflow_flag" in top_rtl
+        assert ".overflow_flag (con_overflow_w)" in top_rtl
+        assert "assign fail_d = |slot_fail;" in child_rtl
+        assert "attempt_fired_q & all_dead" not in child_rtl
+
     def test_b_rep_3(self) -> None:
         """a |-> b[*3] — K=4, T=4."""
         node = PropImplication(
             antecedent=_b("a"),
             consequent=SeqRepetition(
-                expr=_b("b"), rep_min=3, rep_max=3, source_loc=_LOC,
+                expr=_b("b"),
+                rep_min=3,
+                rep_max=3,
+                source_loc=_LOC,
             ),
-            overlapping=True, source_loc=_LOC,
+            overlapping=True,
+            source_loc=_LOC,
         )
         c = compose(node, _CLK, None, "a |-> b[*3]")
         assert c.template_name == "implication_nfa"
@@ -83,7 +97,8 @@ class TestOverlapImplNfaCompile:
                 delays=((2, 2), (3, 3)),
                 source_loc=_LOC,
             ),
-            overlapping=True, source_loc=_LOC,
+            overlapping=True,
+            source_loc=_LOC,
         )
         c = compose(node, _CLK, None, "a |-> b ##2 c ##3 d")
         assert c.template_name == "implication_nfa"
@@ -105,19 +120,24 @@ class TestOverlapImplNfaOracle:
             antecedent=_b("a"),
             consequent=SeqConcat(
                 elements=(_b("b"), _b("c")),
-                delays=((2, 2),), source_loc=_LOC,
+                delays=((2, 2),),
+                source_loc=_LOC,
             ),
-            overlapping=True, source_loc=_LOC,
+            overlapping=True,
+            source_loc=_LOC,
         )
         c = compose(node, _CLK, None, "a |-> b ##2 c")
         stim = [
-            {"start": True,  "a": True,  "b": True,  "c": False},
+            {"start": True, "a": True, "b": True, "c": False},
             {"start": False, "a": False, "b": False, "c": False},
             {"start": False, "a": False, "b": False, "c": True},
             {"start": False, "a": False, "b": False, "c": False},
         ]
         assert self._p(simulate_checker_hierarchy(c, stim)) == [
-            False, False, False, True,
+            False,
+            False,
+            False,
+            True,
         ]
 
     def test_b_rep_3_pass(self) -> None:
@@ -125,19 +145,26 @@ class TestOverlapImplNfaOracle:
         node = PropImplication(
             antecedent=_b("a"),
             consequent=SeqRepetition(
-                expr=_b("b"), rep_min=3, rep_max=3, source_loc=_LOC,
+                expr=_b("b"),
+                rep_min=3,
+                rep_max=3,
+                source_loc=_LOC,
             ),
-            overlapping=True, source_loc=_LOC,
+            overlapping=True,
+            source_loc=_LOC,
         )
         c = compose(node, _CLK, None, "a |-> b[*3]")
         stim = [
-            {"start": True,  "a": True,  "b": True},
+            {"start": True, "a": True, "b": True},
             {"start": False, "a": False, "b": True},
             {"start": False, "a": False, "b": True},
             {"start": False, "a": False, "b": False},
         ]
         assert self._p(simulate_checker_hierarchy(c, stim)) == [
-            False, False, False, True,
+            False,
+            False,
+            False,
+            True,
         ]
 
     def test_ant_false_no_pass(self) -> None:
@@ -146,13 +173,15 @@ class TestOverlapImplNfaOracle:
             antecedent=_b("a"),
             consequent=SeqConcat(
                 elements=(_b("b"), _b("c")),
-                delays=((2, 2),), source_loc=_LOC,
+                delays=((2, 2),),
+                source_loc=_LOC,
             ),
-            overlapping=True, source_loc=_LOC,
+            overlapping=True,
+            source_loc=_LOC,
         )
         c = compose(node, _CLK, None, "a |-> b ##2 c")
         stim = [
-            {"start": True,  "a": False, "b": True,  "c": False},
+            {"start": True, "a": False, "b": True, "c": False},
             {"start": False, "a": False, "b": False, "c": False},
             {"start": False, "a": False, "b": False, "c": True},
             {"start": False, "a": False, "b": False, "c": False},
@@ -167,13 +196,15 @@ class TestOverlapImplNfaOracle:
             antecedent=_b("a"),
             consequent=SeqConcat(
                 elements=(_b("b"), _b("c")),
-                delays=((2, 2),), source_loc=_LOC,
+                delays=((2, 2),),
+                source_loc=_LOC,
             ),
-            overlapping=True, source_loc=_LOC,
+            overlapping=True,
+            source_loc=_LOC,
         )
         c = compose(node, _CLK, None, "a |-> b ##2 c")
         stim = [
-            {"start": True,  "a": True,  "b": True,  "c": False},
+            {"start": True, "a": True, "b": True, "c": False},
             {"start": False, "a": False, "b": False, "c": False},
             {"start": False, "a": False, "b": False, "c": False},
             {"start": False, "a": False, "b": False, "c": False},
@@ -199,20 +230,26 @@ class TestNonoverlapImplNfa:
             antecedent=_b("a"),
             consequent=SeqConcat(
                 elements=(_b("b"), _b("c")),
-                delays=((2, 2),), source_loc=_LOC,
+                delays=((2, 2),),
+                source_loc=_LOC,
             ),
-            overlapping=False, source_loc=_LOC,
+            overlapping=False,
+            source_loc=_LOC,
         )
         c = compose(node, _CLK, None, "a |=> b ##2 c")
         stim = [
-            {"start": True,  "a": True,  "b": False, "c": False},  # t=0
-            {"start": False, "a": False, "b": True,  "c": False},  # t=1
+            {"start": True, "a": True, "b": False, "c": False},  # t=0
+            {"start": False, "a": False, "b": True, "c": False},  # t=1
             {"start": False, "a": False, "b": False, "c": False},  # t=2
-            {"start": False, "a": False, "b": False, "c": True},   # t=3
+            {"start": False, "a": False, "b": False, "c": True},  # t=3
             {"start": False, "a": False, "b": False, "c": False},  # t=4
         ]
         assert self._p(simulate_checker_hierarchy(c, stim)) == [
-            False, False, False, False, True,
+            False,
+            False,
+            False,
+            False,
+            True,
         ]
 
     def test_b_rep_3_pass(self) -> None:
@@ -220,20 +257,28 @@ class TestNonoverlapImplNfa:
         node = PropImplication(
             antecedent=_b("a"),
             consequent=SeqRepetition(
-                expr=_b("b"), rep_min=3, rep_max=3, source_loc=_LOC,
+                expr=_b("b"),
+                rep_min=3,
+                rep_max=3,
+                source_loc=_LOC,
             ),
-            overlapping=False, source_loc=_LOC,
+            overlapping=False,
+            source_loc=_LOC,
         )
         c = compose(node, _CLK, None, "a |=> b[*3]")
         stim = [
-            {"start": True,  "a": True,  "b": False},
+            {"start": True, "a": True, "b": False},
             {"start": False, "a": False, "b": True},
             {"start": False, "a": False, "b": True},
             {"start": False, "a": False, "b": True},
             {"start": False, "a": False, "b": False},
         ]
         assert self._p(simulate_checker_hierarchy(c, stim)) == [
-            False, False, False, False, True,
+            False,
+            False,
+            False,
+            False,
+            True,
         ]
 
 
@@ -252,7 +297,8 @@ class TestImplNfaRejection:
                 delays=((2, 5),),
                 source_loc=_LOC,
             ),
-            overlapping=True, source_loc=_LOC,
+            overlapping=True,
+            source_loc=_LOC,
         )
         checker = compose(node, _CLK, None, "a |-> b ##[2:5] c")
         assert checker is not None
@@ -277,7 +323,8 @@ class TestImplNfaRejection:
                 delays=((2, 2),),
                 source_loc=_LOC,
             ),
-            overlapping=True, source_loc=_LOC,
+            overlapping=True,
+            source_loc=_LOC,
         )
         with pytest.raises(UnsupportedConstruct):
             compose(node, _CLK, None, "a ##2 b |-> c ##2 b")
