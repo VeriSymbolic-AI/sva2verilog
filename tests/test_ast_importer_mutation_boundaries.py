@@ -79,6 +79,56 @@ def test_past_without_explicit_depth_keeps_default_rendering() -> None:
     assert _reconstruct_signal_func_text(signal_func) == "$past(a)"
 
 
+def test_sampled_value_rejects_packed_vector_operand() -> None:
+    node = {
+        "kind": "CallExpression",
+        "subroutineName": "$rose",
+        "arguments": [{"kind": "NamedValue", "symbol": "1 data", "type": "logic[7:0]"}],
+    }
+
+    with pytest.raises(UnsupportedConstruct, match="width 8"):
+        _build_signal_func(node, _LOC)
+
+
+def test_sampled_value_rejects_expression_operand() -> None:
+    node = {
+        "kind": "CallExpression",
+        "subroutineName": "$stable",
+        "arguments": [
+            {
+                "kind": "ElementSelect",
+                "value": {"kind": "NamedValue", "symbol": "1 data"},
+                "selector": {"kind": "IntegerLiteral", "value": "0"},
+            }
+        ],
+    }
+
+    with pytest.raises(UnsupportedConstruct, match="scalar identifier"):
+        _build_signal_func(node, _LOC)
+
+
+def test_sampled_value_rejects_optional_arguments() -> None:
+    node = {
+        "kind": "CallExpression",
+        "subroutineName": "$rose",
+        "arguments": [_SIGNAL, {"kind": "NamedValue", "symbol": "1 clk"}],
+    }
+
+    with pytest.raises(UnsupportedConstruct, match="optional sampled-value"):
+        _build_signal_func(node, _LOC)
+
+
+def test_past_rejects_nonpositive_depth() -> None:
+    node = {
+        "kind": "CallExpression",
+        "subroutineName": "$past",
+        "arguments": [_SIGNAL, {"kind": "IntegerLiteral", "value": "0"}],
+    }
+
+    with pytest.raises(UnsupportedConstruct, match="at least 1"):
+        _build_signal_func(node, _LOC)
+
+
 def test_sequence_concat_rejects_either_negative_delay_endpoint() -> None:
     node = {
         "elements": [

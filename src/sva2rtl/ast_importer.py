@@ -187,9 +187,7 @@ def import_assertion(
         if member.get("kind") == "Instance":
             body = member.get("body", {})
             if body.get("kind") == "InstanceBody":
-                token = _DECLARATIONS.set(
-                    _collect_declarations(body.get("members", []))
-                )
+                token = _DECLARATIONS.set(_collect_declarations(body.get("members", [])))
                 try:
                     result = _find_assertion_in_members(body.get("members", []))
                     if result is not None:
@@ -235,13 +233,9 @@ def import_all_assertions(
         if member.get("kind") == "Instance":
             body = member.get("body", {})
             if body.get("kind") == "InstanceBody":
-                token = _DECLARATIONS.set(
-                    _collect_declarations(body.get("members", []))
-                )
+                token = _DECLARATIONS.set(_collect_declarations(body.get("members", [])))
                 try:
-                    results.extend(
-                        _find_all_assertions_in_members(body.get("members", []))
-                    )
+                    results.extend(_find_all_assertions_in_members(body.get("members", [])))
                 finally:
                     _DECLARATIONS.reset(token)
 
@@ -973,14 +967,19 @@ def _import_concurrent_assertion(
                 "clocking": body.get("clocking", {}),
             }
             inner_ir, _, inner_text, _ = _import_concurrent_assertion(
-                {"kind": "ConcurrentAssertion", "propertySpec": inner_body,
-                 "source_file_start": node.get("source_file_start", ""),
-                 "source_line_start": node.get("source_line_start", 0),
-                 "source_column_start": node.get("source_column_start", 0)},
+                {
+                    "kind": "ConcurrentAssertion",
+                    "propertySpec": inner_body,
+                    "source_file_start": node.get("source_file_start", ""),
+                    "source_line_start": node.get("source_line_start", 0),
+                    "source_column_start": node.get("source_column_start", 0),
+                },
                 label,
             )
             ir_node = DisableIff(
-                condition=cond_ir, body=inner_ir, source_loc=source_loc,
+                condition=cond_ir,
+                body=inner_ir,
+                source_loc=source_loc,
             )
             text = f"disable iff ({cond_text}) {inner_text}"
         case _:
@@ -1545,21 +1544,50 @@ def _build_signal_func(node: dict[str, Any], source_loc: SourceLoc) -> SignalFun
             )
         )
 
-    # Extract signal name from first argument (expected NamedValue)
+    max_args = 2 if func_name == "past" else 1
+    if len(arguments) > max_args:
+        raise UnsupportedConstruct(
+            message=(
+                f"${func_name} at {source_loc} uses optional sampled-value "
+                "arguments that the scalar v1 contract does not support."
+            ),
+            construct_name=f"${func_name}_optional_arguments",
+            source_loc=source_loc,
+        )
+
+    # The v1 sampled-value contract is deliberately scalar and identifier-only.
+    # Accepting an expression here would later turn text such as ``data[0]``
+    # into an invalid module port; accepting a vector would silently apply
+    # scalar RTL semantics to a wider SVA expression.
     arg0 = arguments[0]
-    if arg0.get("kind") == "NamedValue":
-        symbol: str = str(arg0.get("symbol", " "))
-        signal = symbol.split(" ", 1)[-1]
-    else:
-        signal_text = expr_to_sv(arg0)
-        signal = signal_text
+    arg0_loc = extract_source_loc(arg0)
+    if arg0.get("kind") != "NamedValue":
+        raise UnsupportedConstruct(
+            message=(
+                f"${func_name} operand at {arg0_loc} must be a scalar identifier; "
+                "sampled expressions and selects are not supported."
+            ),
+            construct_name="sampled-value complex operand",
+            source_loc=arg0_loc,
+        )
+    width = _named_value_width(arg0, arg0_loc)
+    if width != 1:
+        raise UnsupportedConstruct(
+            message=(
+                f"${func_name} operand at {arg0_loc} has width {width}; "
+                "only the scalar sampled-value subset is supported."
+            ),
+            construct_name="sampled-value packed vector",
+            source_loc=arg0_loc,
+        )
+    signal = _symbol_name(arg0)
 
     # Extract depth from second argument (only for $past)
     depth: int = 1
     if func_name == "past" and len(arguments) >= 2:
         arg1 = arguments[1]
+        arg1_loc = extract_source_loc(arg1)
         if arg1.get("kind") != "IntegerLiteral":
-            arg1_loc = extract_source_loc(arg1)
             raise UnsupportedConstruct(
                 message=(
                     f"$past depth must be a compile-time integer literal at {arg1_loc}; "
@@ -1569,6 +1597,12 @@ def _build_signal_func(node: dict[str, Any], source_loc: SourceLoc) -> SignalFun
                 source_loc=arg1_loc,
             )
         depth = int(arg1.get("value", 1))
+        if depth < 1:
+            raise UnsupportedConstruct(
+                message=f"$past depth must be at least 1 at {arg1_loc}; got {depth}.",
+                construct_name="$past_nonpositive_depth",
+                source_loc=arg1_loc,
+            )
 
     # NYQ-22: warn when $past depth exceeds practical hardware bound
     if func_name == "past" and depth > 100:

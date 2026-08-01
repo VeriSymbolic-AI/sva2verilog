@@ -172,9 +172,7 @@ def test_import_unknown_system_func_raises() -> None:
                                         "kind": "CallExpression",
                                         "type": "int",
                                         "subroutineName": "$countones",
-                                        "arguments": [
-                                            {"kind": "NamedValue", "symbol": "1 x"}
-                                        ],
+                                        "arguments": [{"kind": "NamedValue", "symbol": "1 x"}],
                                     },
                                 },
                             }
@@ -260,6 +258,40 @@ def test_compose_observed_signals_single() -> None:
     checker = compose(sf, clock, None, "$rose(req)")
     assert len(checker.observed_signals) == 1
     assert checker.observed_signals[0] == ("req", "req")
+
+
+def test_compose_reserved_signal_uses_deterministic_alias() -> None:
+    loc = SourceLoc("test.sv", 1, 1)
+    clock = ClockSpec(edge="posedge", signal="clk", source_loc=loc)
+    sf = SignalFunc(func_name="rose", signal="start", depth=1, source_loc=loc)
+
+    checker = compose(sf, clock, None, "$rose(start)")
+    sv = emit_all(checker)[checker.module_name]
+
+    assert checker.observed_signals == (("dut_start", "start"),)
+    assert checker.params["signal_name"] == "dut_start"
+    assert sv.count("input  logic start,") == 1
+    assert "input  logic dut_start," in sv
+
+
+@pytest.mark.parametrize(
+    ("signal", "clock_signal", "match"),
+    [
+        ("data[0]", "clk", "plain SystemVerilog identifier"),
+        ("clk", "clk", "collides with the monitor clock"),
+    ],
+)
+def test_compose_sampled_value_rejects_invalid_manual_ir(
+    signal: str,
+    clock_signal: str,
+    match: str,
+) -> None:
+    loc = SourceLoc("test.sv", 1, 1)
+    clock = ClockSpec(edge="posedge", signal=clock_signal, source_loc=loc)
+    sf = SignalFunc(func_name="rose", signal=signal, depth=1, source_loc=loc)
+
+    with pytest.raises(UnsupportedConstruct, match=match):
+        compose(sf, clock, None, f"$rose({signal})")
 
 
 def test_compose_fell_template_name() -> None:
@@ -369,18 +401,18 @@ def test_oracle_rose_edge_detected() -> None:
     """$rose: 0->1 transition fires pass."""
     sim = SVABehavioralSim("rose", {})
     sim.tick({"start": False, "sig": False})  # prev=False (initial)
-    out = sim.tick({"start": True, "sig": True})   # 0->1: rose fires
-    assert out["pass"],  "0->1 transition: $rose should pass"
+    out = sim.tick({"start": True, "sig": True})  # 0->1: rose fires
+    assert out["pass"], "0->1 transition: $rose should pass"
     assert not out["fail"], "0->1 transition: not fail"
 
 
 def test_oracle_rose_no_edge_no_pass() -> None:
     """$rose: 1->1 (stable high) does NOT fire pass."""
     sim = SVABehavioralSim("rose", {})
-    sim.tick({"start": False, "sig": True})   # prev=True
-    out = sim.tick({"start": True, "sig": True})   # 1->1: no rose
+    sim.tick({"start": False, "sig": True})  # prev=True
+    out = sim.tick({"start": True, "sig": True})  # 1->1: no rose
     assert not out["pass"], "1->1: no $rose"
-    assert out["fail"],     "1->1: fail (no edge detected)"
+    assert out["fail"], "1->1: fail (no edge detected)"
 
 
 def test_oracle_rose_reset_clears_prev() -> None:
@@ -395,9 +427,9 @@ def test_oracle_rose_reset_clears_prev() -> None:
 def test_oracle_fell_edge_detected() -> None:
     """$fell: 1->0 transition fires pass."""
     sim = SVABehavioralSim("fell", {})
-    sim.tick({"start": False, "sig": True})   # prev=True
+    sim.tick({"start": False, "sig": True})  # prev=True
     out = sim.tick({"start": True, "sig": False})  # 1->0: fell fires
-    assert out["pass"],  "1->0 transition: $fell should pass"
+    assert out["pass"], "1->0 transition: $fell should pass"
     assert not out["fail"], "1->0: not fail"
 
 
@@ -407,33 +439,33 @@ def test_oracle_fell_no_edge_no_pass() -> None:
     sim.tick({"start": False, "sig": False})  # prev=False
     out = sim.tick({"start": True, "sig": False})  # 0->0: no fell
     assert not out["pass"], "0->0: no $fell"
-    assert out["fail"],     "0->0: fail (no falling edge)"
+    assert out["fail"], "0->0: fail (no falling edge)"
 
 
 def test_oracle_stable_no_change_passes() -> None:
     """$stable: same value in consecutive cycles fires pass."""
     sim = SVABehavioralSim("stable", {})
-    sim.tick({"start": False, "sig": True})   # prev=True
-    out = sim.tick({"start": True, "sig": True})   # 1->1: stable
-    assert out["pass"],  "1->1: $stable passes"
+    sim.tick({"start": False, "sig": True})  # prev=True
+    out = sim.tick({"start": True, "sig": True})  # 1->1: stable
+    assert out["pass"], "1->1: $stable passes"
     assert not out["fail"], "1->1: not fail"
 
 
 def test_oracle_stable_change_fails() -> None:
     """$stable: different values in consecutive cycles fires fail."""
     sim = SVABehavioralSim("stable", {})
-    sim.tick({"start": False, "sig": True})   # prev=True
+    sim.tick({"start": False, "sig": True})  # prev=True
     out = sim.tick({"start": True, "sig": False})  # 1->0: not stable
     assert not out["pass"], "1->0: $stable fails"
-    assert out["fail"],     "1->0: fail"
+    assert out["fail"], "1->0: fail"
 
 
 def test_oracle_past_depth_1() -> None:
     """$past(sig, 1): reflects sig value from 1 cycle ago."""
     sim = SVABehavioralSim("past", {"depth": "1"})
-    sim.tick({"start": False, "sig": True})   # sig[t-1]=True stored
-    out = sim.tick({"start": True,  "sig": False})  # past_value = True (from t-1)
-    assert out["pass"],  "past(sig,1) 1 cycle ago was True → pass"
+    sim.tick({"start": False, "sig": True})  # sig[t-1]=True stored
+    out = sim.tick({"start": True, "sig": False})  # past_value = True (from t-1)
+    assert out["pass"], "past(sig,1) 1 cycle ago was True → pass"
     assert not out["fail"], "not fail"
 
 

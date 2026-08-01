@@ -163,6 +163,11 @@ Counter with range check. Reports match when count is within [M, N] and operand 
 | `$past(sig, N)` | N-stage shift register on `sig` |
 
 All sampled value functions register the signal with a one-cycle delay (`sig_d1`).
+The v1 contract accepts one plain, scalar identifier only. Packed vectors,
+selects / compound expressions, optional clocking or gating arguments, and
+non-positive `$past` depths are rejected explicitly instead of being silently
+scalarized or emitted as invalid ports. DUT signals whose names overlap the
+public monitor interface are assigned deterministic `dut_*` port aliases.
 
 ### `disable iff`
 
@@ -288,7 +293,8 @@ The following operators remain unsupported or deliberately rejected:
 | Unbounded delay `##[0:$]` | Requires infinite state; not synthesizable |
 | Local variables | SVA local variables in sequences are not supported |
 | Recursive properties | Not supported |
-| Multi-dimensional signals | Array signals not supported in sampled value functions |
+| Non-scalar sampled operands | Packed vectors, arrays, selects, and compound expressions are not supported in sampled value functions |
+| Optional sampled arguments | Optional clocking/gating arguments are outside the scalar v1 sampled-value contract |
 | `$countones`, `$onehot` | System functions beyond $rose/$fell/$stable/$past not supported |
 
 ### Multi-clock support (v1.4.1 Part B — Path One: trusted 2-DFF synchronizer)

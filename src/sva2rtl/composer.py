@@ -895,13 +895,52 @@ def _compose_signal_func(
     Each function maps directly to a template of the same name:
       rose -> rose.sv.j2, fell -> fell.sv.j2, changed -> changed.sv.j2, etc.
     """
+    supported_funcs = frozenset({"rose", "fell", "stable", "past", "changed"})
+    if node.func_name not in supported_funcs:
+        raise UnsupportedConstruct(
+            message=f"Unsupported sampled-value function: ${node.func_name}",
+            construct_name=f"${node.func_name}",
+            source_loc=node.source_loc,
+        )
+    if _IDENT_RE.fullmatch(node.signal) is None or node.signal in _SV_KEYWORDS:
+        raise UnsupportedConstruct(
+            message=(
+                f"Sampled-value operand '{node.signal}' must be a plain SystemVerilog identifier."
+            ),
+            construct_name="sampled-value complex operand",
+            source_loc=node.source_loc,
+        )
+    if node.signal == clock.signal:
+        raise UnsupportedConstruct(
+            message=(
+                f"Sampled-value operand '{node.signal}' collides with the monitor clock port."
+            ),
+            construct_name="sampled-value clock collision",
+            source_loc=node.source_loc,
+        )
+    if node.func_name == "past" and node.depth < 1:
+        raise UnsupportedConstruct(
+            message=f"$past depth must be at least 1; got {node.depth}.",
+            construct_name="$past_nonpositive_depth",
+            source_loc=node.source_loc,
+        )
+
     module_name = module_name_from_label(label, original_text)
-    # Single observed signal: (port_name, dut_signal_name)
-    observed: tuple[tuple[str, str], ...] = ((node.signal, node.signal),)
+    # Alias public-contract names so an observed DUT signal such as ``start``
+    # cannot create a duplicate module port.  Avoid the selected clock name too.
+    port_name = node.signal
+    if port_name in _RESERVED_MONITOR_PORTS:
+        base = f"dut_{port_name}"
+        port_name = base
+        suffix = 2
+        while port_name == clock.signal:
+            port_name = f"{base}_{suffix}"
+            suffix += 1
+    observed: tuple[tuple[str, str], ...] = ((port_name, node.signal),)
 
     params: dict[str, str] = {
         "module_name": module_name,
-        "signal_name": node.signal,
+        "signal_name": port_name,
         "depth": str(node.depth),
         "clock_signal": clock.signal,
         "clock_edge": clock.edge,
@@ -915,6 +954,7 @@ def _compose_signal_func(
         module_name=module_name,
         params=params,
         observed_signals=observed,
+        observed_signal_widths=((port_name, 1),),
         source_loc=node.source_loc,
         children=(),
         cse_origin=cse_origin,

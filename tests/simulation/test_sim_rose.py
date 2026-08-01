@@ -17,7 +17,7 @@ from sva2rtl.ast_importer import import_assertion
 from sva2rtl.behavioral_oracle import SVABehavioralSim
 from sva2rtl.composer import compose
 from sva2rtl.emitter import emit_all
-from sva2rtl.ir import CheckerNode
+from sva2rtl.ir import CheckerNode, ClockSpec, SignalFunc, SourceLoc
 from tests.simulation.tb_generator import (
     extra_inputs_from_checker,
     generate_testbench,
@@ -51,7 +51,8 @@ def _run_both(
 
     # Oracle
     sim = SVABehavioralSim("rose", {})
-    oracle_out = [sim.tick(s) for s in stimulus]
+    signal_port = checker.observed_signals[0][0]
+    oracle_out = [sim.tick({**s, "sig": bool(s.get(signal_port, False))}) for s in stimulus]
 
     # RTL
     tb = generate_testbench(
@@ -89,10 +90,10 @@ def test_rtl_rose_vs_oracle_transition(tmp_path: Path, simulator: str) -> None:
     """
     checker = _build_checker("rose")
     stimulus = [
-        {"start": True,  "sig": False},  # tick 0
-        {"start": True,  "sig": True},   # tick 1 → pass
-        {"start": True,  "sig": True},   # tick 2 → no pass (stable)
-        {"start": True,  "sig": False},  # tick 3 → no pass (fell)
+        {"start": True, "sig": False},  # tick 0
+        {"start": True, "sig": True},  # tick 1 → pass
+        {"start": True, "sig": True},  # tick 2 → no pass (stable)
+        {"start": True, "sig": False},  # tick 3 → no pass (fell)
     ]
     oracle_out, rtl_out = _run_both(checker, stimulus, tmp_path)
 
@@ -101,9 +102,31 @@ def test_rtl_rose_vs_oracle_transition(tmp_path: Path, simulator: str) -> None:
     )
 
     for i, (oracle, rtl) in enumerate(zip(oracle_out, rtl_out)):
-        assert rtl["pass"]   == oracle["pass"],   f"tick {i}: pass   mismatch"
-        assert rtl["fail"]   == oracle["fail"],   f"tick {i}: fail   mismatch"
+        assert rtl["pass"] == oracle["pass"], f"tick {i}: pass   mismatch"
+        assert rtl["fail"] == oracle["fail"], f"tick {i}: fail   mismatch"
         assert rtl["active"] == oracle["active"], f"tick {i}: active mismatch"
+
+
+def test_rtl_rose_reserved_start_signal_is_aliased(
+    tmp_path: Path,
+    simulator: str,
+) -> None:
+    loc = SourceLoc("reserved_sampled.sv", 1, 1)
+    checker = compose(
+        SignalFunc(func_name="rose", signal="start", depth=1, source_loc=loc),
+        ClockSpec(edge="posedge", signal="clk", source_loc=loc),
+        "reserved_sampled",
+        "$rose(start)",
+    )
+    stimulus = [
+        {"start": True, "dut_start": False},
+        {"start": True, "dut_start": True},
+        {"start": True, "dut_start": True},
+    ]
+
+    oracle_out, rtl_out = _run_both(checker, stimulus, tmp_path, simulator)
+    assert [row["pass"] for row in rtl_out] == [row["pass"] for row in oracle_out]
+    assert rtl_out[1]["pass"]
 
 
 def test_rtl_rose_pass_fires_at_correct_tick(tmp_path: Path, simulator: str) -> None:
@@ -111,13 +134,13 @@ def test_rtl_rose_pass_fires_at_correct_tick(tmp_path: Path, simulator: str) -> 
     checker = _build_checker("rose")
     stimulus = [
         {"start": True, "sig": False},  # tick 0: old_prev=0, sig=0 → rose=0 → pass=F
-        {"start": True, "sig": True},   # tick 1: old_prev=0, sig=1 → rose=1 → pass=T
-        {"start": True, "sig": True},   # tick 2: old_prev=1, sig=1 → rose=0 → pass=F
+        {"start": True, "sig": True},  # tick 1: old_prev=0, sig=1 → rose=1 → pass=T
+        {"start": True, "sig": True},  # tick 2: old_prev=1, sig=1 → rose=0 → pass=F
     ]
     _, rtl_out = _run_both(checker, stimulus, tmp_path)
 
     assert not rtl_out[0]["pass"], "tick 0: sig=0→0, no rose event"
-    assert     rtl_out[1]["pass"], "tick 1: sig=0→1, rose event → pass"
+    assert rtl_out[1]["pass"], "tick 1: sig=0→1, rose event → pass"
     assert not rtl_out[2]["pass"], "tick 2: sig=1→1, no rose event"
 
 
@@ -126,14 +149,14 @@ def test_rtl_rose_no_start_no_output(tmp_path: Path, simulator: str) -> None:
     checker = _build_checker("rose")
     stimulus = [
         {"start": False, "sig": False},  # tick 0
-        {"start": False, "sig": True},   # tick 1: 0→1 but start=F
+        {"start": False, "sig": True},  # tick 1: 0→1 but start=F
         {"start": False, "sig": False},  # tick 2: 1→0 but start=F
     ]
     oracle_out, rtl_out = _run_both(checker, stimulus, tmp_path)
 
     for i, rtl in enumerate(rtl_out):
-        assert not rtl["pass"],   f"tick {i}: start=F → no pass"
-        assert not rtl["fail"],   f"tick {i}: start=F → no fail"
+        assert not rtl["pass"], f"tick {i}: start=F → no pass"
+        assert not rtl["fail"], f"tick {i}: start=F → no fail"
         assert not rtl["active"], f"tick {i}: start=F → not active"
 
 
@@ -144,7 +167,7 @@ def test_rtl_rose_disable_gates_output(tmp_path: Path, simulator: str) -> None:
     # tick 1: disable_i=1 even during a rose event → all outputs = 0
     stimulus = [
         {"start": True, "sig": False, "disable_i": False},  # tick 0 → fail (no rose)
-        {"start": True, "sig": True,  "disable_i": True},   # tick 1 → disabled → all 0
+        {"start": True, "sig": True, "disable_i": True},  # tick 1 → disabled → all 0
     ]
     modules = emit_all(checker)
     extra_inputs = extra_inputs_from_checker(checker)
@@ -170,8 +193,8 @@ def test_rtl_rose_disable_gates_output(tmp_path: Path, simulator: str) -> None:
     )
 
     # tick 1: disable_i=1 → all outputs 0
-    assert not rtl_out[1]["pass"],   "disabled: pass must be 0"
-    assert not rtl_out[1]["fail"],   "disabled: fail must be 0"
+    assert not rtl_out[1]["pass"], "disabled: pass must be 0"
+    assert not rtl_out[1]["fail"], "disabled: fail must be 0"
     assert not rtl_out[1]["active"], "disabled: active must be 0"
 
 
@@ -180,20 +203,20 @@ def test_rtl_rose_full_oracle_compare(tmp_path: Path, simulator: str) -> None:
     checker = _build_checker("rose")
     # Long mixed trace
     stimulus = [
-        {"start": True,  "sig": False},  # 0
-        {"start": True,  "sig": True},   # 1 → rose
-        {"start": False, "sig": True},   # 2
-        {"start": True,  "sig": True},   # 3
-        {"start": True,  "sig": False},  # 4 → fell (no rose)
-        {"start": True,  "sig": False},  # 5
-        {"start": True,  "sig": True},   # 6 → rose
-        {"start": True,  "sig": True},   # 7
+        {"start": True, "sig": False},  # 0
+        {"start": True, "sig": True},  # 1 → rose
+        {"start": False, "sig": True},  # 2
+        {"start": True, "sig": True},  # 3
+        {"start": True, "sig": False},  # 4 → fell (no rose)
+        {"start": True, "sig": False},  # 5
+        {"start": True, "sig": True},  # 6 → rose
+        {"start": True, "sig": True},  # 7
         {"start": False, "sig": False},  # 8
     ]
     oracle_out, rtl_out = _run_both(checker, stimulus, tmp_path)
 
     assert len(rtl_out) == len(stimulus)
     for i, (oracle, rtl) in enumerate(zip(oracle_out, rtl_out)):
-        assert rtl["pass"]   == oracle["pass"],   f"tick {i}: pass mismatch"
-        assert rtl["fail"]   == oracle["fail"],   f"tick {i}: fail mismatch"
+        assert rtl["pass"] == oracle["pass"], f"tick {i}: pass mismatch"
+        assert rtl["fail"] == oracle["fail"], f"tick {i}: fail mismatch"
         assert rtl["active"] == oracle["active"], f"tick {i}: active mismatch"
