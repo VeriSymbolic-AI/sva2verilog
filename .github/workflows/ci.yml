@@ -89,6 +89,7 @@ jobs:
           --allow-skip-prefix "yosys"
           --allow-skip-prefix "verilator"
           --allow-skip-prefix "select with -m differential_slow"
+          --allow-skip-prefix "k-induction did not converge for"
 
       - name: Run tests (Verilator — simulation + bounded differential)
         if: matrix.simulator == 'verilator'

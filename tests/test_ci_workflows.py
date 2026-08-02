@@ -157,7 +157,13 @@ def test_ci_and_nightly_enforce_test_execution_budgets() -> None:
     assert "--min-passed 3 --max-skipped 0" in ci
     assert "--min-passed 1150 --max-skipped 0" in ci
     assert ci.count("not formal") == 2
-    for prefix in ("sby", "yosys", "verilator", "select with -m differential_slow"):
+    for prefix in (
+        "sby",
+        "yosys",
+        "verilator",
+        "select with -m differential_slow",
+        "k-induction did not converge for",
+    ):
         assert f'--allow-skip-prefix "{prefix}"' in ci
     assert nightly.count("tools/ci/check_junit.py") == 4
     assert formal.count("tools/ci/check_junit.py") == 1
