@@ -10,9 +10,9 @@ sva2verilog 是一个开源的 SystemVerilog Assertion (SVA) 到可综合 RTL
 监控器编译器。v1.7.1 已于 2026-07-31 发布，修复了 v1.7.0 的完整契约语义
 缺陷。发布后的首个可执行代码与工作流基线 `b055105` 已完成同提交远端资格
 闭环；后续高优先级加固与 F-11 真实工程 frontend 远端基线已经推进到
-`de3f697`。本地候选 `92a3b5a` 又关闭了 F-15/F-16/F-18/F-19，但尚未获准
-推送，因此不能将 `de3f697` 的远端运行倒推为该候选的证明。后续纯文档提交
-也只记录可执行基线，不把文档 SHA 倒推为新的证明对象。
+`c957bdf`。该提交同时关闭 F-15/F-16/F-18/F-19、将当前版本改为
+Apache-2.0，并补齐 README、形式化验证与高级 SVA 降级方案。所有远端结论均
+绑定到该精确 SHA；后续纯文档提交仍不倒推为新的可执行证明对象。
 
 - 发布状态：tag `v1.7.1` 指向 `8b5c063`；发布后资格基线为 `b055105`
 - 当前许可证：Apache License 2.0（SPDX：`Apache-2.0`）；根目录
@@ -31,20 +31,37 @@ sva2verilog 是一个开源的 SystemVerilog Assertion (SVA) 到可综合 RTL
   通过；nightly run `30686818970` 的三个 job 通过；Full Formal run
   `30686820029` 的六个分片通过。该组运行实际使用 Node.js 24 actions，
   并覆盖最新 CDC 注入、oracle mutation 与测试隔离修复
-- 最新本地候选：`92a3b5a`；完整 Icarus 1579 passed / 1 skipped /
+- 最新同提交资格：`c957bdf`；完整 Icarus 1580 passed / 1 skipped /
   1 个动态分类的 bounded-liveness xfail，完整 Verilator simulation 174
   passed / 1 个已审查 skip，branch coverage 88.12%，generated RTL 133
   passed，Full Formal 126 passed / 1 个相同 xfail；ruff 与 strict mypy 通过
-- 变异与差分：候选的四个 Python mutation 面为 317/317（100%，另有 32 个
+- 变异与差分：四个 Python mutation 面为 317/317（100%，另有 32 个
   未覆盖候选不进入分母）、RTL template mutation 12/12；Icarus/Verilator
-  fixed-seed fast 各 16 passed，date-seeded slow 各 1 passed。远端基线
-  `de3f697` 的同提交 CI
-  run `30709818712` 13/13、nightly run `30709827239` 3/3、Full Formal
-  run `30709832382` 6/6 全部通过；`92a3b5a` 尚无远端证据
+  fixed-seed fast 各 16 passed，date-seeded slow 各 1 passed。`c957bdf` 的
+  同提交 CI run `30741073680` 13/13、nightly run `30741082278` 3/3、
+  Full Formal run `30741083516` 6/6 全部通过
 - 支持状态权威：`SUPPORT_MATRIX.md` 记录逐构造支持边界、证据完整度和降级原因；README / SUPPORTED_CONSTRUCTS 只作概览和解释
 - 工业级验证缺口：已记录在 `INDUSTRIAL_VALIDATION_GAPS.md`，包含当前进展、P0/P1/P2 严重度、修复计划和 fully-supported 定义标准
 
-## 2026-08-02 F-15/F-16/F-18/F-19 可信度闭环（本地候选）
+## 2026-08-02 Apache-2.0、README 与形式化验证说明
+
+- 根目录 `LICENSE` 使用未修改的 Apache License 2.0 正文；`pyproject.toml`
+  使用 SPDX 表达式 `Apache-2.0`，wheel/sdist 元数据与发行包内许可证均由测试
+  锁定。README 不再包含 BSL/source-available 的生产用途限制。
+- README 明确区分“已实现算子”与“Fully supported”，并把逐算子证据权威
+  交给 `SUPPORT_MATRIX.md`；当前仍为 0 个 Fully supported，不能把工作流
+  绿灯外推成全 IEEE 1800、工业工程或芯片正确性证明。
+- `FORMAL_VERIFICATION.md` 给出独立 reference miter、assumption 审查、BMC、
+  k-induction、required cover、双仿真、综合/lint、差分与 mutation 的可复现
+  命令及判读规则。
+- 开源工具不直接支持的有界高级 SVA 先由 slang 解析，再下降为普通计数器、
+  token/NFA 与状态 RTL，供 Icarus、Verilator、Yosys、SymbiYosys 使用；无法
+  保持语义的构造明确拒绝，并给出有限边界改写、辅助 RTL、独立手写 monitor、
+  原始 SVA 仿真/商业 formal、CDC handshake/toggle/FIFO 和离线 trace 等替代。
+- 本轮本地全套门禁通过，并由上方三条 `c957bdf` 同提交远端运行完成资格；
+  这仍不消除逐算子 reference/证明深度、CDC、工业 corpus 和许可权属确认边界。
+
+## 2026-08-02 F-15/F-16/F-18/F-19 可信度闭环（已远端资格）
 
 - F-15：移除 k-induction 整类测试的 blanket xfail。只有日志同时表明
   basecase 通过、induction 未收敛或超时才动态 xfail；basecase 反例、普通

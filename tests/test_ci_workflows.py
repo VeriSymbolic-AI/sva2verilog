@@ -229,9 +229,9 @@ def test_support_claims_do_not_reuse_historical_remote_evidence() -> None:
     assert matrix.count("| Fully supported |") == 1
     assert "0 construct rows are promoted" in matrix
     assert "current-commit rerun pending" not in matrix
-    assert "92a3b5a925325401dd6ead27a85f55ec6d0cd7bb" in matrix
-    assert "it has not been pushed or remotely qualified yet" in matrix
-    assert "CI run `30709818712` qualifies executable\n`de3f697`" in matrix
+    assert "c957bdf3d3ed9cf145f23057d9e2a94d555c30e3" in matrix
+    assert "it has not been pushed or remotely qualified yet" not in matrix
+    assert "CI run `30741073680` qualifies executable\n`c957bdf`" in matrix
     # Only the evidence-state legend and the genuinely deferred dynamic CDC
     # row may retain a pending-remote marker.
     assert matrix.count("pending-remote") == 2

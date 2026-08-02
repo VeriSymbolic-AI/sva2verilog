@@ -42,25 +42,24 @@ Latest follow-on hardening baseline: commit
 - Full Formal run [`30686820029`](https://github.com/VeriSymbolic-AI/sva2verilog/actions/runs/30686820029):
   all six formal shards passed.
 
-The latest remotely qualified executable remains commit
-`de3f697cea34a64bae1e327d7b551dd0914e6151` on 2026-08-02. The newer local
-qualification candidate `92a3b5a925325401dd6ead27a85f55ec6d0cd7bb`
-records full Icarus 1579 passed / 1 skipped / 1 dynamically classified
-k-induction xfail, generated RTL 133/133, Full Formal 126 passed / 1 identical
-bounded-liveness xfail, branch coverage 88.12%, and full local Verilator
-simulation 174 passed / 1 reviewed skip. Both backends pass fixed-seed fast and
-date-seeded slow differential sweeps. The four Python mutation surfaces now
-kill 317/317 covered valid mutants; 32 uncovered candidates remain outside the
-denominator. Reviewed RTL-template mutation remains 12/12. The candidate pins
-the CI uv runtime to 0.12.1 and makes counterexamples/tool errors hard failures;
-it has not been pushed or remotely qualified yet.
+The latest remotely qualified executable is commit
+`c957bdf3d3ed9cf145f23057d9e2a94d555c30e3` on 2026-08-02. It records full
+Icarus 1580 passed / 1 skipped / 1 dynamically classified k-induction xfail,
+generated RTL 133/133, Full Formal 126 passed / 1 identical bounded-liveness
+xfail, branch coverage 88.12%, and full local Verilator simulation 174 passed /
+1 reviewed skip. Both backends pass fixed-seed fast and date-seeded slow
+differential sweeps. The four Python mutation surfaces kill 317/317 covered
+valid mutants; 32 uncovered candidates remain outside the denominator.
+Reviewed RTL-template mutation remains 12/12. This baseline also carries the
+Apache-2.0 relicense, release-metadata checks, corrected public scope, and the
+formal/advanced-SVA guide.
 
-For the exact `de3f697` executable, differential nightly run
-[`30709827239`](https://github.com/VeriSymbolic-AI/sva2verilog/actions/runs/30709827239)
+For the exact `c957bdf` executable, differential nightly run
+[`30741082278`](https://github.com/VeriSymbolic-AI/sva2verilog/actions/runs/30741082278)
 passed all three jobs, and Full Formal run
-[`30709832382`](https://github.com/VeriSymbolic-AI/sva2verilog/actions/runs/30709832382)
+[`30741083516`](https://github.com/VeriSymbolic-AI/sva2verilog/actions/runs/30741083516)
 passed all six shards. CI run
-[`30709818712`](https://github.com/VeriSymbolic-AI/sva2verilog/actions/runs/30709818712)
+[`30741073680`](https://github.com/VeriSymbolic-AI/sva2verilog/actions/runs/30741073680)
 passed all 13 jobs, including all eight OS/Python/simulator axes, generated RTL,
 coverage, Formal smoke, lint, Python 3.14, and installed-distribution gates.
 Neither local nor remote gates close per-construct independent-reference,
@@ -68,9 +67,9 @@ proof-depth, CDC, or industrial-corpus gaps.
 
 **Qualification overlay:** the detailed row ledger now names the exact
 executable baseline for remote simulator/lint evidence instead of using a
-floating “current commit” phrase. CI run `30709818712` qualifies executable
-`de3f697`; it must not be attributed to local candidate `92a3b5a`. This overlay
-does not fill a row's independent-reference, proof-depth, real-source,
+floating “current commit” phrase. CI run `30741073680` qualifies executable
+`c957bdf`; its same-commit nightly and Full Formal runs are named above. This
+overlay does not fill a row's independent-reference, proof-depth, real-source,
 rejection, CDC, or industrial-corpus gaps, and therefore does not change any
 support status by itself.
 
@@ -85,11 +84,11 @@ support status by itself.
 
 Current v1.7 evidence: **0 construct rows are promoted to `Fully supported`**.
 Same-commit dual-simulator, generated-lint, nightly, and Full Formal evidence is
-present for executable `de3f697`; candidate `92a3b5a` has complete local but no
-remote evidence. The six strongest rows (`##N`, `[*N]`, sampled value functions,
-overlapping implication, `first_match`, and `disable iff`) remain `Bounded
-evidence` until their row-specific real-source, independent-reference,
-full-contract/formal, and unsupported-variant links are individually audited.
+present for executable `c957bdf`. The six strongest rows (`##N`, `[*N]`, sampled
+value functions, overlapping implication, `first_match`, and `disable iff`)
+remain `Bounded evidence` until their row-specific real-source,
+independent-reference, full-contract/formal, and unsupported-variant links are
+individually audited.
 The remaining rows stay at `Bounded evidence`, `Trusted boundary`, or
 `Unsupported / rejected` as listed.
 
@@ -106,7 +105,7 @@ The remaining rows stay at `Bounded evidence`, `Trusted boundary`, or
 
 ## Structured Project Frontend Boundary
 
-F-11 is closed for the structured v1 compilation-context subset at `de3f697`.
+F-11 is closed for the structured v1 compilation-context subset at `c957bdf`.
 `SlangCompilationContext` and the CLI represent source files, `-F` filelists,
 include paths, defines, top modules, parameter overrides, library
 files/directories/extensions/order, and single-unit mode as validated argv. The
@@ -115,7 +114,7 @@ escape hatch. Nested elaborated instance bodies and two-state parameter constant
 are covered by real slang integration tests; a dedicated simulation regression
 executes filelist/include/define/top/parameter specialization through emitted RTL
 and compares Icarus and Verilator cycle outputs with the behavioral oracle.
-Candidate `92a3b5a` replaces temporary project generation with two versioned
+The `c957bdf` baseline replaces temporary project generation with two versioned
 corpora under `tests/project_corpus/`: parameter specialization and library
 directory/extension resolution. The first corpus also carries a hand-authored,
 cycle-exact source expectation, so a shared RTL/oracle error cannot pass solely
