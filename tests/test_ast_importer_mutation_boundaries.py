@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -15,16 +16,52 @@ from sva2rtl.ast_importer import (
     _build_seq_concat,
     _build_seq_repetition,
     _build_signal_func,
+    _dispatch_expr_to_ir,
+    _extract_label,
+    _find_all_assertions_in_members,
+    _find_assertion_in_members,
+    _import_concurrent_assertion,
     _reconstruct_signal_func_text,
     build_bool_expr,
     import_all_assertions,
 )
 from sva2rtl.errors import SvaCompileError, UnsupportedConstruct
-from sva2rtl.ir import BoolConst, SourceLoc
+from sva2rtl.ir import (
+    BoolConst,
+    PropNot,
+    SeqAnd,
+    SeqIntersect,
+    SeqOr,
+    SeqThroughout,
+    SeqWithin,
+    SourceLoc,
+)
 
 _LOC = SourceLoc("importer_boundaries.sv", 1, 1)
 _SIGNAL = {"kind": "NamedValue", "symbol": "1 a"}
 _FIXTURES = Path(__file__).parent / "fixtures"
+
+
+def _simple(name: str) -> dict[str, Any]:
+    return {"kind": "Simple", "expr": {"kind": "NamedValue", "symbol": f"1 {name}"}}
+
+
+def _clocked_assertion(expr: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "kind": "ConcurrentAssertion",
+        "source_file_start": "importer_boundaries.sv",
+        "source_line_start": 1,
+        "source_column_start": 1,
+        "propertySpec": {
+            "kind": "Clocking",
+            "clocking": {
+                "kind": "SignalEvent",
+                "edge": "PosEdge",
+                "expr": {"kind": "NamedValue", "symbol": "1 clk"},
+            },
+            "expr": expr,
+        },
+    }
 
 
 def test_import_all_assertions_recurses_elaborated_instance_hierarchy_once() -> None:
@@ -92,6 +129,169 @@ def test_named_parameter_four_state_constant_is_rejected() -> None:
 
     with pytest.raises(UnsupportedConstruct, match="Four-state literal"):
         build_bool_expr(node)
+
+
+def test_unnamed_unsupported_call_reports_its_ast_kind() -> None:
+    """An absent function name must not produce an empty diagnostic identity."""
+    with pytest.raises(UnsupportedConstruct) as exc_info:
+        build_bool_expr({"kind": "CallExpression"})
+
+    assert exc_info.value.construct_name == "CallExpression"
+
+
+def test_statement_block_label_is_consumed_by_single_assertion_search() -> None:
+    assertion = _clocked_assertion(_simple("a"))
+    members: list[dict[str, Any]] = [
+        {"kind": "StatementBlock", "name": "single_label"},
+        {"kind": "ProceduralBlock", "body": {"kind": "Block", "body": assertion}},
+    ]
+
+    result = _find_assertion_in_members(members)
+
+    assert result is not None
+    assert result[3] == "single_label"
+
+
+def test_statement_block_label_is_consumed_by_all_assertion_search() -> None:
+    assertion = _clocked_assertion(_simple("a"))
+    members: list[dict[str, Any]] = [
+        {"kind": "StatementBlock", "name": "all_label"},
+        {"kind": "ProceduralBlock", "body": {"kind": "Block", "body": assertion}},
+    ]
+
+    results = _find_all_assertions_in_members(members)
+
+    assert len(results) == 1
+    assert results[0][3] == "all_label"
+
+
+def test_non_statement_block_name_is_never_treated_as_a_label() -> None:
+    assert _extract_label({"kind": "Block", "name": "wrong_field"}) is None
+
+
+@pytest.mark.parametrize(
+    ("kind", "expected_type"),
+    [
+        ("Intersect", SeqIntersect),
+        ("Within", SeqWithin),
+        ("Throughout", SeqThroughout),
+    ],
+)
+def test_v11_binary_operator_dispatch_is_exact(
+    kind: str,
+    expected_type: type[SeqIntersect] | type[SeqWithin] | type[SeqThroughout],
+) -> None:
+    expr: dict[str, Any] = {
+        "kind": "Binary",
+        "op": kind,
+        "left": _simple("a"),
+        "right": _simple("b"),
+    }
+
+    ir, _clock, _text, _label = _import_concurrent_assertion(_clocked_assertion(expr), None)
+
+    assert type(ir) is expected_type
+
+
+def test_v11_unary_not_dispatch_is_exact() -> None:
+    expr: dict[str, Any] = {"kind": "Unary", "op": "Not", "operand": _simple("a")}
+
+    ir, _clock, _text, _label = _import_concurrent_assertion(_clocked_assertion(expr), None)
+
+    assert type(ir) is PropNot
+
+
+def test_legacy_unary_property_not_dispatch_is_exact() -> None:
+    expr: dict[str, Any] = {
+        "kind": "UnaryPropertyExpr",
+        "op": "Not",
+        "operand": _simple("a"),
+    }
+
+    ir, _clock, _text, _label = _import_concurrent_assertion(_clocked_assertion(expr), None)
+
+    assert type(ir) is PropNot
+
+
+def test_simple_wrapper_preserves_legacy_nonconsecutive_repetition() -> None:
+    expr: dict[str, Any] = {
+        "kind": "Simple",
+        "expr": {
+            "kind": "SimpleAssertionExpr",
+            "expr": {"kind": "NamedValue", "symbol": "1 a"},
+            "repetition": {"kind": "Nonconsecutive", "min": 2, "max": 2},
+        },
+    }
+
+    ir, _clock, _text, _label = _import_concurrent_assertion(_clocked_assertion(expr), None)
+
+    assert ir.__class__.__name__ == "SeqNonconsecRep"
+
+
+def test_simple_wrapper_expands_inlined_assertion_instance() -> None:
+    expr: dict[str, Any] = {
+        "kind": "Simple",
+        "expr": {
+            "kind": "AssertionInstance",
+            "body": {
+                "kind": "SequenceConcat",
+                "elements": [
+                    {"sequence": _simple("a"), "min": 0, "max": 0},
+                    {"sequence": _simple("b"), "min": 1, "max": 1},
+                ],
+            },
+        },
+    }
+
+    ir, _clock, _text, _label = _import_concurrent_assertion(_clocked_assertion(expr), None)
+
+    assert ir.__class__.__name__ == "SeqConcat"
+
+
+@pytest.mark.parametrize(
+    ("op", "expected_type"),
+    [("And", SeqAnd), ("Or", SeqOr)],
+)
+def test_nested_binary_property_dispatch_is_exact(
+    op: str,
+    expected_type: type[SeqAnd] | type[SeqOr],
+) -> None:
+    node = {
+        "kind": "BinaryPropertyExpr",
+        "op": op,
+        "left": _simple("a"),
+        "right": _simple("b"),
+    }
+
+    assert type(_dispatch_expr_to_ir(node)) is expected_type
+
+
+def test_nested_unary_property_not_dispatch_is_exact() -> None:
+    node = {"kind": "UnaryPropertyExpr", "op": "Not", "operand": _simple("a")}
+
+    assert type(_dispatch_expr_to_ir(node)) is PropNot
+
+
+def test_nested_intersect_cannot_be_captured_by_or_dispatch() -> None:
+    node = {
+        "kind": "IntersectPropertyExpr",
+        "left": _simple("a"),
+        "right": _simple("b"),
+    }
+
+    assert type(_dispatch_expr_to_ir(node)) is SeqIntersect
+
+
+def test_unknown_binary_property_operator_is_not_captured_as_or() -> None:
+    node = {
+        "kind": "BinaryPropertyExpr",
+        "op": "Intersect",
+        "left": _simple("a"),
+        "right": _simple("b"),
+    }
+
+    with pytest.raises(UnsupportedConstruct, match="Unsupported BinaryPropertyExpr"):
+        _dispatch_expr_to_ir(node)
 
 
 @pytest.mark.parametrize("builder", [_build_goto_rep, _build_nonconsec_rep])

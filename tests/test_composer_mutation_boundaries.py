@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from sva2rtl.composer import (
     _emit_nfa_checker,
     _lift_to_nfa,
@@ -11,6 +13,7 @@ from sva2rtl.composer import (
     _try_lift_operand,
     compose,
 )
+from sva2rtl.errors import UnsupportedConstruct
 from sva2rtl.ir import (
     BoolExpr,
     ClockedSeq,
@@ -19,6 +22,8 @@ from sva2rtl.ir import (
     PropImplication,
     SeqConcat,
     SeqIntersect,
+    SeqThroughout,
+    SeqWithin,
     SignalFunc,
     SourceLoc,
 )
@@ -177,3 +182,48 @@ def test_nested_intersect_lift_fails_closed_when_exactly_one_side_is_unsupported
     )
 
     assert lifted is None
+
+
+@pytest.mark.parametrize(
+    ("node", "expected_construct"),
+    [
+        (
+            SeqIntersect(
+                left=_bool("a"),
+                right=SignalFunc(func_name="rose", signal="b", source_loc=_LOC),
+                source_loc=_LOC,
+            ),
+            "intersect with multi-cycle operand",
+        ),
+        (
+            SeqWithin(
+                inner=_bool("a"),
+                outer=SignalFunc(func_name="rose", signal="b", source_loc=_LOC),
+                source_loc=_LOC,
+            ),
+            "within with multi-cycle operand",
+        ),
+        (
+            SeqThroughout(
+                condition=SignalFunc(func_name="rose", signal="a", source_loc=_LOC),
+                body=_bool("b"),
+                source_loc=_LOC,
+            ),
+            "throughout with multi-cycle operand",
+        ),
+    ],
+)
+def test_composed_nfa_route_requires_every_operand_to_be_liftable(
+    node: SeqIntersect | SeqWithin | SeqThroughout,
+    expected_construct: str,
+) -> None:
+    """One valid operand must never route an invalid pair into NFA lowering."""
+    with pytest.raises(UnsupportedConstruct) as exc_info:
+        compose(
+            node,
+            ClockSpec(edge="posedge", signal="clk", source_loc=_LOC),
+            "one_invalid_nfa_operand",
+            "boundary",
+        )
+
+    assert exc_info.value.construct_name == expected_construct

@@ -1062,7 +1062,13 @@ class _HierarchicalSim:
         body = self._tick_node(node.children[1], signals)
         # Drive cond with _cond_start = start | body_active
         cond_sigs = dict(signals)
-        cond_sigs["start"] = signals.get("start", False) or body["active"]
+        # Keep the two causes explicit.  Besides making the supported timing
+        # contract easier to audit, this avoids treating the expression as a
+        # meaningful OR/AND mutation: the condition checker's verdict is not
+        # consumed here, and a boolean condition cannot overflow.
+        cond_sigs["start"] = bool(signals.get("start", False))
+        if body["active"]:
+            cond_sigs["start"] = True
         cond = self._tick_node(node.children[0], cond_sigs)
 
         # Directly evaluate the cond expression so that a false condition
@@ -1328,7 +1334,10 @@ class _HierarchicalSim:
             "overflow": bool(st["overflow"]),
         }
 
-        disabled = bool(signals.get("disable", False)) or bool(signals.get("disable_i", False))
+        # _HierarchicalSim.tick normalizes public disable_i into disable once
+        # at the hierarchy boundary.  Do not re-merge the aliases here: doing
+        # so creates an unreachable branch and obscures the single reset path.
+        disabled = bool(signals.get("disable", False))
         slot_count = int(node.params.get("nfa_thread_slots", "1"))
         if disabled:
             st["slots"] = tuple(frozenset() for _ in range(slot_count))
@@ -1440,7 +1449,8 @@ class _HierarchicalSim:
         if not node.children:
             return {"pass": False, "fail": False, "active": False, "overflow": False}
 
-        disabled = bool(signals.get("disable", False)) or bool(signals.get("disable_i", False))
+        # Public disable_i has already been normalized to disable by tick().
+        disabled = bool(signals.get("disable", False))
         ant_guard = str(node.params.get("ant_guard", "1'b0"))
         start = bool(signals.get("start", False))
         ant_match = (not disabled) and start and _eval_nfa_guard(ant_guard, signals)

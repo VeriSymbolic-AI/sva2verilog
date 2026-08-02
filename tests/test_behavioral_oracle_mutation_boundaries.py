@@ -244,6 +244,34 @@ def test_external_disable_i_cancels_pending_composite_verdict() -> None:
     assert all(not output["pass"] and not output["fail"] for output in outputs[1:])
 
 
+@pytest.mark.parametrize("disable_signal", ["disable", "disable_i"])
+def test_public_disable_aliases_abort_nfa_state_identically(disable_signal: str) -> None:
+    """The hierarchy boundary owns alias normalization for every NFA path."""
+    node = _hierarchy_node(
+        "nfa_generic",
+        f"nfa_disable_{disable_signal}",
+        {
+            "nfa_transitions": "0,a,1;1,b,2",
+            "nfa_accept": "2",
+            "nfa_kind": "property",
+        },
+    )
+
+    outputs = simulate_checker_hierarchy(
+        node,
+        [
+            {"start": True, "a": True, "b": False},
+            {"start": False, "a": False, "b": False, disable_signal: True},
+            {"start": False, "a": False, "b": False},
+        ],
+    )
+
+    assert outputs[1:] == [
+        {"pass": False, "fail": False, "active": False, "overflow": False},
+        {"pass": False, "fail": False, "active": False, "overflow": False},
+    ]
+
+
 def test_concat_only_first_child_receives_external_start() -> None:
     first = _hierarchy_node("rose", "concat_first", {"depth": "1"}, observed_signal="a")
     second = _hierarchy_node("rose", "concat_second", {"depth": "1"}, observed_signal="b")

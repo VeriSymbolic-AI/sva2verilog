@@ -2188,7 +2188,9 @@ def _render_multi_state_d_body(
             lines.append(f"    assign state_d[{base + b}] = {terms};")
         lines.append("")
     # Remove trailing blank line.
-    if lines and lines[-1] == "":
+    # states and thread_slots are validated positive by the caller, so this
+    # renderer always emitted at least the slot header before the separator.
+    if lines[-1] == "":
         lines.pop()
     return "\n".join(lines)
 
