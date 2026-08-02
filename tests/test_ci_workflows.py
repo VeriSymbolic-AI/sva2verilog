@@ -20,6 +20,7 @@ README = ROOT / "README.md"
 NIGHTLY_WORKFLOW = ROOT / ".github" / "workflows" / "differential-nightly.yml"
 CHECKOUT_NODE24_SHA = "3d3c42e5aac5ba805825da76410c181273ba90b1"
 SETUP_UV_NODE24_SHA = "c771a70e6277c0a99b617c7a806ffedaca235ff9"
+PINNED_UV_VERSION = "0.12.1"
 
 
 def test_verilator_installer_has_all_source_build_dependencies() -> None:
@@ -198,6 +199,7 @@ def test_core_actions_use_pinned_native_node24_releases() -> None:
 
     assert workflow_text.count(f"actions/checkout@{CHECKOUT_NODE24_SHA}") == 10
     assert workflow_text.count(f"astral-sh/setup-uv@{SETUP_UV_NODE24_SHA}") == 10
+    assert workflow_text.count(f'version: "{PINNED_UV_VERSION}"') == 10
     assert workflow_text.count("prune-cache: true") == 10
     assert "actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683" not in workflow_text
     assert "astral-sh/setup-uv@e4db8464a088ece1b920f60402e813ea4de65b8f" not in workflow_text
