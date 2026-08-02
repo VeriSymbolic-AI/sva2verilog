@@ -187,25 +187,29 @@ def _build_rep_checker(n: int) -> CheckerNode:
 def _is_induction_boundary(output: str) -> bool:
     """Return True only for proof non-convergence, not real counterexamples."""
     lower = output.lower()
-    if "timed out" in lower or "timeout" in lower:
-        return True
-
     lines = [line.lower() for line in output.splitlines()]
     basecase_failed = any(
-        "basecase" in line
-        and any(token in line for token in ("fail", "assert", "counterexample"))
+        "basecase failed" in line
+        or "for basecase: fail" in line
+        or "returned fail for basecase" in line
         for line in lines
     )
     if basecase_failed:
         return False
 
-    if "temporal induction failed" in lower:
+    if "timed out" in lower or "timeout" in lower:
         return True
-    return any(
-        "induction" in line
-        and any(token in line for token in ("fail", "unknown", "unreached"))
+
+    basecase_passed = any(
+        "for basecase: pass" in line or "returned pass for basecase" in line for line in lines
+    )
+    induction_failed = "temporal induction failed" in lower or any(
+        "for induction: fail" in line
+        or "returned fail for induction" in line
+        or "returned unknown for induction" in line
         for line in lines
     )
+    return basecase_passed and induction_failed
 
 
 def _assert_kinduction_passed(passed: bool, output: str, op_name: str) -> None:
@@ -214,8 +218,7 @@ def _assert_kinduction_passed(passed: bool, output: str, op_name: str) -> None:
         return
     if _is_induction_boundary(output):
         pytest.xfail(
-            f"k-induction did not converge for {op_name} (honest boundary):\n"
-            f"{output[-500:]}"
+            f"k-induction did not converge for {op_name} (honest boundary):\n{output[-500:]}"
         )
     pytest.fail(f"{op_name} k-induction proof FAILED:\n{output[-2000:]}")
 
@@ -524,9 +527,7 @@ endmodule
             mode="prove",
             timeout=_phase10_prove_timeout(),
         )
-        _assert_kinduction_passed(
-            passed, output, "bounded consecutive repetition [*2:5]"
-        )
+        _assert_kinduction_passed(passed, output, "bounded consecutive repetition [*2:5]")
 
 
 # ── Phase P2-1 expansion: bounded liveness ───────────────────────────────
@@ -535,11 +536,6 @@ endmodule
 class TestKinductionBoundedEventually:
     """Attempt complete proof for bounded eventually ``s_eventually[1:3] a``."""
 
-    @pytest.mark.xfail(
-        reason="bounded eventually is a liveness property; k-induction on the "
-               "pass signal may not converge without additional invariants",
-        strict=False,
-    )
     def test_bounded_eventually_kinduction_prove(self) -> None:
         """P2-1: `s_eventually[1:3] a` pass behavior attempted with k-induction.
 
@@ -555,7 +551,10 @@ class TestKinductionBoundedEventually:
         loc = _loc()
         node = PropBoundedEventually(
             body=BoolExpr(text="a", source_loc=loc),
-            lo=lo, hi=hi, strong=True, source_loc=loc,
+            lo=lo,
+            hi=hi,
+            strong=True,
+            source_loc=loc,
         )
         checker = optimize(compose(node, _clock(loc), "be", f"s_eventually[{lo}:{hi}] a"))
         ref_name = "ref_be_1_3_prove"
@@ -595,6 +594,4 @@ endmodule
             mode="prove",
             timeout=_phase10_prove_timeout(),
         )
-        _assert_kinduction_passed(
-            passed, output, "bounded eventually s_eventually[1:3]"
-        )
+        _assert_kinduction_passed(passed, output, "bounded eventually s_eventually[1:3]")

@@ -41,7 +41,8 @@ jobs:
           - suite: kinduction
             files: tests/test_formal_kinduction.py
             min-passed: 10
-            # One strict xfail documents the bounded-liveness induction boundary.
+            # One dynamically classified xfail documents only the bounded-liveness
+            # induction-convergence boundary. Counterexamples remain hard failures.
             max-skipped: 1
 
     steps:
@@ -85,3 +86,4 @@ jobs:
         run: >
           uv run python tools/ci/check_junit.py formal-results.xml
           --min-passed ${{ matrix.min-passed }} --max-skipped ${{ matrix.max-skipped }}
+          --allow-skip-prefix "k-induction did not converge for"
