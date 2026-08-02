@@ -38,6 +38,27 @@ catalog.
 | F-13 | Medium | Generated RTL embeds source paths | Artifacts can disclose directory structure and become non-reproducible | Normalize source locations relative to an explicit root and avoid absolute paths by default |
 | F-14 | Low | Semantic hot paths have high cyclomatic complexity | Changes in importer/composer/CLI/oracle have broad regression blast radius | Refactor only under dedicated semantic tests and mutation protection |
 
+## 2026-08-02 follow-up findings and closure
+
+The original table remains the historical 2026-08-01 review. A fresh audit of
+the later `de3f697` baseline found five additional evidence-governance issues;
+local candidate `92a3b5a925325401dd6ead27a85f55ec6d0cd7bb` addresses them:
+
+| ID | Severity | Finding | Closure in local candidate | Remaining boundary |
+|---|---|---|---|---|
+| F-15 | High | `TestKinductionBoundedEventually` had a blanket non-strict xfail, so a real counterexample or tool error could be reported as expected failure | Removed the marker; classify only basecase-pass plus induction non-convergence/timeout; added five log-classification regressions and exact JUnit reason gates | One bounded-liveness induction target still does not converge and remains explicit xfail; other formal results are bounded by their harnesses |
+| F-16 | Medium | Workflow action SHAs were pinned but the uv CLI version could still float | All ten `setup-uv` uses explicitly request uv 0.12.1; workflow regression enforces action SHA and CLI version | Dependency lock and toolchain updates still require deliberate periodic review |
+| F-17 | Medium | Row-level support evidence reused floating “current commit pending” text after exact remote runs existed | Matrix rows now name executable `de3f697` and CI run `30709818712`; local candidate evidence is separately marked non-remote | Candidate `92a3b5a` still needs same-SHA CI/nightly/Full Formal after explicit push authorization |
+| F-18 | Medium | Twenty-one covered Python mutants survived, including importer dispatch and NFA routing boundaries; several survivors were equivalent duplicate conditions | Added operator/label/routing/disable regressions and simplified unreachable duplicate predicates; all 317 covered valid mutants and 12 reviewed RTL mutants are killed | Thirty-two uncovered Python candidates and the finite mutation vocabulary remain outside the score |
+| F-19 | Medium | Real-project tests generated temporary toy projects and used RTL-vs-oracle agreement as the sole dynamic verdict | Added two versioned project corpora and a hand-authored cycle-exact source expectation checked before oracle agreement | No large industrial corpus, nested filelist/conflicting-library corpus, or repeated-instance corpus yet |
+
+Fresh local gates for `92a3b5a`: Icarus 1579 passed / 1 skipped / 1 dynamic
+xfail; Verilator 174 passed / 1 reviewed skip; generated RTL 133/133; branch
+coverage 88.12%; Full Formal 126 passed / 1 identical bounded-liveness xfail;
+dual-backend fixed/date-seeded differential passes; Python mutation 317/317;
+RTL-template mutation 12/12; ruff and strict mypy pass. These are local results,
+not remote or production evidence.
+
 ## Reproduced failures
 
 The following were reproduced against the reviewed baseline:
@@ -80,4 +101,3 @@ assertion PASS plus a failed required cover is not accepted as closure.
 - Local and parent-commit evidence is not silently attributed to a different
   executable commit.
 - Building a wheel in CI does not mean the package is published.
-

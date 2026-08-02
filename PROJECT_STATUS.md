@@ -9,9 +9,10 @@
 sva2verilog 是一个开源的 SystemVerilog Assertion (SVA) 到可综合 RTL
 监控器编译器。v1.7.1 已于 2026-07-31 发布，修复了 v1.7.0 的完整契约语义
 缺陷。发布后的首个可执行代码与工作流基线 `b055105` 已完成同提交远端资格
-闭环；后续高优先级加固与 F-11 真实工程 frontend 基线已经推进到
-`de3f697`。后续纯文档提交只记录可执行基线，不把文档 SHA 倒推为新的
-证明对象。
+闭环；后续高优先级加固与 F-11 真实工程 frontend 远端基线已经推进到
+`de3f697`。本地候选 `92a3b5a` 又关闭了 F-15/F-16/F-18/F-19，但尚未获准
+推送，因此不能将 `de3f697` 的远端运行倒推为该候选的证明。后续纯文档提交
+也只记录可执行基线，不把文档 SHA 倒推为新的证明对象。
 
 - 发布状态：tag `v1.7.1` 指向 `8b5c063`；发布后资格基线为 `b055105`
 - 主 CI：run `30683023280` 全部 13 个 job 通过，包括 8 个
@@ -28,17 +29,36 @@ sva2verilog 是一个开源的 SystemVerilog Assertion (SVA) 到可综合 RTL
   通过；nightly run `30686818970` 的三个 job 通过；Full Formal run
   `30686820029` 的六个分片通过。该组运行实际使用 Node.js 24 actions，
   并覆盖最新 CDC 注入、oracle mutation 与测试隔离修复
-- 最新本地可执行基线：`de3f697`；完整 Icarus 1553 passed / 1 skipped /
-  1 xfailed，完整 Verilator simulation 174 passed / 2 个已审查 skip，branch
-  coverage 87.19%，generated RTL 133 passed，Full Formal 126 passed /
-  1 xfailed，Python 3.14 选择轴 1196/1196 passed；wheel/sdist 隔离冒烟通过
-- 变异与差分：F-11 代码基线的 Python mutation 295/316（93.4%，另有 36 个
-  未覆盖候选）、RTL template mutation 12/12；Icarus/Verilator fast 各
-  16 passed，date-seeded slow 各 1 passed。最终 `de3f697` 的同提交 CI
+- 最新本地候选：`92a3b5a`；完整 Icarus 1579 passed / 1 skipped /
+  1 个动态分类的 bounded-liveness xfail，完整 Verilator simulation 174
+  passed / 1 个已审查 skip，branch coverage 88.12%，generated RTL 133
+  passed，Full Formal 126 passed / 1 个相同 xfail；ruff 与 strict mypy 通过
+- 变异与差分：候选的四个 Python mutation 面为 317/317（100%，另有 32 个
+  未覆盖候选不进入分母）、RTL template mutation 12/12；Icarus/Verilator
+  fixed-seed fast 各 16 passed，date-seeded slow 各 1 passed。远端基线
+  `de3f697` 的同提交 CI
   run `30709818712` 13/13、nightly run `30709827239` 3/3、Full Formal
-  run `30709832382` 6/6 全部通过
+  run `30709832382` 6/6 全部通过；`92a3b5a` 尚无远端证据
 - 支持状态权威：`SUPPORT_MATRIX.md` 记录逐构造支持边界、证据完整度和降级原因；README / SUPPORTED_CONSTRUCTS 只作概览和解释
 - 工业级验证缺口：已记录在 `INDUSTRIAL_VALIDATION_GAPS.md`，包含当前进展、P0/P1/P2 严重度、修复计划和 fully-supported 定义标准
+
+## 2026-08-02 F-15/F-16/F-18/F-19 可信度闭环（本地候选）
+
+- F-15：移除 k-induction 整类测试的 blanket xfail。只有日志同时表明
+  basecase 通过、induction 未收敛或超时才动态 xfail；basecase 反例、普通
+  counterexample 和工具错误全部硬失败。CI 与 Full Formal 的 JUnit 门禁只
+  白名单该精确原因。
+- F-16：三条 GitHub Actions workflow 的 10 个 `setup-uv` 入口均显式固定
+  uv 0.12.1，避免 action 固定而运行时 CLI 漂移。
+- F-18：为 slang v11 标签传递、属性运算符分派、NFA 路由和 disable 归一化
+  增加 mutation-sensitive 回归，并删除合法输入域内不可观察的重复判断。
+  四模块当前覆盖有效突变为 16/16、135/135、51/51、115/115。
+- F-19：新增两套版本化小型 project corpus，覆盖参数专化与 library
+  directory/extension 解析；参数项目同时保存手工推导的 cycle-exact 期望
+  trace，RTL 必须先匹配源语义真值，再与 Python oracle 比较。
+- 本地 Full Formal 为 126 passed + 1 个受控边界，证明分类单元测试 5/5；
+  该结果仍是有界、按 harness/assumption/tool 列明的证据，不是芯片正确性或
+  所有 SVA 构造完备性的证明。
 
 ## 2026-08-02 F-11 真实工程 frontend 闭环
 

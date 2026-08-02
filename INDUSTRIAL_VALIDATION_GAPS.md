@@ -33,6 +33,17 @@ not an industrial-corpus claim: trusted filelist contents, escaped identifiers,
 instance-label collisions, complex library resolution, and tool-specific option
 sets remain outside the qualified subset.
 
+Local candidate `92a3b5a` closes four additional false-assurance gaps without
+changing the industrial claim. Formal k-induction no longer has a blanket
+xfail: only a passed basecase followed by an induction non-convergence/timeout
+is dynamically classified, while counterexamples and tool errors hard-fail.
+All CI setup points pin uv 0.12.1. Two versioned frontend corpora replace
+temporary-only project construction, and one carries a hand-authored expected
+trace independent of the Python oracle. Covered valid Python mutation is now
+317/317 across the four semantic modules, with 32 uncovered candidates kept
+outside the denominator. This candidate is locally qualified but not pushed or
+remotely qualified.
+
 The remaining risk is not raw test count. The remaining risk is evidence-chain
 closure. For each supported construct, an external reviewer should be able to see
 real source input, dual simulator parity, a non-circular semantic reference, a
@@ -96,6 +107,12 @@ Current project state:
   1196/1196. Same-commit nightly run `30709827239` and Full Formal run
   `30709832382` passed; CI run `30709818712` also passed all 13 jobs, including
   its four Verilator axes.
+- Latest local candidate `92a3b5a`: full Icarus 1579 passed / 1 skipped / 1
+  dynamically classified xfail; full Verilator simulation 174 passed / 1
+  reviewed skip; generated RTL 133/133; Full Formal 126 passed / 1 identical
+  bounded-liveness xfail; branch coverage 88.12%; fixed/date-seeded fast/slow
+  differential passes on both simulators; Python mutation 317/317 and reviewed
+  RTL-template mutation 12/12. No remote run may be attributed to this SHA yet.
 
 Recent hardening already completed:
 
@@ -452,15 +469,12 @@ Done when:
 - Critical modules have explicit coverage targets.
 - Mutation score is high enough to catch common timing, gating, and polarity bugs.
 
-Current local evidence (rerun 2026-08-01):
+Current local evidence (rerun 2026-08-02 at `92a3b5a`):
 
-- `bool_semantics.py`: 15/15 killed (100%).
-- `behavioral_oracle.py`: 118/131 covered, valid mutants killed (90.1%);
-  18 uncovered candidates are reported separately.
-- `composer.py`: 41/48 covered, valid mutants killed (85.4%); 4 uncovered
-  candidates are reported separately.
-- `ast_importer.py`: 92/108 covered, valid mutants killed (85.2%); 8 uncovered
-  candidates are reported separately.
+- `bool_semantics.py`: 16/16 killed (100%); 1 uncovered candidate reported.
+- `behavioral_oracle.py`: 135/135 killed (100%); 17 uncovered candidates.
+- `composer.py`: 51/51 killed (100%); 10 uncovered candidates.
+- `ast_importer.py`: 115/115 killed (100%); 4 uncovered candidates.
 - Reviewed RTL template mutations: 12/12 killed, covering delay upper bounds,
   repetition counter state, counter width, non-overlap consequent wiring,
   sequence-OR failure polarity, both sequence-OR failure-retention latches,
@@ -471,17 +485,21 @@ Current local evidence (rerun 2026-08-01):
   from the percentage and exposed as explicit uncovered debt.
 - The scheduled mutation job runs all four Python modules separately at the
   85% threshold and the RTL template suite at a strict 100% threshold.
-- Across the four Python modules, 266/302 scored mutants were killed (88.1%).
-  Thirty-six valid mutants survived and 30 candidates were uncovered, so this
-  gate passes its current threshold but also exposes concrete test debt; it is
-  not evidence that the selected semantic surfaces are exhaustive.
+- Across the four Python modules, all 317 scored mutants were killed. Thirty-two
+  candidates were not executed by the configured mutation baselines and remain
+  explicit coverage debt. A 100% score over this finite operator set is not
+  evidence that the selected mutation operators or semantic surfaces are
+  exhaustive.
 
-#### Width, type, and bit-select support is weak
+#### Width, type, and bit-select support remains deliberately bounded
 
-Signal extraction still relies heavily on identifier scanning for boolean
-expressions, and generated ports are scalar in the common templates. Industrial
-SVA inputs commonly use vectors, bit-selects, part-selects, parameters, and typed
-comparisons.
+F-01 is closed for the structured supported subset: vector widths, single-bit
+selects, two-state constants/parameters, and equality/inequality reach typed
+monitor ports and dual-backend tests. Arithmetic, reductions, part-selects,
+four-state constants, ambiguous widths, and broader SystemVerilog typing remain
+explicitly rejected. Industrial SVA inputs commonly require those excluded
+forms, so this is still a product-scope gap rather than a silent scalarization
+bug.
 
 Fix:
 
@@ -643,9 +661,9 @@ The immediate next work should be:
    baseline. **Done for `b055105`, `1841ed4`, and `de3f697`; do not attribute
    these runs to the release tag or later
    documentation-only commits.**
-7. Continue converting the remaining 21 mutation survivors and 36 uncovered
-   candidates into targeted semantic regressions, prioritizing the 14 importer
-   survivors and then composer boundaries.
+7. Convert mutation debt into targeted semantic regressions. **Covered valid
+   survivors are closed at `92a3b5a` (317/317); 32 uncovered candidates and the
+   finite mutation-operator vocabulary remain explicit debt.**
 8. Add k-induction proofs for additional small finite-state templates and make
    the bounded-liveness xfail boundary explicit per construct.
 9. Replace the multi-clock 2-DFF level crossing with an acknowledged event
@@ -654,6 +672,9 @@ The immediate next work should be:
     **Done and remotely qualified at `1841ed4`.**
 11. Build a versioned frontend corpus with nested filelists, conflicting library
     resolution, repeated parameterized instances, and deterministic diagnostics.
+    **Partially done at `92a3b5a`: two maintained corpora cover parameter
+    specialization and library directory/extension resolution, including one
+    independent source-truth trace. Nested/conflicting/large-project cases remain.**
 12. FPGA prototype (FUT-03) — demand-pulled.
 13. C++ rewrite v2 (FUT-04) — demand-pulled.
 
