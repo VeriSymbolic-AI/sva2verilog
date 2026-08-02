@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -22,63 +23,34 @@ from tests.simulation.tb_generator import (
 
 pytestmark = [pytest.mark.simulation, requires_slang]
 
-
-def _write(path: Path, text: str) -> Path:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
-    return path
+_CORPUS = Path(__file__).parents[1] / "project_corpus" / "parameter_specialization"
 
 
 def test_parameter_specialized_project_matches_oracle_on_selected_simulator(
     tmp_path: Path,
     simulator: str,
 ) -> None:
-    """Filelist/include/define/top/-G output agrees with the independent oracle."""
-    include_dir = tmp_path / "include"
-    _write(
-        include_dir / "project_check.svh",
-        "`ifdef ENABLE_PROJECT_CHECK\n"
-        "project_check: assert property (@(posedge clk) a == EXPECTED_PARAM);\n"
-        "`endif\n",
-    )
-    _write(
-        tmp_path / "blocks" / "assertion_block.sv",
-        "module assertion_block #(parameter bit EXPECTED_PARAM = 0) "
-        "(input logic clk, input logic a);\n"
-        "  `include \"project_check.svh\"\n"
-        "endmodule\n",
-    )
-    primary = _write(
-        tmp_path / "top.sv",
-        "module project_top #(parameter bit EXPECTED_PARAM = 0) "
-        "(input logic clk, input logic a);\n"
-        "  assertion_block #(.EXPECTED_PARAM(EXPECTED_PARAM)) "
-        "u_checker(.clk(clk), .a(a));\n"
-        "endmodule\n",
-    )
-    filelist = _write(tmp_path / "files.f", "blocks/assertion_block.sv\n")
+    """A versioned project has source-derived truth beyond oracle agreement."""
+    manifest = json.loads((_CORPUS / "expected.json").read_text(encoding="utf-8"))
     context = SlangCompilationContext(
-        filelists=(filelist,),
-        include_dirs=(include_dir,),
-        defines=("ENABLE_PROJECT_CHECK=1",),
-        top_modules=("project_top",),
-        parameter_overrides=("EXPECTED_PARAM=1",),
+        filelists=(_CORPUS / "files.f",),
+        include_dirs=(_CORPUS / "include",),
+        defines=tuple(manifest["defines"]),
+        top_modules=(manifest["top"],),
+        parameter_overrides=tuple(manifest["parameters"]),
         single_unit=True,
     )
 
-    ast = invoke_slang(primary, context=context)
+    ast = invoke_slang(_CORPUS / "top.sv", context=context)
     assertions = import_all_assertions(ast)
     assert len(assertions) == 1
     node, clock, text, label = assertions[0]
+    assert label == manifest["assertion_label"]
+    assert text == manifest["assertion_text"]
     checker = optimize(compose(node, clock, label, text))
-    assert checker.observed_signals == (("a", "a"),)
+    assert [port for port, _source in checker.observed_signals] == manifest["observed_signals"]
 
-    stimulus: list[dict[str, Any]] = [
-        {"start": True, "a": False},
-        {"start": True, "a": True},
-        {"start": False, "a": True},
-        {"start": True, "a": False},
-    ]
+    stimulus: list[dict[str, Any]] = manifest["stimulus"]
     modules = emit_all(checker)
     extra_inputs = extra_inputs_from_checker(checker)
     testbench = generate_testbench(
@@ -103,7 +75,10 @@ def test_parameter_specialized_project_matches_oracle_on_selected_simulator(
     )
     oracle = simulate_checker_hierarchy(checker, stimulus)
 
+    # Primary verdict: a hand-authored, versioned trace derived from the source
+    # property and the documented registered-output sampling contract.
+    assert rtl == manifest["expected_trace"]
+    # Secondary verdict: preserve differential agreement with the independent
+    # Python temporal model without making it the sole source of truth.
     for output in ("active", "pass", "fail"):
         assert [row[output] for row in rtl] == [row[output] for row in oracle]
-    assert any(row["attempt_fired"] for row in rtl)
-    assert not any(row["disabled_o"] for row in rtl)

@@ -16,6 +16,7 @@ from sva2rtl.frontend import SlangCompilationContext, invoke_slang
 from tests.conftest import requires_slang
 
 _SIMPLE_AST: dict[str, object] = {"design": {"members": []}}
+_PROJECT_CORPUS = Path(__file__).parent / "project_corpus"
 
 
 def _completed_process() -> subprocess.CompletedProcess[str]:
@@ -219,47 +220,25 @@ def test_cli_help_has_no_raw_slang_argument_escape_hatch() -> None:
 @requires_slang
 @pytest.mark.integration
 def test_real_project_filelist_include_define_top_and_parameter(tmp_path: Path) -> None:
-    """A relative -F project elaborates through the complete CLI pipeline."""
-    include_dir = tmp_path / "include"
-    include_dir.mkdir()
-    _touch(
-        include_dir / "project_check.svh",
-        "`ifdef ENABLE_PROJECT_CHECK\n"
-        "project_check: assert property (@(posedge clk) a == EXPECTED_PARAM);\n"
-        "`endif\n",
-    )
-    _touch(
-        tmp_path / "blocks" / "assertion_block.sv",
-        "module assertion_block #(parameter bit EXPECTED_PARAM = 0) "
-        "(input logic clk, input logic a);\n"
-        "  `include \"project_check.svh\"\n"
-        "endmodule\n",
-    )
-    primary = _touch(
-        tmp_path / "top.sv",
-        "module project_top #(parameter bit EXPECTED_PARAM = 0) "
-        "(input logic clk, input logic a);\n"
-        "  assertion_block #(.EXPECTED_PARAM(EXPECTED_PARAM)) "
-        "u_checker(.clk(clk), .a(a));\n"
-        "endmodule\n",
-    )
-    filelist = _touch(tmp_path / "files.f", "blocks/assertion_block.sv\n")
+    """A versioned relative -F project elaborates through the complete CLI pipeline."""
+    corpus = _PROJECT_CORPUS / "parameter_specialization"
+    expected = json.loads((corpus / "expected.json").read_text(encoding="utf-8"))
     output = tmp_path / "project_check.sv"
 
     result = CliRunner().invoke(
         main,
         [
-            str(primary),
+            str(corpus / "top.sv"),
             "--filelist",
-            str(filelist),
+            str(corpus / "files.f"),
             "--include-dir",
-            str(include_dir),
+            str(corpus / "include"),
             "--define",
-            "ENABLE_PROJECT_CHECK=1",
+            expected["defines"][0],
             "--top",
-            "project_top",
+            expected["top"],
             "--parameter",
-            "EXPECTED_PARAM=1",
+            expected["parameters"][0],
             "--single-unit",
             "--output",
             str(output),
@@ -277,37 +256,27 @@ def test_real_project_filelist_include_define_top_and_parameter(tmp_path: Path) 
 @requires_slang
 @pytest.mark.integration
 def test_real_project_library_directory_and_extension(tmp_path: Path) -> None:
-    """A missing module is found through the reviewed -y/-Y library context."""
-    library_dir = tmp_path / "library"
-    library_dir.mkdir()
-    _touch(
-        library_dir / "library_checker.sv",
-        "module library_checker(input logic clk, input logic a);\n"
-        "  library_check: assert property (@(posedge clk) a);\n"
-        "endmodule\n",
-    )
-    primary = _touch(
-        tmp_path / "top.sv",
-        "module library_top(input logic clk, input logic a);\n"
-        "  library_checker u_checker(.clk(clk), .a(a));\n"
-        "endmodule\n",
-    )
+    """A versioned missing module is found through reviewed -y/-Y context."""
+    corpus = _PROJECT_CORPUS / "library_resolution"
+    expected = json.loads((corpus / "expected.json").read_text(encoding="utf-8"))
     output = tmp_path / "library_check.sv"
 
     result = CliRunner().invoke(
         main,
         [
-            str(primary),
+            str(corpus / "top.sv"),
             "--library-dir",
-            str(library_dir),
+            str(corpus / "library"),
             "--library-ext",
-            ".sv",
+            expected["library_extension"],
             "--top",
-            "library_top",
+            expected["top"],
             "--output",
             str(output),
         ],
     )
 
     assert result.exit_code == 0, result.output
-    assert "module sva_library_check" in output.read_text(encoding="utf-8")
+    emitted = output.read_text(encoding="utf-8")
+    assert f"module sva_{expected['assertion_label']}" in emitted
+    assert expected["assertion_text"] in emitted

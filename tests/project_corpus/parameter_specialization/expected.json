@@ -1,0 +1,20 @@
+{
+  "top": "project_top",
+  "defines": ["ENABLE_PROJECT_CHECK=1"],
+  "parameters": ["EXPECTED_PARAM=1"],
+  "assertion_label": "project_check",
+  "assertion_text": "(a == 1'b1)",
+  "observed_signals": ["a"],
+  "stimulus": [
+    {"start": true, "a": false},
+    {"start": true, "a": true},
+    {"start": false, "a": true},
+    {"start": true, "a": false}
+  ],
+  "expected_trace": [
+    {"active": false, "pass": false, "fail": false, "attempt_fired": false, "disabled_o": false},
+    {"active": true, "pass": false, "fail": true, "attempt_fired": true, "disabled_o": false},
+    {"active": true, "pass": true, "fail": false, "attempt_fired": true, "disabled_o": false},
+    {"active": false, "pass": false, "fail": false, "attempt_fired": true, "disabled_o": false}
+  ]
+}

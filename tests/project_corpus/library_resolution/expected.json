@@ -1,0 +1,7 @@
+{
+  "top": "library_top",
+  "assertion_label": "library_check",
+  "assertion_text": "a",
+  "observed_signals": ["a"],
+  "library_extension": ".sv"
+}
