@@ -5,7 +5,9 @@
 
 An open-source SVA (SystemVerilog Assertion) to synthesizable RTL compiler. It takes SVA properties/sequences as input and generates hardware monitor modules in SystemVerilog (with Verilog-2001 compatibility flag) that can be simulated with Verilator/Icarus or synthesized to FPGA. No mature open-source tool exists in this space globally — this fills a critical gap in the EDA toolchain.
 
-**Core Value:** Turn any SVA property into a correct, area-efficient synthesizable hardware monitor — something no open-source tool does today.
+**Core Value:** Turn any supported SVA property into an area-efficient,
+evidence-backed synthesizable hardware monitor while rejecting unsupported or
+insufficiently verified forms.
 
 ### Constraints
 
@@ -13,7 +15,7 @@ An open-source SVA (SystemVerilog Assertion) to synthesizable RTL compiler. It t
 - **Language**: Python for v1 (rapid iteration), potential C++ rewrite for v2 performance
 - **Output**: SystemVerilog default, Verilog-2001 via --verilog flag
 - **Validation**: All generated monitors must pass equivalence checking against behavioral simulation (Icarus/Verilator). Dual-oracle contract enforced: every simulation test passes under both iverilog and Verilator in CI.
-- **License**: BSL (Business Source License) — free for individual/academic/evaluation, commercial use by large companies requires license
+- **License**: Apache License 2.0 (SPDX: `Apache-2.0`)
 - **Architecture**: Token-passing composition model (TIMA Lab) with operator-aware templates (counter encoding for ranges)
 - **Interface standard**: Every generated checker exposes (clk, rst_n, start, pass, fail, active) ports
 

@@ -66,10 +66,12 @@ work; mutation and coverage release metrics are tracked in
 
 ## Tier 3 Operators (v1.4 Part A — Bounded Liveness)
 
-Bounded-liveness operators carry an explicit cycle window `[m:n]`, which makes
-them synthesizable on finite state (the obligation has a hard deadline). The
-**unbounded** forms are rejected at compile time — they are not synthesizable on
-finite state.
+Bounded-liveness operators carry an explicit cycle window `[m:n]`, which gives
+the current pass/fail monitor a hard deadline and a finite resource budget. The
+**unbounded** forms are rejected at compile time because v1 does not define a
+complete finite-time verdict and resource contract for them. This is a compiler
+scope boundary; it is not a claim that every unbounded safety monitor is
+mathematically impossible in hardware.
 
 | Operator | Category | Description | Example SVA | Generated Template |
 |----------|----------|-------------|-------------|-------------------|
@@ -87,9 +89,11 @@ Notes for v1.4 Part A:
 - Equivalence is established **non-circularly**: the generated monitor is proven
   by SymbiYosys BMC against an independent IEEE-1800 reference monitor authored
   from `∃ k ∈ [m,n] : a(t0+k)` semantics (not derived from the implementation).
-- Unbounded `s_eventually a` / `always a` / `s_until` / `s_until_with` (which
-  require an eventual or unbounded obligation) raise `UnsupportedConstruct` with a
-  source location and a remediation hint.
+- Unbounded `s_eventually a` / `always a` / `s_until` / `s_until_with` raise
+  `UnsupportedConstruct` with a source location and a remediation hint. The
+  eventual/strong-until forms have no finite completion deadline under the
+  current contract; unbounded `always` is also outside the implemented v1
+  streaming-monitor subset.
 - Weak `until` / `until_with` are safety properties (no liveness obligation) and
   are implemented in the current finite-state subset; the strong `s_until` /
   `s_until_with` forms are rejected.
@@ -274,11 +278,11 @@ The following operators remain unsupported or deliberately rejected:
 |----------|----------|--------|
 | `nexttime` | Temporal | Not supported |
 | `eventually`/`s_eventually` (bounded `[m:n]`) | Liveness | **Supported** (v1.4 Part A) |
-| `eventually`/`s_eventually` (unbounded) | Liveness | Rejected — not synthesizable on finite state |
+| `eventually`/`s_eventually` (unbounded) | Liveness | Rejected — no finite completion deadline in the v1 monitor contract |
 | `always [m:n]` / `s_always [m:n]` (bounded) | Liveness | **Supported** (v1.4 Part A) |
 | `until` / `until_with` (weak) | Safety | **Supported** (v1.4 Part A) |
 | `s_until` / `s_until_with` (strong) | Liveness | Rejected — requires unbounded eventual obligation |
-| `always` (unbounded) | Temporal | Rejected — not synthesizable on finite state |
+| `always` (unbounded) | Temporal | Rejected — legal streaming safety form, but not implemented by v1 |
 | `[->M:N]` / `[=M:N]` where `M < N` | Repetition | Rejected — v1 supports fixed counts only |
 | `intersect`/`within` with local variables | Sequence | Not supported |
 | Nested multi-path operators | Sequence | Supported when operands are NFA-liftable and K ≤ 32 |
@@ -289,8 +293,8 @@ The following operators remain unsupported or deliberately rejected:
 | Limitation | Description |
 |------------|-------------|
 | Multi-clock path-one only | The compiler accepts `##1` clock-change sequences and non-overlap cross-clock implication through a trusted 2-DFF level synchronizer; event delivery, full CDC/metastability proof, and multi-path cross-clock composition are excluded |
-| Unbounded repetition `[*]` | Requires infinite state; not synthesizable |
-| Unbounded delay `##[0:$]` | Requires infinite state; not synthesizable |
+| Unbounded repetition `[*]` | Open-ended match/resource semantics are outside the bounded v1 contract |
+| Unbounded delay `##[0:$]` | No finite deadline under the current pass/fail monitor contract |
 | Local variables | SVA local variables in sequences are not supported |
 | Recursive properties | Not supported |
 | Non-scalar sampled operands | Packed vectors, arrays, selects, and compound expressions are not supported in sampled value functions |
@@ -367,7 +371,7 @@ The following constructs are recognized by the parser but produce clear error me
 | `[->M:N]` / `[=M:N]` where `M < N` | SVA-E002 | Use fixed `[->N]` / `[=N]`, or split into explicit properties |
 | `##[0:$]` | SVA-E002 | Use `##[0:MAX]` with explicit bound |
 | Unsupported multi-clock forms (`##N` where N≠1, cross-clock `intersect`, overlapping cross-clock `|->`) | SVA-E003 | Use allowed path-one forms (`##1`, `|=>`) or split into single-clock properties |
-| `nexttime` / unbounded `always` / unbounded `eventually` / `s_until` | SVA-E001 | Unbounded liveness not synthesizable; use bounded `[m:n]` forms |
+| `nexttime` / unbounded `always` / unbounded `eventually` / `s_until` | SVA-E001 | Outside the v1 monitor contract; use a semantically justified bounded form or an alternative flow |
 | bounded `eventually`/`s_eventually [m:n]` | — | Supported since v1.4 Part A |
 
 ## Validation

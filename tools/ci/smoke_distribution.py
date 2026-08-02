@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import shutil
 import subprocess
 import sys
@@ -11,6 +12,8 @@ import tarfile
 import tempfile
 import zipfile
 from pathlib import Path
+
+APACHE_2_LICENSE_SHA256 = "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
 
 
 def _run(command: list[str], *, cwd: Path) -> subprocess.CompletedProcess[str]:
@@ -45,8 +48,37 @@ def inspect_artifacts(wheel: Path, sdist: Path) -> None:
     if missing:
         raise RuntimeError(f"wheel is missing required members: {missing}")
 
+    metadata_members = [name for name in wheel_names if name.endswith(".dist-info/METADATA")]
+    license_members = [name for name in wheel_names if name.endswith(".dist-info/licenses/LICENSE")]
+    if len(metadata_members) != 1 or len(license_members) != 1:
+        raise RuntimeError("wheel must contain one METADATA file and one licensed LICENSE file")
+    with zipfile.ZipFile(wheel) as archive:
+        metadata = archive.read(metadata_members[0]).decode("utf-8")
+        wheel_license = archive.read(license_members[0])
+    if "License-Expression: Apache-2.0" not in metadata:
+        raise RuntimeError("wheel metadata does not declare Apache-2.0")
+    if hashlib.sha256(wheel_license).hexdigest() != APACHE_2_LICENSE_SHA256:
+        raise RuntimeError("wheel LICENSE does not match the official Apache-2.0 text")
+
     with tarfile.open(sdist, "r:gz") as archive:
         sdist_names = [Path(name) for name in archive.getnames()]
+        required_docs = {
+            "LICENSE",
+            "README.md",
+            "FORMAL_VERIFICATION.md",
+            "SUPPORTED_CONSTRUCTS.md",
+            "SUPPORT_MATRIX.md",
+        }
+        present_docs = {path.name for path in sdist_names}
+        missing_docs = sorted(required_docs - present_docs)
+        if missing_docs:
+            raise RuntimeError(f"sdist is missing public license/support docs: {missing_docs}")
+        license_member = next(path for path in sdist_names if path.name == "LICENSE")
+        extracted_license = archive.extractfile(license_member.as_posix())
+        if extracted_license is None:
+            raise RuntimeError("sdist LICENSE could not be read")
+        if hashlib.sha256(extracted_license.read()).hexdigest() != APACHE_2_LICENSE_SHA256:
+            raise RuntimeError("sdist LICENSE does not match the official Apache-2.0 text")
     forbidden_roots = {"tests", "tools", ".github", ".planning", ".gsd"}
     leaked = sorted(
         str(path)

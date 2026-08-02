@@ -2,7 +2,8 @@
 name = "sva2rtl"
 version = "1.7.1"
 description = "SVA to synthesizable RTL monitor compiler"
-license = {text = "BSL-1.1"}
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 readme = "README.md"
 requires-python = ">=3.12"
 keywords = ["sva", "systemverilog", "assertion", "rtl", "formal", "eda", "monitor", "synthesis"]
@@ -43,6 +44,12 @@ include = [
     "/templates",
     "/LICENSE",
     "/README.md",
+    "/FORMAL_VERIFICATION.md",
+    "/SUPPORTED_CONSTRUCTS.md",
+    "/SUPPORT_MATRIX.md",
+    "/INDUSTRIAL_VALIDATION_GAPS.md",
+    "/PROJECT_STATUS.md",
+    "/PROJECT_ANALYSIS_2026-07-11.md",
     "/pyproject.toml",
 ]
 

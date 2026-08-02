@@ -33,6 +33,12 @@ def test_sdist_excludes_development_only_surfaces() -> None:
         "/templates",
         "/LICENSE",
         "/README.md",
+        "/FORMAL_VERIFICATION.md",
+        "/SUPPORTED_CONSTRUCTS.md",
+        "/SUPPORT_MATRIX.md",
+        "/INDUSTRIAL_VALIDATION_GAPS.md",
+        "/PROJECT_STATUS.md",
+        "/PROJECT_ANALYSIS_2026-07-11.md",
         "/pyproject.toml",
     }
 

@@ -17,6 +17,7 @@ FORMAL_WORKFLOW = ROOT / ".github" / "workflows" / "formal-full.yml"
 SUPPORT_MATRIX = ROOT / "SUPPORT_MATRIX.md"
 PROJECT_STATUS = ROOT / "PROJECT_STATUS.md"
 README = ROOT / "README.md"
+FORMAL_GUIDE = ROOT / "FORMAL_VERIFICATION.md"
 NIGHTLY_WORKFLOW = ROOT / ".github" / "workflows" / "differential-nightly.yml"
 CHECKOUT_NODE24_SHA = "3d3c42e5aac5ba805825da76410c181273ba90b1"
 SETUP_UV_NODE24_SHA = "c771a70e6277c0a99b617c7a806ffedaca235ff9"
@@ -34,7 +35,7 @@ def test_verilator_installer_has_all_source_build_dependencies() -> None:
         "libfl-dev",
     ):
         assert dependency in script
-    assert 'test -r /usr/include/FlexLexer.h' in script
+    assert "test -r /usr/include/FlexLexer.h" in script
     assert "brew --prefix flex" in script
     assert "brew --prefix bison" in script
     assert "HOMEBREW_NO_AUTO_UPDATE=1" in script
@@ -247,9 +248,35 @@ def test_readme_describes_the_implemented_optimizer() -> None:
 def test_readme_distribution_license_and_cdc_claims_match_repository_truth() -> None:
     readme = README.read_text(encoding="utf-8")
 
-    assert "A source-available compiler" in readme
+    assert "An open-source compiler" in readme
+    assert "Apache License, Version 2.0" in readme
+    assert "FORMAL_VERIFICATION.md" in readme
+    assert "zero `Fully supported` rows" in readme
     assert "not currently published on PyPI" in readme
     assert "pip install sva2rtl\n" not in readme
     assert ">$10M" not in readme
+    assert "source-available" not in readme
+    assert "BSL-1.1" not in readme
     assert "--experimental-multiclock" in readme
     assert "not a\nCDC sign-off claim" in readme
+
+
+def test_formal_guide_preserves_evidence_and_advanced_sva_boundaries() -> None:
+    guide = FORMAL_GUIDE.read_text(encoding="utf-8")
+    normalized = " ".join(guide.split())
+
+    for required in (
+        "mode `bmc`",
+        "mode `prove`",
+        "mode `cover`",
+        "primary proof passes but a required cover is not reached",
+        "zero `Fully supported` construct",
+        "tests/test_formal_sva_equiv.py",
+        "tests/test_formal_kinduction.py",
+        "differential-nightly.yml",
+        "Full SVA or unbounded/liveness proof needed",
+        "handshake, toggle, or asynchronous FIFO",
+    ):
+        assert required in normalized
+    assert "BMC pass is not an unbounded proof" in normalized
+    assert "not a blanket correctness certificate" in normalized

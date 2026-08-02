@@ -15,6 +15,8 @@ sva2verilog 是一个开源的 SystemVerilog Assertion (SVA) 到可综合 RTL
 也只记录可执行基线，不把文档 SHA 倒推为新的证明对象。
 
 - 发布状态：tag `v1.7.1` 指向 `8b5c063`；发布后资格基线为 `b055105`
+- 当前许可证：Apache License 2.0（SPDX：`Apache-2.0`）；根目录
+  `LICENSE`、README 与包元数据保持一致
 - 主 CI：run `30683023280` 全部 13 个 job 通过，包括 8 个
   `{ubuntu,macos} × {3.12,3.13} × {iverilog,verilator}` 仿真轴、generated
   RTL、formal smoke、coverage、lint、Python 3.14 与仓库外安装包验证
