@@ -2,13 +2,13 @@
 gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Open Formal Verification
-status: ready_to_plan
-last_updated: "2026-08-03T18:08:36.233Z"
+status: executing
+last_updated: "2026-08-04"
 progress:
   total_phases: 6
   completed_phases: 5
-  total_plans: 10
-  completed_plans: 10
+  total_plans: 12
+  completed_plans: 11
   percent: 83
 ---
 
@@ -17,8 +17,9 @@ progress:
 ## Current Position
 
 Phase: 24 — EXECUTING
-Plan: 1 of ?
-Phases 19 through 23 are complete. Phase 24 is next.
+Plan: 2 of 2
+Phases 19 through 23 and Phase 24 Plan 01 are complete. Plan 02 remote
+qualification is executing.
 
 ## Verified v2.0 Evidence
 
@@ -59,12 +60,20 @@ Phases 19 through 23 are complete. Phase 24 is next.
 
 ## Latest Local Qualification
 
-- Phase 23 focused boundary/formal/document suite: 117 passed, 2 conditional skips.
-- Complete pytest baseline before Phase 21: 1643 passed, 1 skipped, 1 xfailed.
-- Verilator simulation: 174 passed, 2 reviewed skips.
-- Full Formal: 126 passed, 1 expected xfail.
-- Yosys synthesis gates: 80 passed.
-- Ruff and mypy: passed.
+- Complete Icarus/default suite: 1702 passed, 3 conditional skips, 1 expected
+  dynamically classified k-induction xfail.
+- Verilator simulation/fast differential selection: 174 passed, 1 selected-out
+  skip; explicit fixed-seed fast differential: 16 passed per backend.
+- Rotating-seed slow differential: 1 passed per backend.
+- Full Formal selection: 204 passed, 2 conditional live-solver skips, 1 expected
+  k-induction xfail; generated RTL synthesis/lint: 133 passed.
+- Critical mutation modules: bool semantics 25/25, behavioral oracle 135/135,
+  composer 51/51, AST importer 124/124; RTL template mutations 12/12.
+- Aggregate branch coverage: 86.98%; formal CLI/flow/lowering are independently
+  gated at 85%/80%/75% minimums.
+- Python 3.14 semantic axis: 1309 passed; wheel/sdist external-install smoke and
+  source/archive privacy scans passed.
+- Ruff, strict mypy, lock check, shell syntax, and diff check passed.
 
 ## Evidence Boundary
 
@@ -76,9 +85,9 @@ Phases 19 through 23 are complete. Phase 24 is next.
 
 ## Next Work
 
-Plan Phase 24 requirements EVID-01 through EVID-05: corpus/status closure,
-formal-vs-monitor matrix, complete local qualification, package/privacy gates,
-and exact-commit remote evidence.
+Push the final anonymous main commit, then require exact-head success for push
+CI, nightly differential/mutation, and all eight Full Formal shards. Linux must
+run both real live good/bad cases with no skip before EVID-05 can close.
 
 ## Performance Metrics
 
@@ -94,3 +103,5 @@ and exact-commit remote evidence.
 | 22 | 22-02 | Complete |
 | 23 | 23-01 | Complete |
 | 23 | 23-02 | Complete |
+| 24 | 24-01 | Complete |
+| 24 | 24-02 | Executing |
