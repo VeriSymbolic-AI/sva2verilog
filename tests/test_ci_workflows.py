@@ -276,6 +276,9 @@ def test_formal_guide_preserves_evidence_and_advanced_sva_boundaries() -> None:
         "differential-nightly.yml",
         "Full SVA or unbounded/liveness proof needed",
         "handshake, toggle, or asynchronous FIFO",
+        "evidence/semantic_profile.json",
+        "restricted-symbolic-witness-only",
+        "the CLI exits 12",
     ):
         assert required in normalized
     assert "BMC pass is not an unbounded proof" in normalized

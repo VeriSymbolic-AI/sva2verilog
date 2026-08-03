@@ -205,6 +205,25 @@ class PropImplication(SVANode):
 
 
 @dataclass(frozen=True)
+class PropLocalCapture(SVANode):
+    """Restricted formal-only automatic local capture.
+
+    Models the whitelisted shape ``a |-> (g, v = x) ##N c(v)``. A symbolic
+    witness selects one antecedent attempt, captures ``x`` into that attempt's
+    private scalar ``v``, and checks ``c`` at the fixed delay. General match
+    items and local-variable semantics remain unsupported.
+    """
+
+    antecedent: BoolExpr
+    capture_guard: BoolExpr
+    local_name: str
+    capture_value: BoolExpr
+    condition: BoolExpr
+    delay_cycles: int
+    overlapping: bool = True
+
+
+@dataclass(frozen=True)
 class DisableIff(SVANode):
     """``disable iff (expr) property`` — conditional disable wrapper (Phase 3+).
 

@@ -242,6 +242,43 @@ frontend requirement for the exact supported shapes and uses open formal IR.
 It does not replace broad IEEE 1800 SVA semantics, commercial debug capacity,
 CDC sign-off, or large industrial proof engines.
 
+### Explicit hard-boundary profiles
+
+Every normal or rejected formal bundle records and hashes
+`evidence/semantic_profile.json`. The initial profile is deliberately narrow:
+
+- `logic_semantics: two-state`: the solver models Boolean/bit-vector values.
+  SVA literals or operators whose result depends on X, Z, or wildcard matching
+  reject instead of coercing unknowns to 0/1.
+- `clock_semantics: single-clock`: a nested `ClockedSeq` never collapses onto
+  the primary clock. It returns `UNSUPPORTED`; the engineering workaround is to
+  prove per-domain properties and separately verify a reviewed handshake,
+  toggle, or asynchronous-FIFO handoff plus CDC signoff.
+- `local_variable_semantics: restricted-symbolic-witness-only`: the accepted
+  form is one automatic 1-bit `logic`/`bit`, one blocking capture assignment,
+  positive fixed delay, Boolean guard/condition, and overlapping implication:
+
+```systemverilog
+sequence captured_check;
+  logic saved;
+  (guard, saved = data) ##2 (ack && data == saved);
+endsequence
+assert property (@(posedge clk) req |-> captured_check);
+```
+
+The formal backend selects an arbitrary `req` attempt, gives it a private
+`captured_q`, and checks the delayed condition. Universal proof over the
+unconstrained selector covers every attempt without sharing local state. The
+local identifier is not a DUT port. Vector/multiple/static locals, nonblocking
+or multiple match items, non-overlapping implication, ranged/dynamic delay, and
+nested local semantics return `UNSUPPORTED`. Monitor synthesis also rejects
+this formal-only IR.
+
+For an unsupported boundary, the CLI exits 12 and still writes copied/hashed
+inputs, the semantic profile, a sanitized reason/remediation, and
+`result.json`. It writes no `formal.sby`, lists no Yosys inputs, and cannot
+produce `PROVEN`.
+
 ## Build a Non-Circular Formal Miter
 
 The formal tests use two different proof targets:
@@ -470,8 +507,9 @@ The current v1.7.1 boundary is deliberately finite and fail-closed:
 - Sampled-value operands are scalar; packed vectors, arrays, compound
   expressions, and optional clock/gating arguments are not supported.
 - Ranged goto/non-consecutive repetition (`[->M:N]`, `[=M:N]` with `M < N`),
-  local variables, recursive properties, and several system functions remain
-  unsupported.
+  general local variables, recursive properties, and several system functions
+  remain unsupported. Only the exact formal-only scalar capture shape above is
+  accepted.
 - NFA-lifted nested multi-path composition has a compile-time state budget
   `K <= 32`; bounded implication concurrency has finite thread slots.
 - Unbounded eventual and strong-until obligations have no finite completion

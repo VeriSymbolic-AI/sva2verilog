@@ -288,7 +288,8 @@ The following operators remain unsupported or deliberately rejected:
 | `s_until` / `s_until_with` (strong Boolean operands) | Liveness | Formal-only safety + eventual-discharge proof; monitor generation rejected |
 | `always` (unbounded) | Temporal | Rejected — legal streaming safety form, but not implemented by v1 |
 | `[->M:N]` / `[=M:N]` where `M < N` | Repetition | Rejected — v1 supports fixed counts only |
-| `intersect`/`within` with local variables | Sequence | Not supported |
+| Restricted scalar local capture in `a |-> (g, v=x) ##N c(v)` | Sequence/property | Formal-only symbolic witness; monitor generation rejected |
+| Other local-variable match-item forms | Sequence | Rejected |
 | Nested multi-path operators | Sequence | Supported when operands are NFA-liftable and K ≤ 32 |
 | Multi-clock properties | Clocking | Trusted/prototype boundary for path-one split-and-synchronize forms |
 
@@ -299,7 +300,7 @@ The following operators remain unsupported or deliberately rejected:
 | Multi-clock path-one only | The compiler accepts `##1` clock-change sequences and non-overlap cross-clock implication through a trusted 2-DFF level synchronizer; event delivery, full CDC/metastability proof, and multi-path cross-clock composition are excluded |
 | Unbounded repetition `[*]` | Open-ended match/resource semantics are outside the bounded v1 contract |
 | Unbounded delay `##[0:$]` | No finite deadline under the current pass/fail monitor contract |
-| Local variables | SVA local variables in sequences are not supported |
+| Local variables | Formal-only support is limited to one automatic 1-bit blocking capture, positive fixed delay, Boolean condition, and overlapping implication; all other local forms and monitor generation reject |
 | Recursive properties | Not supported |
 | Non-scalar sampled operands | Packed vectors, arrays, selects, and compound expressions are not supported in sampled value functions |
 | Optional sampled arguments | Optional clocking/gating arguments are outside the scalar v1 sampled-value contract |
@@ -375,6 +376,10 @@ The following constructs are recognized by the parser but produce clear error me
 | `[->M:N]` / `[=M:N]` where `M < N` | SVA-E002 | Use fixed `[->N]` / `[=N]`, or split into explicit properties |
 | `##[0:$]` | SVA-E002 | Use `##[0:MAX]` with explicit bound |
 | Unsupported multi-clock forms (`##N` where N≠1, cross-clock `intersect`, overlapping cross-clock `|->`) | SVA-E003 | Use allowed path-one forms (`##1`, `|=>`) or split into single-clock properties |
+| Multi-clock property in `sva2rtl-formal` | SVA-E002 / `UNSUPPORTED` result | Split by named domain; prove a reviewed handshake/toggle/FIFO sampled handoff; run separate CDC signoff |
+| X/Z-dependent property in `--logic-semantics two-state` | SVA-E002 / `UNSUPPORTED` result | Remove four-state dependence or use an explicit four-state-capable frontend; never coerce X/Z silently |
+| Restricted scalar local capture | — | Formal-only via symbolic witness; see `FORMAL_VERIFICATION.md` |
+| Other local-variable forms | SVA-E002 / `UNSUPPORTED` result | Precompute explicit RTL state or decompose to supported per-attempt obligations |
 | `nexttime` / unbounded `always` / unsupported nested liveness | SVA-E001 | Outside the implemented unbounded frontend; decompose with a checked relation or use another supporting frontend |
 | unbounded `s_eventually` / strong `s_until` in the documented Boolean shapes | — | Use `sva2rtl-formal`; synthesizable monitor generation remains intentionally rejected |
 | bounded `eventually`/`s_eventually [m:n]` | — | Supported since v1.4 Part A |

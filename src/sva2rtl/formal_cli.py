@@ -17,8 +17,10 @@ from sva2rtl.formal_flow import (
     FormalMode,
     FormalRunConfig,
     FormalStatus,
+    LogicSemantics,
     build_formal_bundle,
     run_formal_bundle,
+    write_unsupported_evidence,
 )
 
 _EXIT_CODES = {
@@ -69,6 +71,15 @@ _EXIT_CODES = {
 @click.option("--engine", default="smtbmc", show_default=True, help="SBY engine token")
 @click.option("--solver", default="yices", show_default=True, help="Engine solver token")
 @click.option(
+    "--logic-semantics",
+    type=click.Choice(
+        [semantics.value for semantics in LogicSemantics], case_sensitive=False
+    ),
+    default=LogicSemantics.TWO_STATE.value,
+    show_default=True,
+    help="Explicit formal value-domain abstraction; X/Z-dependent SVA rejects",
+)
+@click.option(
     "--output",
     "output_dir",
     required=True,
@@ -116,6 +127,7 @@ def main(
     timeout_seconds: int,
     engine: str,
     solver: str,
+    logic_semantics: str,
     output_dir: Path,
     slang_path: str,
     sby_path: str,
@@ -129,8 +141,9 @@ def main(
 
     The original property source is retained as evidence but is never passed to
     Yosys.  Exit codes: 0 PROVEN/compiled, 10 FAILED, 11 UNKNOWN,
-    12 UNSUPPORTED, 13 TIMEOUT, 1 ERROR, 2 usage/unsupported source, 3 slang missing.
+    12 UNSUPPORTED, 13 TIMEOUT, 1 ERROR, 2 usage/property selection, 3 slang missing.
     """
+    config: FormalRunConfig | None = None
     try:
         config = FormalRunConfig(
             dut_sources=dut_sources,
@@ -145,6 +158,7 @@ def main(
             timeout_seconds=timeout_seconds,
             engine=engine,
             solver=solver,
+            logic_semantics=LogicSemantics(logic_semantics.lower()),
             output_dir=output_dir,
             slang_path=slang_path,
             sby_path=sby_path,
@@ -166,7 +180,13 @@ def main(
     except SlangNotFound as exc:
         click.echo(str(exc), err=True)
         raise click.exceptions.Exit(3) from exc
-    except (PropertyNotFound, UnsupportedConstruct) as exc:
+    except UnsupportedConstruct as exc:
+        click.echo(str(exc), err=True)
+        if config is not None:
+            result_path = write_unsupported_evidence(config, exc)
+            click.echo(f"Evidence: {result_path}", err=True)
+        raise click.exceptions.Exit(_EXIT_CODES[FormalStatus.UNSUPPORTED]) from exc
+    except PropertyNotFound as exc:
         click.echo(str(exc), err=True)
         raise click.exceptions.Exit(2) from exc
     except SvaError as exc:

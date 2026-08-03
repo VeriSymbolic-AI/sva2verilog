@@ -70,6 +70,7 @@ def test_help_lists_formal_inputs() -> None:
         "--timeout",
         "--engine",
         "--solver",
+        "--logic-semantics",
         "--suprove-path",
         "--fairness",
         "--decomposition-certificate",

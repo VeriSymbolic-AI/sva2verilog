@@ -24,7 +24,7 @@ from contextvars import ContextVar
 from pathlib import Path
 from typing import Any, Literal
 
-from sva2rtl.bool_semantics import render_bool_expr
+from sva2rtl.bool_semantics import collect_bool_signal_types, render_bool_expr
 from sva2rtl.errors import SvaCompileError, UnsupportedConstruct
 from sva2rtl.ir import (
     BoolBinary,
@@ -44,6 +44,7 @@ from sva2rtl.ir import (
     PropEventually,
     PropIfElse,
     PropImplication,
+    PropLocalCapture,
     PropNexttime,
     PropNot,
     PropStrongUntil,
@@ -982,7 +983,7 @@ def _import_concurrent_assertion(
         ):
             prop_ir = _build_prop_implication(expr_node, source_loc)
             ir_node = prop_ir
-            text = _reconstruct_impl_text(prop_ir)
+            text = _reconstruct_node_text(prop_ir)
         case "BinaryPropertyExpr" if expr_node.get("op") == "And" and not _is_boolean_binary(
             expr_node
         ):
@@ -999,7 +1000,7 @@ def _import_concurrent_assertion(
         ):
             prop_ir = _build_prop_implication(expr_node, source_loc)
             ir_node = prop_ir
-            text = _reconstruct_impl_text(prop_ir)
+            text = _reconstruct_node_text(prop_ir)
         case "Binary" if expr_node.get("op") == "Or" and not _is_boolean_binary(expr_node):
             ir_node, text = _build_binary_seq_op(expr_node, source_loc, "or")
         case "Binary" if expr_node.get("op") == "And" and not _is_boolean_binary(expr_node):
@@ -1902,12 +1903,185 @@ def _reconstruct_seq_text(node: SeqConcat) -> str:
     return " ".join(parts)
 
 
+def _local_assertion_instance(node: dict[str, Any]) -> dict[str, Any] | None:
+    """Return a consequence AssertionInstance only when it declares locals."""
+    current = node
+    while current.get("kind") in {"Simple", "SequenceExpr"}:
+        child = current.get("expr")
+        if not isinstance(child, dict):
+            return None
+        current = child
+    if current.get("kind") != "AssertionInstance" or not current.get("localVars"):
+        return None
+    return current
+
+
+def _build_local_capture_implication(
+    node: dict[str, Any],
+    instance: dict[str, Any],
+    source_loc: SourceLoc,
+    visited: frozenset[str],
+) -> PropLocalCapture:
+    """Import one exact automatic scalar capture shape for formal witness use."""
+    overlapping = node.get("op") == "OverlappedImplication"
+    if not overlapping:
+        raise UnsupportedConstruct(
+            message=(
+                "restricted local capture currently supports overlapping '|->' "
+                "only; split and review next-cycle capture timing explicitly"
+            ),
+            construct_name="non-overlapping local-variable capture",
+            source_loc=source_loc,
+        )
+    antecedent = _dispatch_expr_to_ir(node["left"], visited)
+    if not isinstance(antecedent, BoolExpr):
+        raise UnsupportedConstruct(
+            message="restricted local capture requires a Boolean antecedent",
+            construct_name="local-variable antecedent",
+            source_loc=source_loc,
+        )
+    locals_raw = instance.get("localVars")
+    if not isinstance(locals_raw, list) or len(locals_raw) != 1:
+        raise UnsupportedConstruct(
+            message="restricted local capture requires exactly one automatic scalar local",
+            construct_name="multiple local variables",
+            source_loc=source_loc,
+        )
+    local = locals_raw[0]
+    if not isinstance(local, dict):
+        raise UnsupportedConstruct(
+            message="malformed local-variable declaration",
+            construct_name="local variable",
+            source_loc=source_loc,
+        )
+    local_name = str(local.get("name", ""))
+    local_type = str(local.get("type", "")).replace(" ", "")
+    if local.get("lifetime") != "Automatic" or local_type not in {"logic", "bit"}:
+        raise UnsupportedConstruct(
+            message=(
+                "restricted local capture requires one automatic 1-bit logic/bit; "
+                "vector, integer, static, or dynamic locals are not encoded"
+            ),
+            construct_name="local-variable type or lifetime",
+            source_loc=source_loc,
+        )
+    body = instance.get("body")
+    elements = body.get("elements") if isinstance(body, dict) else None
+    if (
+        not isinstance(body, dict)
+        or body.get("kind") != "SequenceConcat"
+        or not isinstance(elements, list)
+        or len(elements) != 2
+    ):
+        raise UnsupportedConstruct(
+            message=(
+                "restricted local capture requires exactly "
+                "(guard, local = value) ##N condition"
+            ),
+            construct_name="local-variable sequence shape",
+            source_loc=source_loc,
+        )
+    first, second = elements
+    if not isinstance(first, dict) or not isinstance(second, dict):
+        raise UnsupportedConstruct(
+            message="malformed local-variable sequence elements",
+            construct_name="local-variable sequence shape",
+            source_loc=source_loc,
+        )
+    match = first.get("sequence")
+    match_items = match.get("matchItems") if isinstance(match, dict) else None
+    if (
+        not isinstance(match, dict)
+        or match.get("kind") != "SequenceWithMatch"
+        or not isinstance(match_items, list)
+        or len(match_items) != 1
+    ):
+        raise UnsupportedConstruct(
+            message="restricted local capture requires one sequence match assignment",
+            construct_name="local-variable match items",
+            source_loc=source_loc,
+        )
+    assignment = match_items[0]
+    if (
+        not isinstance(assignment, dict)
+        or assignment.get("kind") != "Assignment"
+        or assignment.get("isNonBlocking") is not False
+    ):
+        raise UnsupportedConstruct(
+            message="restricted local capture requires one blocking assignment",
+            construct_name="local-variable assignment",
+            source_loc=source_loc,
+        )
+    left = assignment.get("left")
+    right = assignment.get("right")
+    if (
+        not isinstance(left, dict)
+        or left.get("kind") != "NamedValue"
+        or _symbol_name(left) != local_name
+        or not isinstance(right, dict)
+    ):
+        raise UnsupportedConstruct(
+            message="match assignment must target the declared local variable",
+            construct_name="local-variable assignment target",
+            source_loc=source_loc,
+        )
+    delay_min = int(second.get("min", 0))
+    delay_max = int(second.get("max", 0))
+    if delay_min < 1 or delay_min != delay_max:
+        raise UnsupportedConstruct(
+            message="restricted local capture requires one positive fixed delay ##N",
+            construct_name="local-variable delay",
+            source_loc=source_loc,
+        )
+    guard = _dispatch_expr_to_ir(match.get("expr", {}), visited)
+    condition = _dispatch_expr_to_ir(second.get("sequence", {}), visited)
+    capture_value = _build_bool_leaf(right)
+    if not isinstance(guard, BoolExpr) or not isinstance(condition, BoolExpr):
+        raise UnsupportedConstruct(
+            message="local capture guard and delayed condition must be Boolean",
+            construct_name="local-variable Boolean subset",
+            source_loc=source_loc,
+        )
+    if condition.expr is None or local_name not in {
+        name for name, _width, _signed in collect_bool_signal_types(condition.expr)
+    }:
+        raise UnsupportedConstruct(
+            message="delayed condition must read the captured local variable",
+            construct_name="unused local-variable capture",
+            source_loc=source_loc,
+        )
+    for expression in (antecedent, guard, capture_value):
+        if expression.expr is not None and local_name in {
+            name for name, _width, _signed in collect_bool_signal_types(expression.expr)
+        }:
+            raise UnsupportedConstruct(
+                message="the local may be read only by the delayed condition",
+                construct_name="local-variable read timing",
+                source_loc=source_loc,
+            )
+    return PropLocalCapture(
+        antecedent=antecedent,
+        capture_guard=guard,
+        local_name=local_name,
+        capture_value=capture_value,
+        condition=condition,
+        delay_cycles=delay_min,
+        overlapping=True,
+        source_loc=source_loc,
+    )
+
+
 def _build_prop_implication(
     node: dict[str, Any],
     source_loc: SourceLoc,
     _visited: frozenset[str] = frozenset(),
-) -> PropImplication:
+) -> PropImplication | PropLocalCapture:
     """Build a PropImplication IR node from a slang BinaryPropertyExpr JSON node."""
+    local_instance = _local_assertion_instance(node["right"])
+    if local_instance is not None:
+        return _build_local_capture_implication(
+            node, local_instance, source_loc, _visited
+        )
     ant = _dispatch_expr_to_ir(node["left"], _visited)
     con = _dispatch_expr_to_ir(node["right"], _visited)
     overlapping = node.get("op") == "OverlappedImplication"
@@ -1962,6 +2136,12 @@ def _reconstruct_node_text(node: SVANode) -> str:
         return _reconstruct_signal_func_text(node)
     if isinstance(node, PropImplication):
         return _reconstruct_impl_text(node)
+    if isinstance(node, PropLocalCapture):
+        return (
+            f"{node.antecedent.text} |-> ({node.capture_guard.text}, "
+            f"{node.local_name} = {node.capture_value.text}) ##{node.delay_cycles} "
+            f"{node.condition.text}"
+        )
     if isinstance(node, SeqAnd):
         return f"({_reconstruct_node_text(node.left)} and {_reconstruct_node_text(node.right)})"
     if isinstance(node, SeqOr):

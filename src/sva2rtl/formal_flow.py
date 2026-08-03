@@ -35,7 +35,11 @@ from sva2rtl.emitter import (
     observed_signal_widths,
 )
 from sva2rtl.errors import PropertyNotFound, SvaCompileError, UnsupportedConstruct
-from sva2rtl.formal_lowering import lower_bounded_implication, lower_liveness_property
+from sva2rtl.formal_lowering import (
+    lower_bounded_implication,
+    lower_liveness_property,
+    lower_local_capture,
+)
 from sva2rtl.frontend import invoke_slang
 from sva2rtl.ir import CheckerNode
 from sva2rtl.normalizer import normalize
@@ -62,6 +66,12 @@ class AttemptMode(StrEnum):
     AUTO = "auto"
     MONITOR = "monitor"
     SYMBOLIC_WITNESS = "symbolic-witness"
+
+
+class LogicSemantics(StrEnum):
+    """Named value-domain abstraction used by the open formal backend."""
+
+    TWO_STATE = "two-state"
 
 
 class FormalStatus(StrEnum):
@@ -115,6 +125,7 @@ class FormalRunConfig:
     slang_path: str = "slang"
     sby_path: str = "sby"
     suprove_path: str = "suprove"
+    logic_semantics: LogicSemantics = LogicSemantics.TWO_STATE
     fairness_signals: tuple[str, ...] = ()
     decomposition_certificate: Path | None = None
     force: bool = False
@@ -141,6 +152,8 @@ class FormalRunConfig:
             raise ValueError("depth must be positive")
         if self.timeout_seconds <= 0:
             raise ValueError("timeout must be positive")
+        if self.logic_semantics is not LogicSemantics.TWO_STATE:
+            raise ValueError("only the explicit two-state formal profile is supported")
         for label, value in (
             ("engine", self.engine),
             ("solver", self.solver),
@@ -544,6 +557,8 @@ def classify_property(node: sva_ir.SVANode) -> PropertyClass:
         return PropertyClass.BOUNDED_LIVENESS
     if isinstance(node, (sva_ir.PropEventually, sva_ir.PropStrongUntil)):
         return PropertyClass.LIVENESS
+    if isinstance(node, sva_ir.PropLocalCapture):
+        return PropertyClass.FINITE_VERDICT
     if isinstance(node, sva_ir.PropBoundedAlways):
         return PropertyClass.FINITE_VERDICT
     if isinstance(node, sva_ir.PropAlways):
@@ -696,6 +711,28 @@ def _compile_checker(config: FormalRunConfig) -> FormalCompilation:
             ),
             source_loc=clock.source_loc,
         )
+    local_witness = lower_local_capture(
+        node,
+        label=label,
+        original_text=original_text,
+        clock_signal=clock.signal,
+        clock_edge=clock.edge,
+    )
+    if local_witness is not None:
+        if config.attempt_mode is AttemptMode.MONITOR:
+            raise UnsupportedConstruct(
+                message=(
+                    "local-variable capture is formal-only and requires the "
+                    "symbolic-witness attempt model"
+                ),
+                construct_name="local-variable monitor synthesis",
+                source_loc=node.source_loc,
+            )
+        return FormalCompilation(
+            checker=local_witness,
+            property_class=PropertyClass.FINITE_VERDICT,
+            backend="symbolic-witness-local",
+        )
     if config.attempt_mode is not AttemptMode.MONITOR:
         witness = lower_bounded_implication(
             node,
@@ -748,6 +785,8 @@ def _compile_checker(config: FormalRunConfig) -> FormalCompilation:
             property_class=property_class,
             backend="direct-invariant-safety",
         )
+    if property_class is PropertyClass.UNSUPPORTED:
+        select_formal_backend(property_class)
     if _is_bare_sequence_property(normalized):
         raise UnsupportedConstruct(
             message=(
@@ -926,6 +965,8 @@ def render_symbolic_witness_bind(
         _input_decl(port, widths.get(port, 1), signedness.get(port, False))
         for port, _signal in observed
     )
+
+
     bind_connections = [f"    .{clock}({clock})", f"    .{reset}({reset})"]
     bind_connections.extend(f"    .{port}({signal})" for port, signal in observed)
     edge = checker.params["clock_edge"]
@@ -1041,6 +1082,85 @@ def render_symbolic_witness_bind(
         "            end else begin\n"
         + obligation_logic
         + "            end\n"
+        "        end\n"
+        "    end\n"
+        "endmodule\n\n"
+        f"bind {top} sva2rtl_formal_bind u_sva2rtl_formal_bind (\n"
+        + ",\n".join(bind_connections)
+        + "\n);\n"
+    )
+
+
+def render_local_witness_bind(
+    checker: CheckerNode,
+    *,
+    top: str,
+    clock: str,
+    reset: str,
+) -> str:
+    """Render the restricted per-attempt scalar local capture proof harness."""
+    for identifier in (top, clock, reset):
+        if _IDENTIFIER_RE.fullmatch(identifier) is None:
+            raise ValueError(f"invalid SystemVerilog identifier: {identifier!r}")
+    widths = observed_signal_widths(checker)
+    signedness = observed_signal_signedness(checker)
+    observed = list(checker.observed_signals)
+    port_lines = [f"    input logic {clock}", f"    input logic {reset}"]
+    port_lines.extend(
+        _input_decl(port, widths.get(port, 1), signedness.get(port, False))
+        for port, _signal in observed
+    )
+    bind_connections = [f"    .{clock}({clock})", f"    .{reset}({reset})"]
+    bind_connections.extend(f"    .{port}({signal})" for port, signal in observed)
+    edge = checker.params["clock_edge"]
+    antecedent = checker.params["antecedent_expr"]
+    guard = checker.params["capture_guard_expr"]
+    capture = checker.params["capture_value_expr"]
+    condition = checker.params["condition_expr"]
+    disable = checker.params["disable_expr"]
+    delay = int(checker.params["delay_cycles"])
+    counter_width = int(checker.params["counter_width"])
+    return (
+        "// Generated restricted per-attempt local-variable witness harness.\n"
+        "module sva2rtl_formal_bind (\n"
+        + ",\n".join(port_lines)
+        + "\n);\n"
+        f"    localparam integer DELAY_CYCLES = {delay};\n"
+        "    (* anyseq *) logic witness_select;\n"
+        "    logic formal_past_valid = 1'b0;\n"
+        "    logic tracking_q = 1'b0;\n"
+        "    logic captured_q = 1'b0;\n"
+        f"    logic [{counter_width - 1}:0] age_q = '0;\n"
+        f"    wire witness_start = !tracking_q && !({disable}) && "
+        f"({antecedent}) && witness_select;\n\n"
+        f"    always @({edge} {clock}) begin\n"
+        "        formal_past_valid <= 1'b1;\n"
+        "        if (!formal_past_valid) begin\n"
+        f"            assume (!{reset});\n"
+        "            tracking_q <= 1'b0;\n"
+        "            captured_q <= 1'b0;\n"
+        "            age_q <= '0;\n"
+        "        end else begin\n"
+        f"            assume ({reset});\n"
+        f"            cover ({antecedent});\n"
+        "            cover (witness_start);\n"
+        f"            if ({disable}) begin\n"
+        "                tracking_q <= 1'b0;\n"
+        "                captured_q <= 1'b0;\n"
+        "                age_q <= '0;\n"
+        "            end else if (witness_start) begin\n"
+        f"                assert ({guard});\n"
+        f"                captured_q <= {capture};\n"
+        "                tracking_q <= 1'b1;\n"
+        "                age_q <= '0;\n"
+        "            end else if (tracking_q) begin\n"
+        "                age_q <= age_q + 1'b1;\n"
+        "                if (age_q + 1'b1 >= DELAY_CYCLES) begin\n"
+        f"                    assert ({condition});\n"
+        f"                    cover ({condition});\n"
+        "                    tracking_q <= 1'b0;\n"
+        "                end\n"
+        "            end\n"
         "        end\n"
         "    end\n"
         "endmodule\n\n"
@@ -1268,6 +1388,7 @@ def build_formal_bundle(config: FormalRunConfig) -> FormalEvidence:
         in {
             "direct-invariant-safety",
             "symbolic-witness-safety",
+            "symbolic-witness-local",
             "open-live-suprove",
         }
         else emit_all(checker)
@@ -1295,6 +1416,13 @@ def build_formal_bundle(config: FormalRunConfig) -> FormalEvidence:
         )
     elif backend == "symbolic-witness-safety":
         bind_text = render_symbolic_witness_bind(
+            checker,
+            top=config.top,
+            clock=config.clock,
+            reset=config.reset,
+        )
+    elif backend == "symbolic-witness-local":
+        bind_text = render_local_witness_bind(
             checker,
             top=config.top,
             clock=config.clock,
@@ -1383,6 +1511,17 @@ def build_formal_bundle(config: FormalRunConfig) -> FormalEvidence:
             ],
         },
     )
+    semantic_profile_path = bundle / "evidence" / "semantic_profile.json"
+    _write_json(
+        semantic_profile_path,
+        {
+            "schema_version": 1,
+            "logic_semantics": config.logic_semantics.value,
+            "x_z_semantics": "unsupported",
+            "clock_semantics": "single-clock",
+            "local_variable_semantics": "restricted-symbolic-witness-only",
+        },
+    )
     live_info = discover_live_backend(config) if backend == "open-live-suprove" else None
 
     manifest: dict[str, Any] = {
@@ -1400,6 +1539,7 @@ def build_formal_bundle(config: FormalRunConfig) -> FormalEvidence:
             "timeout_seconds": config.timeout_seconds,
             "engine": config.engine,
             "solver": config.solver,
+            "logic_semantics": config.logic_semantics.value,
             "fairness_signals": list(config.fairness_signals),
         },
         "property": {
@@ -1422,6 +1562,10 @@ def build_formal_bundle(config: FormalRunConfig) -> FormalEvidence:
             "path": "evidence/fairness.json",
             "sha256": _sha256(fairness_path),
         },
+        "semantic_profile": {
+            "path": "evidence/semantic_profile.json",
+            "sha256": _sha256(semantic_profile_path),
+        },
         "yosys_inputs": consumed,
         "assumptions": [
             "reset is asserted on the first sampled cycle",
@@ -1437,6 +1581,7 @@ def build_formal_bundle(config: FormalRunConfig) -> FormalEvidence:
             in {
                 "direct-invariant-safety",
                 "symbolic-witness-safety",
+                "symbolic-witness-local",
                 "open-live-suprove",
             }
             else [
@@ -1449,7 +1594,7 @@ def build_formal_bundle(config: FormalRunConfig) -> FormalEvidence:
             if backend == "direct-invariant-safety"
             else (
                 "antecedent, witness selection, and obligation completion are reachable"
-                if backend == "symbolic-witness-safety"
+                if backend in {"symbolic-witness-safety", "symbolic-witness-local"}
                 else (
                     "liveness antecedent, selection, discharge, and fairness signals "
                     "are reachable"
@@ -1488,6 +1633,95 @@ def build_formal_bundle(config: FormalRunConfig) -> FormalEvidence:
     )
     _write_json(bundle / "result.json", initial.to_dict())
     return FormalEvidence(bundle, config, checker.module_name, property_class, manifest)
+
+
+def write_unsupported_evidence(
+    config: FormalRunConfig,
+    error: UnsupportedConstruct,
+) -> Path:
+    """Persist a sanitized, machine-readable unsupported semantic boundary."""
+    bundle = _prepare_output(config)
+    evidence_dir = bundle / "evidence"
+    evidence_dir.mkdir(parents=True, exist_ok=True)
+    property_copy = evidence_dir / "property.sv"
+    shutil.copyfile(config.property_file, property_copy)
+    dut_manifest: list[dict[str, str]] = []
+    for index, source in enumerate(config.dut_sources):
+        relative = f"dut_{index:03d}.sv"
+        copied = bundle / relative
+        shutil.copyfile(source, copied)
+        dut_manifest.append({"path": relative, "sha256": _sha256(copied)})
+
+    profile_path = evidence_dir / "semantic_profile.json"
+    _write_json(
+        profile_path,
+        {
+            "schema_version": 1,
+            "logic_semantics": config.logic_semantics.value,
+            "x_z_semantics": "unsupported",
+            "clock_semantics": "single-clock",
+            "local_variable_semantics": "restricted-symbolic-witness-only",
+        },
+    )
+    location = ""
+    if error.source_loc is not None:
+        location = (
+            f"evidence/property.sv:{error.source_loc.line}:"
+            f"{error.source_loc.col}: "
+        )
+    message = (
+        f"{location}error SVA-E002: unsupported construct "
+        f"'{error.construct_name}': {error.message}"
+    )
+    boundary = {
+        "construct": error.construct_name,
+        "message": message,
+        "remediation": (
+            "Split multi-clock properties by named domain and verify a reviewed "
+            "sampled handoff, remove X/Z dependence or use an explicit four-state "
+            "frontend, or rewrite locals into the documented restricted capture shape."
+        ),
+    }
+    manifest: dict[str, Any] = {
+        "schema_version": 1,
+        "backend": "unsupported-boundary",
+        "property_class": PropertyClass.UNSUPPORTED.value,
+        "status": FormalStatus.UNSUPPORTED.value,
+        "config": {
+            "top": config.top,
+            "property": config.property_name,
+            "clock": config.clock,
+            "reset": config.reset,
+            "mode": config.mode.value,
+            "logic_semantics": config.logic_semantics.value,
+        },
+        "property": {
+            "path": "evidence/property.sv",
+            "sha256": _sha256(property_copy),
+        },
+        "dut_sources": dut_manifest,
+        "semantic_profile": {
+            "path": "evidence/semantic_profile.json",
+            "sha256": _sha256(profile_path),
+        },
+        "boundary": boundary,
+        "yosys_inputs": [],
+        "assumptions": [],
+        "covers": [],
+    }
+    _write_json(bundle / "manifest.json", manifest)
+    result = FormalResult(
+        status=FormalStatus.UNSUPPORTED,
+        mode=config.mode,
+        message=message,
+        returncode=None,
+        duration_seconds=0.0,
+        tool_versions={"slang": _probe_version([config.slang_path, "--version"])},
+        log_path="",
+    )
+    result_path = bundle / "result.json"
+    _write_json(result_path, result.to_dict())
+    return result_path
 
 
 def classify_sby_result(

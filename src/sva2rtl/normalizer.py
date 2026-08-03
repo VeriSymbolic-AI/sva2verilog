@@ -34,6 +34,7 @@ from sva2rtl.ir import (
     PropEventually,
     PropIfElse,
     PropImplication,
+    PropLocalCapture,
     PropNexttime,
     PropNot,
     PropStrongUntil,
@@ -111,6 +112,8 @@ def normalize(node: SVANode) -> SVANode:
                     source_loc=node.source_loc,
                 )
             )
+        case PropLocalCapture():
+            return node
 
         case DisableIff():
             new_body = normalize(node.body)

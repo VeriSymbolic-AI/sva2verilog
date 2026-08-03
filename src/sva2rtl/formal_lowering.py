@@ -20,12 +20,19 @@ from sva2rtl.bool_semantics import (
 )
 from sva2rtl.composer import module_name_from_label
 from sva2rtl.ir import (
+    BoolBinary,
+    BoolBitSelect,
+    BoolCompare,
     BoolConst,
     BoolExpr,
+    BoolIdent,
+    BoolNode,
+    BoolUnary,
     CheckerNode,
     DisableIff,
     PropEventually,
     PropImplication,
+    PropLocalCapture,
     PropNexttime,
     PropStrongUntil,
     SeqConcat,
@@ -40,6 +47,18 @@ class ObligationKind(StrEnum):
 
     EVENTUALLY = "eventually"
     CONSECUTIVE = "consecutive"
+
+
+def _is_scalar_capture_expr(expr: BoolNode) -> bool:
+    """Accept only expressions whose assignment result is unambiguously 1-bit."""
+    match expr:
+        case BoolIdent(width=width):
+            return width == 1
+        case BoolConst(value=value, width=width):
+            return value in {0, 1} and width in {None, 1}
+        case BoolBitSelect() | BoolCompare() | BoolBinary() | BoolUnary():
+            return True
+    return False
 
 
 def _true_expr(source_loc: SourceLoc) -> BoolExpr:
@@ -183,6 +202,95 @@ def lower_bounded_implication(
             "min_cycles": str(lo),
             "max_cycles": str(hi),
             "start_offset": str(start_offset),
+            "counter_width": str(counter_width),
+            "clock_signal": clock_signal,
+            "clock_edge": clock_edge,
+            "source_loc": str(node.source_loc),
+            "sva2rtl_version": __version__,
+            "original_text": original_text,
+        },
+        observed_signals=observed,
+        observed_signal_widths=widths,
+        observed_signal_signedness=signedness,
+        source_loc=node.source_loc,
+    )
+
+
+def lower_local_capture(
+    node: SVANode,
+    *,
+    label: str | None,
+    original_text: str,
+    clock_signal: str = "clk",
+    clock_edge: str = "posedge",
+) -> CheckerNode | None:
+    """Lower the exact scalar local-capture whitelist to witness metadata."""
+    body, disable = _unwrap_disable(node)
+    if not isinstance(body, PropLocalCapture):
+        return None
+    expressions = (
+        body.antecedent,
+        body.capture_guard,
+        body.capture_value,
+        body.condition,
+    ) + ((disable,) if disable is not None else ())
+    types: dict[str, tuple[int, bool]] = {}
+    local_seen = False
+    for expression in expressions:
+        if expression.expr is None:
+            return None
+        for name, width, signed in collect_bool_signal_types(expression.expr):
+            if name == body.local_name:
+                local_seen = True
+                if width != 1 or signed:
+                    return None
+                continue
+            metadata = (width, signed)
+            previous = types.get(name)
+            if previous is not None and previous != metadata:
+                return None
+            types.setdefault(name, metadata)
+    capture_expr = body.capture_value.expr
+    if (
+        capture_expr is None
+        or not local_seen
+        or not _is_scalar_capture_expr(capture_expr)
+    ):
+        return None
+    aliases = {name: f"obs_{index}" for index, name in enumerate(types)}
+    observed = tuple((aliases[name], name) for name in types)
+    widths = tuple((aliases[name], metadata[0]) for name, metadata in types.items())
+    signedness = tuple(
+        (aliases[name], metadata[1]) for name, metadata in types.items()
+    )
+    condition_aliases = {**aliases, body.local_name: "captured_q"}
+    antecedent_text = _render(body.antecedent, aliases)
+    guard_text = _render(body.capture_guard, aliases)
+    capture_text = _render(body.capture_value, aliases)
+    condition_text = _render(body.condition, condition_aliases)
+    disable_text = _render(disable, aliases) if disable is not None else "1'b0"
+    if None in {
+        antecedent_text,
+        guard_text,
+        capture_text,
+        condition_text,
+        disable_text,
+    }:
+        return None
+    module_name = module_name_from_label(label, original_text)
+    counter_width = max(1, math.ceil(math.log2(body.delay_cycles + 1)))
+    return CheckerNode(
+        template_name="formal_local_witness",
+        module_name=module_name,
+        params={
+            "module_name": module_name,
+            "antecedent_expr": str(antecedent_text),
+            "capture_guard_expr": str(guard_text),
+            "capture_value_expr": str(capture_text),
+            "condition_expr": str(condition_text),
+            "disable_expr": str(disable_text),
+            "local_name": body.local_name,
+            "delay_cycles": str(body.delay_cycles),
             "counter_width": str(counter_width),
             "clock_signal": clock_signal,
             "clock_edge": clock_edge,

@@ -22,6 +22,8 @@ FPGA prototyping flows.
 - Compiles the documented finite-state SVA subset into synthesizable RTL
 - Verifies selected unbounded SVA directly against a DUT with an open
   formal-only backend, without asking Yosys to parse the original SVA
+- Records explicit two-state/single-clock/local-variable semantic profiles and
+  machine-readable `UNSUPPORTED` evidence at hard boundaries
 - Token-passing composition model for bounded concurrent-attempt evaluation
 - Counter-encoded range operators for area efficiency
 - Deterministic output suitable for formal equivalence checking
@@ -199,6 +201,11 @@ true-liveness obligations use `mode live` and require Super Prove; pass
 `--suprove-path /path/to/suprove` if it is not on `PATH`. User-supplied
 fairness is never inferred: each `--fairness ready` means the explicit
 assumption `GF(ready)` and is recorded and hashed in the evidence bundle.
+The default `--logic-semantics two-state` profile rejects X/Z-dependent SVA.
+Multi-clock properties never collapse to the primary clock; they produce
+`UNSUPPORTED` evidence and must be split around a separately verified sampled
+handoff. One formal-only scalar local-capture shape is documented in the
+[formal guide](FORMAL_VERIFICATION.md#explicit-hard-boundary-profiles).
 
 ## CLI Reference
 
@@ -412,6 +419,12 @@ boundaries are deliberate:
   proof is conditional on Super Prove; otherwise the result is `UNKNOWN`.
 - Other unbounded forms, nested liveness combinations, liveness under property
   negation/conditionals, and general sequence eventuality remain unsupported.
+- Formal semantics are explicitly two-state and single-clock. X/Z-dependent
+  properties and multi-clock temporal composition are `UNSUPPORTED`; the
+  experimental multi-clock monitor path is not used as formal evidence.
+- Local variables are limited to one documented automatic scalar capture under
+  an overlapping implication and symbolic witness. General match items,
+  vector/multiple locals, ranged timing, and monitor synthesis reject.
 - Multi-clock generation is disabled unless explicitly opted into as an
   experiment. Its 2-DFF level synchronizer remains a *trusted boundary*: full
   event delivery, clock-domain-crossing, and metastability proof are out of scope.
