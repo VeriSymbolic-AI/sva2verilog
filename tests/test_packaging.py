@@ -22,6 +22,15 @@ def test_wheel_force_includes_complete_template_tree() -> None:
     assert wheel_config["force-include"] == {"templates": "sva2rtl/templates"}
 
 
+def test_distribution_exposes_monitor_and_formal_entry_points() -> None:
+    """Both backends must be callable after installing a wheel or sdist."""
+    config = tomllib.loads((PROJECT_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    assert config["project"]["scripts"] == {
+        "sva2rtl": "sva2rtl.cli:main",
+        "sva2rtl-formal": "sva2rtl.formal_cli:main",
+    }
+
+
 def test_sdist_excludes_development_only_surfaces() -> None:
     """Published source archives contain build inputs, not audit/test history."""
 
