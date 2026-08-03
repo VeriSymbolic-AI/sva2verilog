@@ -561,6 +561,33 @@ class PropBoundedAlways(SVANode):
 
 
 @dataclass(frozen=True)
+class PropAlways(SVANode):
+    """Unbounded sampled invariant: ``always p`` / ``s_always p``.
+
+    Unlike :class:`PropBoundedAlways`, this property has no finite completion
+    point.  It is therefore a formal-safety IR node and is intentionally not
+    accepted by the synthesizable monitor composer.
+    """
+
+    body: SVANode
+    strong: bool = False
+
+
+@dataclass(frozen=True)
+class PropNexttime(SVANode):
+    """Fixed-delay nexttime property before normalization.
+
+    ``cycles`` is one for bare ``nexttime p`` and the explicit nonnegative
+    bound for ``nexttime[n] p`` / ``s_nexttime[n] p``.  The normalizer rewrites
+    this node into the existing exact-delay sequence kernel.
+    """
+
+    body: SVANode
+    cycles: int = 1
+    strong: bool = False
+
+
+@dataclass(frozen=True)
 class PropUntil(SVANode):
     """Until: ``a until b`` / ``a until_with b`` (weak forms only, v1.4 Part A).
 

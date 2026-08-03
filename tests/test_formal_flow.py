@@ -10,6 +10,7 @@ import pytest
 
 from sva2rtl.errors import UnsupportedConstruct
 from sva2rtl.formal_flow import (
+    FormalCompilation,
     FormalMode,
     FormalRunConfig,
     FormalStatus,
@@ -203,7 +204,11 @@ def test_bundle_excludes_property_from_sby_and_uses_relative_manifest_paths(
     config = _config(tmp_path)
     with patch(
         "sva2rtl.formal_flow._compile_checker",
-        return_value=(_checker(), PropertyClass.FINITE_VERDICT),
+        return_value=FormalCompilation(
+            checker=_checker(),
+            property_class=PropertyClass.FINITE_VERDICT,
+            backend="generated-monitor-safety",
+        ),
     ):
         evidence = build_formal_bundle(config)
 
@@ -236,7 +241,11 @@ def test_existing_nonempty_bundle_requires_force(tmp_path: Path) -> None:
     (config.output_dir / "keep.txt").write_text("do not overwrite\n", encoding="utf-8")
     with patch(
         "sva2rtl.formal_flow._compile_checker",
-        return_value=(_checker(), PropertyClass.FINITE_VERDICT),
+        return_value=FormalCompilation(
+            checker=_checker(),
+            property_class=PropertyClass.FINITE_VERDICT,
+            backend="generated-monitor-safety",
+        ),
     ):
         with pytest.raises(FileExistsError, match="--force"):
             build_formal_bundle(config)

@@ -38,10 +38,12 @@ from sva2rtl.ir import (
     ClockedSeq,
     ClockSpec,
     DisableIff,
+    PropAlways,
     PropBoundedAlways,
     PropBoundedEventually,
     PropIfElse,
     PropImplication,
+    PropNexttime,
     PropNot,
     PropUntil,
     SeqAnd,
@@ -964,6 +966,8 @@ def _import_concurrent_assertion(
             ir_node, text = _build_bounded_eventually(expr_node, source_loc)
         case "Unary" if expr_node.get("op") in ("Always", "SAlways"):
             ir_node, text = _build_bounded_always(expr_node, source_loc)
+        case "Unary" if expr_node.get("op") in ("NextTime", "SNextTime"):
+            ir_node, text = _build_nexttime(expr_node, source_loc)
         case "Binary" if expr_node.get("op") in ("Until", "UntilWith", "SUntil", "SUntilWith"):
             ir_node, text = _build_until(expr_node, source_loc)
         case "Conditional":
@@ -1097,6 +1101,9 @@ def _dispatch_expr_to_ir(node: dict[str, Any], _visited: frozenset[str] = frozen
             return ir_node
         case "Unary" if node.get("op") in ("Always", "SAlways"):
             ir_node, _text = _build_bounded_always(node, source_loc)
+            return ir_node
+        case "Unary" if node.get("op") in ("NextTime", "SNextTime"):
+            ir_node, _text = _build_nexttime(node, source_loc)
             return ir_node
         case "Binary" if node.get("op") in ("Until", "UntilWith", "SUntil", "SUntilWith"):
             ir_node, _text = _build_until(node, source_loc)
@@ -1391,14 +1398,32 @@ def _build_bounded_always(
     op = node.get("op", "")
     strong = op == "SAlways"
     kw = "s_always" if strong else "always"
-    if "min" not in node or "max" not in node:
+    has_min = "min" in node
+    has_max = "max" in node
+    if has_min != has_max:
         raise UnsupportedConstruct(
             message=(
-                f"unbounded '{kw}' is not synthesizable on finite state — use the "
-                f"bounded form '{kw} [m:n] p' with an explicit cycle range."
+                f"unbounded '{kw}' must omit both range endpoints; a bounded "
+                "form must provide both min and max"
             ),
-            construct_name=f"unbounded {kw}",
+            construct_name=f"incomplete {kw} range",
             source_loc=source_loc,
+        )
+    if not has_min:
+        body_ir = _dispatch_expr_to_ir(node.get("expr", {}))
+        if not isinstance(body_ir, BoolExpr):
+            raise UnsupportedConstruct(
+                message=(
+                    f"unbounded '{kw}' currently supports only a boolean-expression "
+                    "operand in the direct formal safety backend"
+                ),
+                construct_name=f"{kw} with non-boolean operand",
+                source_loc=source_loc,
+            )
+        body_text = _reconstruct_node_text(body_ir)
+        return (
+            PropAlways(body=body_ir, strong=strong, source_loc=source_loc),
+            f"{kw} ({body_text})",
         )
     lo = int(node["min"])
     hi = int(node["max"])
@@ -1425,6 +1450,54 @@ def _build_bounded_always(
     return (
         PropBoundedAlways(body=body_ir, lo=lo, hi=hi, strong=strong, source_loc=source_loc),
         text,
+    )
+
+
+def _build_nexttime(
+    node: dict[str, Any],
+    source_loc: SourceLoc,
+) -> tuple[SVANode, str]:
+    """Build fixed-delay nexttime IR from slang v11 ``Unary`` nodes."""
+    op = str(node.get("op", ""))
+    strong = op == "SNextTime"
+    kw = "s_nexttime" if strong else "nexttime"
+    has_min = "min" in node
+    has_max = "max" in node
+    if has_min != has_max:
+        raise UnsupportedConstruct(
+            message=f"'{kw}' requires a complete fixed delay bound",
+            construct_name=f"{kw} fixed delay",
+            source_loc=source_loc,
+        )
+    lo = int(node["min"]) if has_min else 1
+    hi = int(node["max"]) if has_max else 1
+    if lo != hi:
+        raise UnsupportedConstruct(
+            message=(
+                f"'{kw}' requires a fixed delay; use an equivalent bounded "
+                "sequence for a range"
+            ),
+            construct_name=f"{kw} fixed delay",
+            source_loc=source_loc,
+        )
+    if lo < 0:
+        raise UnsupportedConstruct(
+            message=f"'{kw}' delay must be nonnegative",
+            construct_name=f"{kw} nonnegative delay",
+            source_loc=source_loc,
+        )
+    body_ir = _dispatch_expr_to_ir(node.get("expr", {}))
+    if not isinstance(body_ir, BoolExpr):
+        raise UnsupportedConstruct(
+            message=f"'{kw}' currently supports only a boolean-expression operand",
+            construct_name=f"{kw} with non-boolean operand",
+            source_loc=source_loc,
+        )
+    delay_text = "" if not has_min and lo == 1 else f"[{lo}]"
+    body_text = _reconstruct_node_text(body_ir)
+    return (
+        PropNexttime(body=body_ir, cycles=lo, strong=strong, source_loc=source_loc),
+        f"{kw}{delay_text} ({body_text})",
     )
 
 
@@ -1857,6 +1930,13 @@ def _reconstruct_node_text(node: SVANode) -> str:
         )
     if isinstance(node, PropNot):
         return f"not ({_reconstruct_node_text(node.body)})"
+    if isinstance(node, PropAlways):
+        keyword = "s_always" if node.strong else "always"
+        return f"{keyword} ({_reconstruct_node_text(node.body)})"
+    if isinstance(node, PropNexttime):
+        keyword = "s_nexttime" if node.strong else "nexttime"
+        suffix = "" if node.cycles == 1 else f"[{node.cycles}]"
+        return f"{keyword}{suffix} ({_reconstruct_node_text(node.body)})"
     if isinstance(node, PropIfElse):
         cond = _reconstruct_node_text(node.condition)
         true_t = _reconstruct_node_text(node.true_branch)

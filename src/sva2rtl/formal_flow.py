@@ -143,6 +143,15 @@ class FormalEvidence:
 
 
 @dataclass(frozen=True)
+class FormalCompilation:
+    """Backend-selected property ready for formal source emission."""
+
+    checker: CheckerNode
+    property_class: PropertyClass
+    backend: str
+
+
+@dataclass(frozen=True)
 class FormalResult:
     """Machine-readable result of running one evidence bundle."""
 
@@ -253,6 +262,10 @@ def classify_property(node: sva_ir.SVANode) -> PropertyClass:
         return PropertyClass.BOUNDED_LIVENESS
     if isinstance(node, sva_ir.PropBoundedAlways):
         return PropertyClass.FINITE_VERDICT
+    if isinstance(node, sva_ir.PropAlways):
+        return PropertyClass.SAFETY
+    if isinstance(node, sva_ir.PropNexttime):
+        return PropertyClass.FINITE_VERDICT
     if isinstance(node, sva_ir.PropUntil):
         return PropertyClass.SAFETY
     if isinstance(node, sva_ir.ClockedSeq):
@@ -332,7 +345,39 @@ def select_formal_backend(property_class: PropertyClass) -> str:
     )
 
 
-def _compile_checker(config: FormalRunConfig) -> tuple[CheckerNode, PropertyClass]:
+def _direct_invariant(node: sva_ir.SVANode) -> sva_ir.BoolExpr | None:
+    """Return the effective invariant body, including disable semantics."""
+    disable: sva_ir.BoolExpr | None = None
+    body = node
+    if isinstance(body, sva_ir.DisableIff):
+        if not isinstance(body.condition, sva_ir.BoolExpr):
+            return None
+        disable = body.condition
+        body = body.body
+    if not isinstance(body, sva_ir.PropAlways) or not isinstance(body.body, sva_ir.BoolExpr):
+        return None
+    invariant = body.body
+    if disable is None:
+        return invariant
+    if disable.expr is None or invariant.expr is None:
+        return sva_ir.BoolExpr(
+            text=f"(({disable.text}) || ({invariant.text}))",
+            source_loc=body.source_loc,
+        )
+    combined = sva_ir.BoolBinary(
+        op="or",
+        left=disable.expr,
+        right=invariant.expr,
+        source_loc=body.source_loc,
+    )
+    return sva_ir.BoolExpr(
+        text=f"(({disable.text}) || ({invariant.text}))",
+        expr=combined,
+        source_loc=body.source_loc,
+    )
+
+
+def _compile_checker(config: FormalRunConfig) -> FormalCompilation:
     """Compile the selected SVA property without involving the DUT frontend."""
     ast = invoke_slang(config.property_file, config.slang_path)
     imported = import_all_assertions(ast)
@@ -347,8 +392,21 @@ def _compile_checker(config: FormalRunConfig) -> tuple[CheckerNode, PropertyClas
         )
     normalized = normalize(node)
     property_class = classify_property(normalized)
+    invariant = _direct_invariant(normalized)
+    if invariant is not None:
+        checker = compose(invariant, clock, label, original_text)
+        return FormalCompilation(
+            checker=optimize(checker),
+            property_class=property_class,
+            backend="direct-invariant-safety",
+        )
+    backend = select_formal_backend(property_class)
     checker = compose(normalized, clock, label, original_text)
-    return optimize(checker), property_class
+    return FormalCompilation(
+        checker=optimize(checker),
+        property_class=property_class,
+        backend=backend,
+    )
 
 
 def _width_decl(width: int) -> str:
@@ -431,6 +489,57 @@ def render_formal_bind(
     )
 
 
+def render_direct_invariant_bind(
+    checker: CheckerNode,
+    *,
+    top: str,
+    clock: str,
+    reset: str,
+) -> str:
+    """Render an unbounded invariant directly, without a PASS-producing monitor."""
+    for identifier in (top, clock, reset):
+        if _IDENTIFIER_RE.fullmatch(identifier) is None:
+            raise ValueError(f"invalid SystemVerilog identifier: {identifier!r}")
+    expression = checker.params.get("bool_expr")
+    if not expression:
+        raise ValueError("direct invariant requires a structured boolean expression")
+    widths = observed_signal_widths(checker)
+    observed = [
+        (port, signal)
+        for port, signal in checker.observed_signals
+        if port not in {clock, reset}
+    ]
+    port_lines = [f"    input logic {clock}", f"    input logic {reset}"]
+    port_lines.extend(
+        f"    input logic{_width_decl(widths.get(port, 1))} {port}"
+        for port, _signal in observed
+    )
+    bind_connections = [f"    .{clock}({clock})", f"    .{reset}({reset})"]
+    bind_connections.extend(f"    .{port}({signal})" for port, signal in observed)
+    edge = checker.params.get("clock_edge", "posedge")
+    if edge not in {"posedge", "negedge"}:
+        raise ValueError(f"unsupported clock edge: {edge!r}")
+    return (
+        "// Generated direct open-formal invariant. No finite PASS is synthesized.\n"
+        "module sva2rtl_formal_bind (\n"
+        + ",\n".join(port_lines)
+        + "\n);\n"
+        "    reg formal_past_valid = 1'b0;\n\n"
+        f"    always @({edge} {clock}) begin\n"
+        "        formal_past_valid <= 1'b1;\n"
+        "        if (!formal_past_valid) begin\n"
+        f"            assume (!{reset});\n"
+        "        end else begin\n"
+        f"            assume ({reset});\n"
+        f"            assert ({expression});\n"
+        "            cover (formal_past_valid);\n"
+        "        end\n"
+        "    end\n"
+        "endmodule\n\n"
+        f"bind {top} sva2rtl_formal_bind u_sva2rtl_formal_bind (\n"
+        + ",\n".join(bind_connections)
+        + "\n);\n"
+    )
 def _render_sby(config: FormalRunConfig, consumed_files: tuple[str, ...]) -> str:
     engine_line = f"{config.engine} {config.solver}".rstrip()
     source_args = " ".join(consumed_files)
@@ -471,8 +580,10 @@ def _prepare_output(config: FormalRunConfig) -> Path:
 def build_formal_bundle(config: FormalRunConfig) -> FormalEvidence:
     """Compile and write one replayable, source-isolated formal project."""
     bundle = _prepare_output(config)
-    checker, property_class = _compile_checker(config)
-    backend = select_formal_backend(property_class)
+    compilation = _compile_checker(config)
+    checker = compilation.checker
+    property_class = compilation.property_class
+    backend = compilation.backend
 
     property_copy = bundle / "evidence" / "property.sv"
     property_copy.parent.mkdir(parents=True, exist_ok=True)
@@ -487,7 +598,7 @@ def build_formal_bundle(config: FormalRunConfig) -> FormalEvidence:
         consumed.append(relative)
         dut_manifest.append({"path": relative, "sha256": _sha256(copied)})
 
-    modules = emit_all(checker)
+    modules = {} if backend == "direct-invariant-safety" else emit_all(checker)
     property_paths = {str(config.property_file), str(config.property_file.resolve())}
     generated_manifest: list[dict[str, str]] = []
     for index, (module_name, source_text) in enumerate(modules.items()):
@@ -502,15 +613,21 @@ def build_formal_bundle(config: FormalRunConfig) -> FormalEvidence:
         )
 
     bind_path = bundle / "formal_bind.sv"
-    _write_text(
-        bind_path,
-        render_formal_bind(
+    if backend == "direct-invariant-safety":
+        bind_text = render_direct_invariant_bind(
             checker,
             top=config.top,
             clock=config.clock,
             reset=config.reset,
-        ),
-    )
+        )
+    else:
+        bind_text = render_formal_bind(
+            checker,
+            top=config.top,
+            clock=config.clock,
+            reset=config.reset,
+        )
+    _write_text(bind_path, bind_text)
     consumed.append("formal_bind.sv")
     _write_text(bundle / "formal.sby", _render_sby(config, tuple(consumed)))
 
@@ -541,10 +658,20 @@ def build_formal_bundle(config: FormalRunConfig) -> FormalEvidence:
         "assumptions": [
             "reset is asserted on the first sampled cycle",
             "reset is deasserted on every later sampled cycle",
-            "monitor start is asserted on every non-reset cycle",
-            "monitor disable_i is held low",
+        ]
+        + (
+            []
+            if backend == "direct-invariant-safety"
+            else [
+                "monitor start is asserted on every non-reset cycle",
+                "monitor disable_i is held low",
+            ]
+        ),
+        "covers": [
+            "direct invariant sampling becomes reachable after reset"
+            if backend == "direct-invariant-safety"
+            else "monitor attempt_fired becomes reachable after reset"
         ],
-        "covers": ["monitor attempt_fired becomes reachable after reset"],
     }
     _write_json(bundle / "manifest.json", manifest)
     initial = FormalResult(

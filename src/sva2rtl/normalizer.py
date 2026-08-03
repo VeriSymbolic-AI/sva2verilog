@@ -24,13 +24,16 @@ import logging
 
 from sva2rtl.errors import SvaCompileError
 from sva2rtl.ir import (
+    BoolConst,
     BoolExpr,
     ClockedSeq,
     DisableIff,
+    PropAlways,
     PropBoundedAlways,
     PropBoundedEventually,
     PropIfElse,
     PropImplication,
+    PropNexttime,
     PropNot,
     PropUntil,
     SeqAnd,
@@ -192,6 +195,33 @@ def normalize(node: SVANode) -> SVANode:
                     source_loc=node.source_loc,
                 )
             )
+        case PropAlways():
+            return PropAlways(
+                body=normalize(node.body),
+                strong=node.strong,
+                source_loc=node.source_loc,
+            )
+        case PropNexttime():
+            body = normalize(node.body)
+            true_expr = BoolConst(
+                value=1,
+                width=1,
+                raw="1'b1",
+                source_loc=node.source_loc,
+            )
+            rewritten = SeqConcat(
+                elements=(
+                    BoolExpr(
+                        text="1'b1",
+                        expr=true_expr,
+                        source_loc=node.source_loc,
+                    ),
+                    body,
+                ),
+                delays=((node.cycles, node.cycles),),
+                source_loc=node.source_loc,
+            )
+            return _normalize_node(rewritten)
         case PropUntil():
             new_left = normalize(node.left)
             new_right = normalize(node.right)

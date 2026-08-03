@@ -25,6 +25,7 @@ from sva2rtl.ir import (
     BoolExpr,
     CheckerNode,
     ClockSpec,
+    PropAlways,
     PropBoundedAlways,
     PropBoundedEventually,
     PropUntil,
@@ -173,14 +174,16 @@ def test_always_single_offset() -> None:
     assert (ir.lo, ir.hi) == (2, 2)
 
 
-def test_unbounded_always_rejected() -> None:
-    with pytest.raises(UnsupportedConstruct, match="unbounded"):
-        _dispatch_expr_to_ir(_always_node("Always", None, None))
+def test_unbounded_always_imports_as_formal_only_safety() -> None:
+    ir = _dispatch_expr_to_ir(_always_node("Always", None, None))
+    assert isinstance(ir, PropAlways)
+    assert ir.strong is False
 
 
-def test_unbounded_s_always_rejected() -> None:
-    with pytest.raises(UnsupportedConstruct, match="unbounded"):
-        _dispatch_expr_to_ir(_always_node("SAlways", None, None))
+def test_unbounded_s_always_imports_as_formal_only_safety() -> None:
+    ir = _dispatch_expr_to_ir(_always_node("SAlways", None, None))
+    assert isinstance(ir, PropAlways)
+    assert ir.strong is True
 
 
 def test_always_inverted_bounds_rejected() -> None:
