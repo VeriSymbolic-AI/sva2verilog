@@ -29,7 +29,11 @@ from typing import Any
 from sva2rtl import ir as sva_ir
 from sva2rtl.ast_importer import import_all_assertions
 from sva2rtl.composer import compose
-from sva2rtl.emitter import emit_all, observed_signal_widths
+from sva2rtl.emitter import (
+    emit_all,
+    observed_signal_signedness,
+    observed_signal_widths,
+)
 from sva2rtl.errors import PropertyNotFound, SvaCompileError, UnsupportedConstruct
 from sva2rtl.frontend import invoke_slang
 from sva2rtl.ir import CheckerNode
@@ -268,6 +272,10 @@ def classify_property(node: sva_ir.SVANode) -> PropertyClass:
         return PropertyClass.FINITE_VERDICT
     if isinstance(node, sva_ir.PropUntil):
         return PropertyClass.SAFETY
+    if isinstance(node, (sva_ir.SeqGotoRep, sva_ir.SeqNonconsecRep)):
+        # Occurrence count is finite but the wait for those occurrences has no
+        # deadline, so successful discharge is a true eventuality obligation.
+        return PropertyClass.LIVENESS
     if isinstance(node, sva_ir.ClockedSeq):
         return PropertyClass.UNSUPPORTED
     if isinstance(node, (sva_ir.DisableIff, sva_ir.SeqFirstMatch)):
@@ -291,8 +299,6 @@ def classify_property(node: sva_ir.SVANode) -> PropertyClass:
         (
             sva_ir.SeqConcat,
             sva_ir.SeqRepetition,
-            sva_ir.SeqGotoRep,
-            sva_ir.SeqNonconsecRep,
         ),
     ):
         children = node.elements if isinstance(node, sva_ir.SeqConcat) else (node.expr,)
@@ -377,6 +383,26 @@ def _direct_invariant(node: sva_ir.SVANode) -> sva_ir.BoolExpr | None:
     )
 
 
+def _is_bare_sequence_property(node: sva_ir.SVANode) -> bool:
+    """Detect sequence roots whose no-match output is not assertion failure."""
+    body = node.body if isinstance(node, sva_ir.DisableIff) else node
+    return isinstance(
+        body,
+        (
+            sva_ir.SeqConcat,
+            sva_ir.SeqRepetition,
+            sva_ir.SeqFirstMatch,
+            sva_ir.SeqGotoRep,
+            sva_ir.SeqNonconsecRep,
+            sva_ir.SeqOr,
+            sva_ir.SeqAnd,
+            sva_ir.SeqIntersect,
+            sva_ir.SeqWithin,
+            sva_ir.SeqThroughout,
+        ),
+    )
+
+
 def _compile_checker(config: FormalRunConfig) -> FormalCompilation:
     """Compile the selected SVA property without involving the DUT frontend."""
     ast = invoke_slang(config.property_file, config.slang_path)
@@ -400,6 +426,16 @@ def _compile_checker(config: FormalRunConfig) -> FormalCompilation:
             property_class=property_class,
             backend="direct-invariant-safety",
         )
+    if _is_bare_sequence_property(normalized):
+        raise UnsupportedConstruct(
+            message=(
+                "a bare sequence no-match is not the same as monitor fail; wrap "
+                "the sequence in an implication/property obligation so the formal "
+                "backend cannot report a vacuous proof"
+            ),
+            construct_name="bare sequence formal assertion",
+            source_loc=normalized.source_loc,
+        )
     backend = select_formal_backend(property_class)
     checker = compose(normalized, clock, label, original_text)
     return FormalCompilation(
@@ -411,6 +447,11 @@ def _compile_checker(config: FormalRunConfig) -> FormalCompilation:
 
 def _width_decl(width: int) -> str:
     return "" if width <= 1 else f" [{width - 1}:0]"
+
+
+def _input_decl(name: str, width: int, signed: bool) -> str:
+    signed_text = " signed" if signed else ""
+    return f"    input logic{signed_text}{_width_decl(width)} {name}"
 
 
 def render_formal_bind(
@@ -426,6 +467,7 @@ def render_formal_bind(
             raise ValueError(f"invalid SystemVerilog identifier: {identifier!r}")
 
     widths = observed_signal_widths(checker)
+    signedness = observed_signal_signedness(checker)
     observed = [
         (port, signal)
         for port, signal in checker.observed_signals
@@ -434,7 +476,7 @@ def render_formal_bind(
     port_lines = [f"    input logic {clock}", f"    input logic {reset}"]
     for port, _signal in observed:
         width = widths.get(port, 1)
-        port_lines.append(f"    input logic{_width_decl(width)} {port}")
+        port_lines.append(_input_decl(port, width, signedness.get(port, False)))
 
     monitor_connections = [
         f"        .{clock}({clock})",
@@ -504,6 +546,7 @@ def render_direct_invariant_bind(
     if not expression:
         raise ValueError("direct invariant requires a structured boolean expression")
     widths = observed_signal_widths(checker)
+    signedness = observed_signal_signedness(checker)
     observed = [
         (port, signal)
         for port, signal in checker.observed_signals
@@ -511,7 +554,7 @@ def render_direct_invariant_bind(
     ]
     port_lines = [f"    input logic {clock}", f"    input logic {reset}"]
     port_lines.extend(
-        f"    input logic{_width_decl(widths.get(port, 1))} {port}"
+        _input_decl(port, widths.get(port, 1), signedness.get(port, False))
         for port, _signal in observed
     )
     bind_connections = [f"    .{clock}({clock})", f"    .{reset}({reset})"]

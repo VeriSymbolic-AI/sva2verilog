@@ -22,7 +22,7 @@ import re
 from collections.abc import Iterator
 from contextvars import ContextVar
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from sva2rtl.bool_semantics import render_bool_expr
 from sva2rtl.errors import SvaCompileError, UnsupportedConstruct
@@ -353,31 +353,49 @@ def build_bool_expr(node: dict[str, Any]) -> BoolNode:
                     value=value,
                     width=width,
                     raw=raw,
+                    signed=_integer_literal_signed(raw),
                     source_loc=source_loc,
                 )
+            width, signed = _named_value_type(node, source_loc)
             return BoolIdent(
                 name=_symbol_name(node),
-                width=_named_value_width(node, source_loc),
+                width=width,
+                signed=signed,
                 source_loc=source_loc,
             )
 
         case "IntegerLiteral":
             value, width, raw = _parse_integer_literal(node, source_loc)
-            return BoolConst(value=value, width=width, raw=raw, source_loc=source_loc)
+            return BoolConst(
+                value=value,
+                width=width,
+                raw=raw,
+                signed=_integer_literal_signed(raw),
+                source_loc=source_loc,
+            )
 
         case "SequenceExpr" | "Simple" | "Conversion":
             return build_bool_expr(_required_expr_child(node, source_loc))
 
         case "UnaryOp":
             op_str = str(node.get("op", ""))
-            if op_str != "LogicalNot":
+            unary_ops: dict[
+                str, Literal["not", "reduce_and", "reduce_or", "reduce_xor"]
+            ] = {
+                "LogicalNot": "not",
+                "BitwiseAnd": "reduce_and",
+                "BitwiseOr": "reduce_or",
+                "BitwiseXor": "reduce_xor",
+            }
+            semantic_op = unary_ops.get(op_str)
+            if semantic_op is None:
                 raise UnsupportedConstruct(
                     message=f"Unsupported unary boolean operator: '{op_str}'",
                     construct_name=op_str,
                     source_loc=source_loc,
                 )
             return BoolUnary(
-                op="not",
+                op=semantic_op,
                 operand=build_bool_expr(_required_child(node, "operand", source_loc)),
                 source_loc=source_loc,
             )
@@ -468,6 +486,19 @@ def _build_bool_binary_op(node: dict[str, Any], source_loc: SourceLoc) -> BoolNo
         return BoolCompare(op="eq", left=left, right=right, source_loc=source_loc)
     if op_str == "Inequality":
         return BoolCompare(op="ne", left=left, right=right, source_loc=source_loc)
+    relational_ops: dict[str, Literal["lt", "le", "gt", "ge"]] = {
+        "LessThan": "lt",
+        "LessThanEqual": "le",
+        "GreaterThan": "gt",
+        "GreaterThanEqual": "ge",
+    }
+    if op_str in relational_ops:
+        return BoolCompare(
+            op=relational_ops[op_str],
+            left=left,
+            right=right,
+            source_loc=source_loc,
+        )
 
     if op_str in _UNSUPPORTED_BINARY_OPS:
         construct_name = _UNSUPPORTED_BINARY_OPS[op_str]
@@ -485,24 +516,33 @@ def _symbol_name(node: dict[str, Any]) -> str:
     return symbol.split(" ", 1)[-1]
 
 
-def _named_value_width(node: dict[str, Any], source_loc: SourceLoc) -> int:
-    """Read a supported scalar or fixed packed-vector width from slang JSON."""
+def _named_value_type(node: dict[str, Any], source_loc: SourceLoc) -> tuple[int, bool]:
+    """Read width and signedness for a scalar or fixed packed vector."""
     type_text = str(node.get("type", "")).replace(" ", "")
     if not type_text:
-        return 1
+        return 1, False
+    signed = "signed" in type_text and "unsigned" not in type_text
     packed = re.search(r"\[(-?\d+):(-?\d+)\]", type_text)
     if packed is not None:
-        return abs(int(packed.group(1)) - int(packed.group(2))) + 1
-    if type_text in {"bit", "logic", "reg"}:
-        return 1
+        return abs(int(packed.group(1)) - int(packed.group(2))) + 1, signed
     scalar_widths = {"byte": 8, "shortint": 16, "int": 32, "integer": 32, "longint": 64}
-    if type_text in scalar_widths:
-        return scalar_widths[type_text]
+    base_type = type_text.replace("unsigned", "").replace("signed", "")
+    if base_type in {"bit", "logic", "reg"}:
+        return 1, signed
+    if base_type in scalar_widths:
+        default_signed = "unsigned" not in type_text
+        return scalar_widths[base_type], signed or default_signed
     raise UnsupportedConstruct(
         message=f"Unsupported boolean identifier type: '{type_text}'",
         construct_name="boolean identifier type",
         source_loc=source_loc,
     )
+
+
+def _named_value_width(node: dict[str, Any], source_loc: SourceLoc) -> int:
+    """Compatibility width projection used by scalar sampled-value checks."""
+    width, _signed = _named_value_type(node, source_loc)
+    return width
 
 
 def _required_expr_child(node: dict[str, Any], source_loc: SourceLoc) -> dict[str, Any]:
@@ -585,6 +625,14 @@ def _integer_literal_width(raw: str) -> int | None:
     if width_text.isdigit():
         return int(width_text)
     return None
+
+
+def _integer_literal_signed(raw: str) -> bool:
+    text = raw.strip().replace("_", "").lower()
+    if "'" not in text:
+        return False
+    _width, body = text.split("'", 1)
+    return body.startswith("s")
 
 
 def extract_source_loc(node: dict[str, Any]) -> SourceLoc:
@@ -1056,6 +1104,12 @@ def _dispatch_expr_to_ir(node: dict[str, Any], _visited: frozenset[str] = frozen
     """
     source_loc = extract_source_loc(node)
     match node.get("kind"):
+        case "Simple" if node.get("repetition", {}).get("kind") == "Consecutive":
+            return _build_seq_repetition(node, source_loc, _visited)
+        case "Simple" if node.get("repetition", {}).get("kind") == "GoTo":
+            return _build_goto_rep(node, source_loc)
+        case "Simple" if node.get("repetition", {}).get("kind") == "Nonconsecutive":
+            return _build_nonconsec_rep(node, source_loc)
         case "Simple":
             # v11.0: unwrap Simple wrapper, recurse into inner expression
             return _dispatch_expr_to_ir(node.get("expr", {}), _visited)

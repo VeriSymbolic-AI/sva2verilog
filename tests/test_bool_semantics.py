@@ -7,6 +7,7 @@ import json
 import pytest
 
 from sva2rtl.bool_semantics import (
+    collect_bool_signal_types,
     collect_bool_signal_widths,
     collect_bool_signals,
     deserialize_bool_expr,
@@ -125,6 +126,56 @@ def test_signal_widths_and_renames_preserve_vector_metadata() -> None:
     assert render_bool_expr(renamed) == "(dut_start && data)"
     assert collect_bool_signal_widths(renamed) == (("dut_start", 1), ("data", 4))
     assert deserialize_bool_expr(serialize_bool_expr(renamed)) == renamed
+
+
+@pytest.mark.parametrize(
+    ("op", "value", "expected"),
+    [
+        ("reduce_and", 0b1111, True),
+        ("reduce_and", 0b1101, False),
+        ("reduce_or", 0b0000, False),
+        ("reduce_or", 0b0100, True),
+        ("reduce_xor", 0b1011, True),
+        ("reduce_xor", 0b1010, False),
+    ],
+)
+def test_vector_reductions_use_every_declared_bit(
+    op: str, value: int, expected: bool
+) -> None:
+    data = BoolIdent(name="data", width=4, signed=False, source_loc=_LOC)
+    expr = BoolUnary(op=op, operand=data, source_loc=_LOC)
+
+    rendered_op = {"reduce_and": "&", "reduce_or": "|", "reduce_xor": "^"}[op]
+    assert render_bool_expr(expr) == f"({rendered_op}data)"
+    assert eval_bool_expr(expr, {"data": value}) is expected
+
+
+@pytest.mark.parametrize(
+    ("op", "expected"),
+    [("lt", True), ("le", True), ("gt", False), ("ge", False)],
+)
+def test_signed_relational_comparisons_use_width_aware_twos_complement(
+    op: str, expected: bool
+) -> None:
+    left = BoolIdent(name="left", width=8, signed=True, source_loc=_LOC)
+    right = BoolIdent(name="right", width=8, signed=True, source_loc=_LOC)
+    expr = BoolCompare(op=op, left=left, right=right, source_loc=_LOC)
+
+    # 8'hff is -1 only because both operands retain signed 8-bit metadata.
+    assert eval_bool_expr(expr, {"left": 0xFF, "right": 1}) is expected
+    assert collect_bool_signal_types(expr) == (
+        ("left", 8, True),
+        ("right", 8, True),
+    )
+    assert deserialize_bool_expr(serialize_bool_expr(expr)) == expr
+
+
+def test_mixed_signed_relational_comparison_is_unsigned() -> None:
+    signed_left = BoolIdent(name="left", width=8, signed=True, source_loc=_LOC)
+    unsigned_right = BoolIdent(name="right", width=8, signed=False, source_loc=_LOC)
+    expr = BoolCompare(op="lt", left=signed_left, right=unsigned_right, source_loc=_LOC)
+
+    assert eval_bool_expr(expr, {"left": 0xFF, "right": 1}) is False
 
 
 def test_serialize_deserialize_round_trips_supported_nodes_deterministically() -> None:

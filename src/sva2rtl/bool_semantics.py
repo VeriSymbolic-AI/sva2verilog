@@ -21,6 +21,7 @@ SignalValue = bool | int
 JsonMap = dict[str, object]
 
 __all__ = [
+    "collect_bool_signal_types",
     "collect_bool_signal_widths",
     "collect_bool_signals",
     "deserialize_bool_expr",
@@ -40,6 +41,12 @@ def render_bool_expr(expr: BoolNode) -> str:
             return raw or str(value)
         case BoolUnary(op="not", operand=operand):
             return f"(!{render_bool_expr(operand)})"
+        case BoolUnary(op="reduce_and", operand=operand):
+            return f"(&{render_bool_expr(operand)})"
+        case BoolUnary(op="reduce_or", operand=operand):
+            return f"(|{render_bool_expr(operand)})"
+        case BoolUnary(op="reduce_xor", operand=operand):
+            return f"(^{render_bool_expr(operand)})"
         case BoolBinary(op="and", left=left, right=right):
             return f"({render_bool_expr(left)} && {render_bool_expr(right)})"
         case BoolBinary(op="or", left=left, right=right):
@@ -48,6 +55,14 @@ def render_bool_expr(expr: BoolNode) -> str:
             return f"({render_bool_expr(left)} == {render_bool_expr(right)})"
         case BoolCompare(op="ne", left=left, right=right):
             return f"({render_bool_expr(left)} != {render_bool_expr(right)})"
+        case BoolCompare(op=op, left=left, right=right) if op in {
+            "lt",
+            "le",
+            "gt",
+            "ge",
+        }:
+            symbol = {"lt": "<", "le": "<=", "gt": ">", "ge": ">="}[op]
+            return f"({render_bool_expr(left)} {symbol} {render_bool_expr(right)})"
         case BoolBitSelect(value=value, index=index):
             return f"{render_bool_expr(value)}[{index}]"
     _unsupported(expr)
@@ -62,6 +77,18 @@ def eval_bool_expr(expr: BoolNode, signals: Mapping[str, SignalValue]) -> bool |
             return value
         case BoolUnary(op="not", operand=operand):
             return not bool(eval_bool_expr(operand, signals))
+        case BoolUnary(op=op, operand=operand) if op in {
+            "reduce_and",
+            "reduce_or",
+            "reduce_xor",
+        }:
+            width = _expr_width(operand)
+            value = _masked_value(eval_bool_expr(operand, signals), width)
+            if op == "reduce_and":
+                return value == (1 << width) - 1
+            if op == "reduce_or":
+                return value != 0
+            return value.bit_count() % 2 == 1
         case BoolBinary(op="and", left=left, right=right):
             return bool(eval_bool_expr(left, signals)) and bool(eval_bool_expr(right, signals))
         case BoolBinary(op="or", left=left, right=right):
@@ -70,6 +97,20 @@ def eval_bool_expr(expr: BoolNode, signals: Mapping[str, SignalValue]) -> bool |
             return _to_int(eval_bool_expr(left, signals)) == _to_int(eval_bool_expr(right, signals))
         case BoolCompare(op="ne", left=left, right=right):
             return _to_int(eval_bool_expr(left, signals)) != _to_int(eval_bool_expr(right, signals))
+        case BoolCompare(op=op, left=left, right=right) if op in {
+            "lt",
+            "le",
+            "gt",
+            "ge",
+        }:
+            left_value, right_value = _comparison_values(left, right, signals)
+            if op == "lt":
+                return left_value < right_value
+            if op == "le":
+                return left_value <= right_value
+            if op == "gt":
+                return left_value > right_value
+            return left_value >= right_value
         case BoolBitSelect(value=BoolIdent(name=name), index=index):
             return (_to_int(signals.get(name, 0)) >> index) & 1
     _unsupported(expr)
@@ -97,11 +138,31 @@ def collect_bool_signal_widths(expr: BoolNode) -> tuple[tuple[str, int], ...]:
     return tuple(widths.items())
 
 
+def collect_bool_signal_types(expr: BoolNode) -> tuple[tuple[str, int, bool], ...]:
+    """Return identifier width and signedness in deterministic first-seen order."""
+    types: dict[str, tuple[int, bool]] = {}
+    for ident in _walk_bool_idents(expr):
+        metadata = (ident.width, ident.signed)
+        previous = types.get(ident.name)
+        if previous is not None and previous != metadata:
+            raise ValueError(
+                f"inconsistent type for boolean identifier {ident.name!r}: "
+                f"{previous} and {metadata}"
+            )
+        types.setdefault(ident.name, metadata)
+    return tuple((name, width, signed) for name, (width, signed) in types.items())
+
+
 def rename_bool_signals(expr: BoolNode, aliases: Mapping[str, str]) -> BoolNode:
     """Return a semantic expression whose identifiers use generated port aliases."""
     match expr:
-        case BoolIdent(name=name, width=width, source_loc=source_loc):
-            return BoolIdent(name=aliases.get(name, name), width=width, source_loc=source_loc)
+        case BoolIdent(name=name, width=width, signed=signed, source_loc=source_loc):
+            return BoolIdent(
+                name=aliases.get(name, name),
+                width=width,
+                signed=signed,
+                source_loc=source_loc,
+            )
         case BoolConst():
             return expr
         case BoolUnary(op=op, operand=operand, source_loc=source_loc):
@@ -171,17 +232,25 @@ def _collect_bool_signals(
 
 def _to_json_obj(expr: BoolNode) -> JsonMap:
     match expr:
-        case BoolIdent(name=name, width=width, source_loc=source_loc):
+        case BoolIdent(name=name, width=width, signed=signed, source_loc=source_loc):
             return {
                 "kind": "ident",
                 "name": name,
                 "source_loc": _source_loc_to_json(source_loc),
+                "signed": signed,
                 "width": width,
             }
-        case BoolConst(value=value, width=width, raw=raw, source_loc=source_loc):
+        case BoolConst(
+            value=value,
+            width=width,
+            raw=raw,
+            signed=signed,
+            source_loc=source_loc,
+        ):
             return {
                 "kind": "const",
                 "raw": raw,
+                "signed": signed,
                 "source_loc": _source_loc_to_json(source_loc),
                 "value": value,
                 "width": width,
@@ -227,6 +296,7 @@ def _from_json_obj(obj: JsonMap) -> BoolNode:
         return BoolIdent(
             name=_require_str(obj, "name"),
             width=_optional_int(obj, "width") or 1,
+            signed=_optional_bool(obj, "signed"),
             source_loc=source_loc,
         )
     if kind == "const":
@@ -234,14 +304,15 @@ def _from_json_obj(obj: JsonMap) -> BoolNode:
             value=_require_int(obj, "value"),
             width=_optional_int(obj, "width"),
             raw=_optional_str(obj, "raw"),
+            signed=_optional_bool(obj, "signed"),
             source_loc=source_loc,
         )
     if kind == "unary":
         op = _require_str(obj, "op")
-        if op != "not":
+        if op not in {"not", "reduce_and", "reduce_or", "reduce_xor"}:
             raise ValueError(f"unsupported unary boolean op: {op}")
         return BoolUnary(
-            op=cast(Literal["not"], op),
+            op=cast(Literal["not", "reduce_and", "reduce_or", "reduce_xor"], op),
             operand=_from_json_obj(_require_map(obj, "operand")),
             source_loc=source_loc,
         )
@@ -257,10 +328,10 @@ def _from_json_obj(obj: JsonMap) -> BoolNode:
         )
     if kind == "compare":
         op = _require_str(obj, "op")
-        if op not in {"eq", "ne"}:
+        if op not in {"eq", "ne", "lt", "le", "gt", "ge"}:
             raise ValueError(f"unsupported compare boolean op: {op}")
         return BoolCompare(
-            op=cast(Literal["eq", "ne"], op),
+            op=cast(Literal["eq", "ne", "lt", "le", "gt", "ge"], op),
             left=_from_json_obj(_require_map(obj, "left")),
             right=_from_json_obj(_require_map(obj, "right")),
             source_loc=source_loc,
@@ -351,6 +422,60 @@ def _optional_int(obj: JsonMap, key: str) -> int | None:
     if not isinstance(value, int) or isinstance(value, bool):
         raise ValueError(f"{key} must be an integer or null")
     return value
+
+
+def _optional_bool(obj: JsonMap, key: str) -> bool:
+    if key not in obj or obj[key] is None:
+        return False
+    value = obj[key]
+    if not isinstance(value, bool):
+        raise ValueError(f"{key} must be a boolean or null")
+    return value
+
+
+def _expr_width(expr: BoolNode) -> int:
+    match expr:
+        case BoolIdent(width=width):
+            return max(1, width)
+        case BoolConst(value=value, width=width):
+            return max(1, width if width is not None else max(1, value.bit_length()))
+        case BoolBitSelect() | BoolCompare():
+            return 1
+        case BoolUnary():
+            return 1
+        case BoolBinary():
+            return 1
+    _unsupported(expr)
+
+
+def _expr_signed(expr: BoolNode) -> bool:
+    match expr:
+        case BoolIdent(signed=signed) | BoolConst(signed=signed):
+            return signed
+        case _:
+            return False
+
+
+def _masked_value(value: SignalValue, width: int) -> int:
+    return _to_int(value) & ((1 << width) - 1)
+
+
+def _signed_value(value: int, width: int) -> int:
+    sign_bit = 1 << (width - 1)
+    return value - (1 << width) if value & sign_bit else value
+
+
+def _comparison_values(
+    left: BoolNode,
+    right: BoolNode,
+    signals: Mapping[str, SignalValue],
+) -> tuple[int, int]:
+    width = max(_expr_width(left), _expr_width(right))
+    left_value = _masked_value(eval_bool_expr(left, signals), width)
+    right_value = _masked_value(eval_bool_expr(right, signals), width)
+    if _expr_signed(left) and _expr_signed(right):
+        return _signed_value(left_value, width), _signed_value(right_value, width)
+    return left_value, right_value
 
 
 def _to_int(value: SignalValue) -> int:

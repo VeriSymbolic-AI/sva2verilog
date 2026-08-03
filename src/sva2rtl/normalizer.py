@@ -209,7 +209,7 @@ def normalize(node: SVANode) -> SVANode:
                 raw="1'b1",
                 source_loc=node.source_loc,
             )
-            rewritten = SeqConcat(
+            delayed = SeqConcat(
                 elements=(
                     BoolExpr(
                         text="1'b1",
@@ -221,7 +221,16 @@ def normalize(node: SVANode) -> SVANode:
                 delays=((node.cycles, node.cycles),),
                 source_loc=node.source_loc,
             )
-            return _normalize_node(rewritten)
+            return PropImplication(
+                antecedent=BoolExpr(
+                    text="1'b1",
+                    expr=true_expr,
+                    source_loc=node.source_loc,
+                ),
+                consequent=_normalize_node(delayed),
+                overlapping=True,
+                source_loc=node.source_loc,
+            )
         case PropUntil():
             new_left = normalize(node.left)
             new_right = normalize(node.right)

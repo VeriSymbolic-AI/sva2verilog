@@ -20,6 +20,7 @@ import re
 
 from sva2rtl import __version__
 from sva2rtl.bool_semantics import (
+    collect_bool_signal_types,
     collect_bool_signal_widths,
     collect_bool_signals,
     rename_bool_signals,
@@ -407,6 +408,15 @@ def _bool_expr_widths(node: BoolExpr) -> tuple[tuple[str, int], ...]:
     return collect_bool_signal_widths(renamed)
 
 
+def _bool_expr_signedness(node: BoolExpr) -> tuple[tuple[str, bool], ...]:
+    """Return generated-port signedness for structured Boolean expressions."""
+    aliases = _bool_expr_aliases(node)
+    if node.expr is None:
+        return tuple((aliases.get(name, name), False) for name, _ in extract_signals(node.text))
+    renamed = rename_bool_signals(node.expr, aliases)
+    return tuple((name, signed) for name, _width, signed in collect_bool_signal_types(renamed))
+
+
 def _bool_expr_aliases(node: BoolExpr) -> dict[str, str]:
     """Allocate deterministic non-conflicting aliases for standard monitor ports."""
     raw = collect_bool_signals(node.expr) if node.expr is not None else extract_signals(node.text)
@@ -469,6 +479,8 @@ def structural_hash(node: CheckerNode) -> str:
         h.update(f"signal:{port}={signal}".encode())
     for port, width in node.observed_signal_widths:
         h.update(f"width:{port}={width}".encode())
+    for port, signed in node.observed_signal_signedness:
+        h.update(f"signed:{port}={int(signed)}".encode())
     for k, v in sorted(node.params.items()):
         if k not in _VOLATILE_PARAMS:
             h.update(f"{k}={v}".encode())
@@ -608,6 +620,7 @@ def _compose_bool_expr(
     rendered = _bool_expr_text(node)
     observed = _bool_expr_observed(node)
     widths = _bool_expr_widths(node)
+    signedness = _bool_expr_signedness(node)
 
     # The clock is already a standard monitor port.  If the property reads it
     # as data, keep the expression reference but do not emit a duplicate input.
@@ -634,6 +647,7 @@ def _compose_bool_expr(
         params=params,
         observed_signals=observed,
         observed_signal_widths=widths,
+        observed_signal_signedness=signedness,
         source_loc=node.source_loc,
         children=(),
         cse_origin=cse_origin,
@@ -847,6 +861,7 @@ def _compose_repetition(
     if isinstance(node.expr, BoolExpr):
         observed = _bool_expr_observed(node.expr)
         widths = _bool_expr_widths(node.expr)
+        signedness = _bool_expr_signedness(node.expr)
         signal_expr = _bool_expr_text(node.expr)
     else:
         raise SvaCompileError(
@@ -877,6 +892,7 @@ def _compose_repetition(
         params=params,
         observed_signals=observed,
         observed_signal_widths=widths,
+        observed_signal_signedness=signedness,
         source_loc=node.source_loc,
         children=(),
         cse_origin=cse_origin,
@@ -1209,6 +1225,7 @@ def _compose_implication_nfa(
     ant_guard = _bool_expr_text(node.antecedent)
     ant_sigs = _bool_expr_signal_names(node.antecedent)
     ant_widths = _bool_expr_widths(node.antecedent)
+    ant_signedness = _bool_expr_signedness(node.antecedent)
 
     # Consequent → sub-NFA (property-kind: dead-end = fail after attempt).
     cons_states, cons_trans, cons_accept, cons_sigs = _lift_to_nfa(
@@ -1256,6 +1273,7 @@ def _compose_implication_nfa(
         params=params,
         observed_signals=tuple((s, s) for s in all_sigs),
         observed_signal_widths=ant_widths,
+        observed_signal_signedness=ant_signedness,
         source_loc=node.source_loc,
         children=(cons_checker,),
         cse_origin=cse_origin,
@@ -1383,6 +1401,9 @@ def _compose_disable_iff(
     _reserved_ports = {"rst_n", clock.signal}
     cond_raw = _bool_expr_observed(node.condition) if isinstance(node.condition, BoolExpr) else ()
     cond_widths = _bool_expr_widths(node.condition) if isinstance(node.condition, BoolExpr) else ()
+    cond_signedness = (
+        _bool_expr_signedness(node.condition) if isinstance(node.condition, BoolExpr) else ()
+    )
     cond_signals = tuple((p, s) for p, s in cond_raw if p not in _reserved_ports)
     cond_seen = {p for p, _ in cond_signals}
     body_extra = tuple(
@@ -1412,6 +1433,7 @@ def _compose_disable_iff(
         params=params,
         observed_signals=all_signals,
         observed_signal_widths=cond_widths,
+        observed_signal_signedness=cond_signedness,
         source_loc=node.source_loc,
         children=(body_checker,),
         cse_origin=cse_origin,
@@ -1470,6 +1492,7 @@ def _compose_goto_rep(
     if isinstance(node.expr, BoolExpr):
         observed = _bool_expr_observed(node.expr)
         widths = _bool_expr_widths(node.expr)
+        signedness = _bool_expr_signedness(node.expr)
         signal_expr = _bool_expr_text(node.expr)
     else:
         raise SvaCompileError(
@@ -1497,6 +1520,7 @@ def _compose_goto_rep(
         params=params,
         observed_signals=observed,
         observed_signal_widths=widths,
+        observed_signal_signedness=signedness,
         source_loc=node.source_loc,
         children=(),
         cse_origin=cse_origin,
@@ -1517,6 +1541,7 @@ def _compose_nonconsec_rep(
     if isinstance(node.expr, BoolExpr):
         observed = _bool_expr_observed(node.expr)
         widths = _bool_expr_widths(node.expr)
+        signedness = _bool_expr_signedness(node.expr)
         signal_expr = _bool_expr_text(node.expr)
     else:
         raise SvaCompileError(
@@ -1544,6 +1569,7 @@ def _compose_nonconsec_rep(
         params=params,
         observed_signals=observed,
         observed_signal_widths=widths,
+        observed_signal_signedness=signedness,
         source_loc=node.source_loc,
         children=(),
         cse_origin=cse_origin,
@@ -2735,12 +2761,14 @@ def _compose_prop_if_else(
         # Add condition signals to observed_signals (used in comb. MUX)
         cond_sigs = _bool_expr_observed(node.condition)
         cond_widths = _bool_expr_widths(node.condition)
+        cond_signedness = _bool_expr_signedness(node.condition)
         cond_seen = {p for p, _ in all_signals}
         cond_extra = tuple((p, s) for p, s in cond_sigs if p not in cond_seen)
         all_signals = all_signals + cond_extra
     else:
         cond_text = "<cond>"
         cond_widths = ()
+        cond_signedness = ()
     params: dict[str, str] = {
         "module_name": module_name,
         "cond_expr": cond_text,
@@ -2757,6 +2785,7 @@ def _compose_prop_if_else(
         params=params,
         observed_signals=all_signals,
         observed_signal_widths=cond_widths,
+        observed_signal_signedness=cond_signedness,
         source_loc=node.source_loc,
         children=tuple(children),
         cse_origin=cse_origin,
@@ -2788,6 +2817,7 @@ def _compose_bounded_eventually(
     module_name = module_name_from_label(label, original_text)
     observed = _bool_expr_observed(node.body)
     widths = _bool_expr_widths(node.body)
+    signedness = _bool_expr_signedness(node.body)
     body_text = _bool_expr_text(node.body)
     cnt_width = max(1, math.ceil(math.log2(node.hi + 1))) if node.hi > 0 else 1
     params: dict[str, str] = {
@@ -2809,6 +2839,7 @@ def _compose_bounded_eventually(
         params=params,
         observed_signals=observed,
         observed_signal_widths=widths,
+        observed_signal_signedness=signedness,
         source_loc=node.source_loc,
         children=(),
         cse_origin=cse_origin,
@@ -2840,6 +2871,7 @@ def _compose_bounded_always(
     module_name = module_name_from_label(label, original_text)
     observed = _bool_expr_observed(node.body)
     widths = _bool_expr_widths(node.body)
+    signedness = _bool_expr_signedness(node.body)
     body_text = _bool_expr_text(node.body)
     cnt_width = max(1, math.ceil(math.log2(node.hi + 1))) if node.hi > 0 else 1
     params: dict[str, str] = {
@@ -2861,6 +2893,7 @@ def _compose_bounded_always(
         params=params,
         observed_signals=observed,
         observed_signal_widths=widths,
+        observed_signal_signedness=signedness,
         source_loc=node.source_loc,
         children=(),
         cse_origin=cse_origin,
@@ -2903,6 +2936,16 @@ def _compose_until(
                 source_loc=node.source_loc,
             )
         widths[port] = width
+    signedness = dict(_bool_expr_signedness(node.left))
+    for port, signed in _bool_expr_signedness(node.right):
+        previous = signedness.get(port)
+        if previous is not None and previous != signed:
+            raise UnsupportedConstruct(
+                message=f"conflicting signedness for signal '{port}'",
+                construct_name="inconsistent signal signedness",
+                source_loc=node.source_loc,
+            )
+        signedness[port] = signed
     left_text = _bool_expr_text(node.left)
     right_text = _bool_expr_text(node.right)
     # Ordered union (left first), preserving first-appearance order.
@@ -2931,6 +2974,7 @@ def _compose_until(
         params=params,
         observed_signals=tuple(observed),
         observed_signal_widths=tuple(widths.items()),
+        observed_signal_signedness=tuple(signedness.items()),
         source_loc=node.source_loc,
         children=(),
         cse_origin=cse_origin,

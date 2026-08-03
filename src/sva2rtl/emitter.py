@@ -50,6 +50,29 @@ def observed_signal_widths(checker: CheckerNode) -> dict[str, int]:
     return widths
 
 
+def observed_signal_signedness(checker: CheckerNode) -> dict[str, bool]:
+    """Collect signedness metadata visible at *checker*, including children."""
+    visible = {port for port, _ in checker.observed_signals}
+    signedness: dict[str, bool] = {}
+
+    def visit(node: CheckerNode) -> None:
+        for child in node.children:
+            visit(child)
+        for port, signed in node.observed_signal_signedness:
+            if port not in visible:
+                continue
+            previous = signedness.get(port)
+            if previous is not None and previous != signed:
+                raise ValueError(
+                    f"conflicting signedness for observed port {port!r}: "
+                    f"{previous} and {signed}"
+                )
+            signedness[port] = signed
+
+    visit(checker)
+    return signedness
+
+
 def merge_module_outputs(target: dict[str, str], incoming: dict[str, str]) -> None:
     """Merge rendered modules without allowing name-based silent replacement."""
     for module_name, sv_text in incoming.items():
@@ -146,6 +169,7 @@ def emit(
     ctx: dict[str, object] = dict(checker.params)
     ctx["observed_signals"] = checker.observed_signals
     ctx["signal_widths"] = observed_signal_widths(checker)
+    ctx["signal_signedness"] = observed_signal_signedness(checker)
     ctx["children"] = checker.children
     ctx["verilog_mode"] = verilog_mode
 
@@ -264,6 +288,7 @@ def _emit_recursive(
     ctx: dict[str, object] = dict(checker.params)
     ctx["observed_signals"] = checker.observed_signals
     ctx["signal_widths"] = observed_signal_widths(checker)
+    ctx["signal_signedness"] = observed_signal_signedness(checker)
     ctx["children"] = checker.children
     ctx["verilog_mode"] = verilog_mode
     merge_module_outputs(results, {checker.module_name: str(tmpl.render(**ctx))})

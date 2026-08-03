@@ -27,6 +27,7 @@ from sva2rtl.ir import (
     ClockSpec,
     DisableIff,
     PropAlways,
+    PropImplication,
     PropNexttime,
     SeqConcat,
 )
@@ -97,10 +98,11 @@ def test_nexttime_import_and_exact_delay_normalization(
     assert node.strong is expected_strong
 
     normalized = normalize(node)
-    assert isinstance(normalized, SeqConcat)
-    assert normalized.delays == ((cycles or 1, cycles or 1),)
-    assert len(normalized.elements) == 2
-    first, second = normalized.elements
+    assert isinstance(normalized, PropImplication)
+    assert isinstance(normalized.consequent, SeqConcat)
+    assert normalized.consequent.delays == ((cycles or 1, cycles or 1),)
+    assert len(normalized.consequent.elements) == 2
+    first, second = normalized.consequent.elements
     assert isinstance(first, BoolExpr)
     assert isinstance(first.expr, BoolConst)
     assert first.expr.value == 1

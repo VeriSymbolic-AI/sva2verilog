@@ -59,6 +59,7 @@ class BoolIdent(BoolNode):
 
     name: str
     width: int = 1
+    signed: bool = False
 
 
 @dataclass(frozen=True)
@@ -73,13 +74,14 @@ class BoolConst(BoolNode):
     value: int
     width: int | None = None
     raw: str = ""
+    signed: bool = False
 
 
 @dataclass(frozen=True)
 class BoolUnary(BoolNode):
     """Unary boolean operation."""
 
-    op: Literal["not"]
+    op: Literal["not", "reduce_and", "reduce_or", "reduce_xor"]
     operand: BoolNode
 
 
@@ -96,7 +98,7 @@ class BoolBinary(BoolNode):
 class BoolCompare(BoolNode):
     """Equality or inequality comparison."""
 
-    op: Literal["eq", "ne"]
+    op: Literal["eq", "ne", "lt", "le", "gt", "ge"]
     left: BoolNode
     right: BoolNode
 
@@ -700,6 +702,8 @@ class CheckerNode:
         observed_signal_widths:
                             ``(port_name, packed_width)`` pairs for observed
                             ports. Scalar ports may be recorded as width 1.
+        observed_signal_signedness:
+                            ``(port_name, is_signed)`` pairs for observed ports.
         source_loc:         Source location of the originating SVA assertion.
         children:           Sub-checker modules wired into this one (for
                             hierarchical composition in Phase 2+).
@@ -711,6 +715,7 @@ class CheckerNode:
     observed_signals: tuple[tuple[str, str], ...]  # (port_name, signal_name)
     source_loc: SourceLoc
     observed_signal_widths: tuple[tuple[str, int], ...] = ()
+    observed_signal_signedness: tuple[tuple[str, bool], ...] = ()
     children: tuple[CheckerNode, ...] = ()
     cse_origin: str | None = None  # named-sequence label for CSE tag (task 3.3.5)
 
@@ -726,6 +731,7 @@ class CheckerNode:
                 frozenset(self.params.items()),
                 self.observed_signals,
                 self.observed_signal_widths,
+                self.observed_signal_signedness,
                 self.source_loc,
                 self.children,
                 self.cse_origin,
@@ -741,6 +747,7 @@ class CheckerNode:
             and frozenset(self.params.items()) == frozenset(other.params.items())
             and self.observed_signals == other.observed_signals
             and self.observed_signal_widths == other.observed_signal_widths
+            and self.observed_signal_signedness == other.observed_signal_signedness
             and self.source_loc == other.source_loc
             and self.children == other.children
             and self.cse_origin == other.cse_origin
