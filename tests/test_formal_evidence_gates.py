@@ -113,8 +113,34 @@ def _write_certificate(tmp_path: Path, property_path: Path) -> Path:
     proof = tmp_path / "subproperty-result.json"
     relation_proof = tmp_path / "relation-result.json"
     subproperty.write_text("assert property (p);\n", encoding="utf-8")
-    proof.write_text('{"status":"PROVEN"}\n', encoding="utf-8")
-    relation_proof.write_text('{"status":"PROVEN"}\n', encoding="utf-8")
+    property_hash = _sha256(property_path)
+    subproperty_hash = _sha256(subproperty)
+    checker = "independent-sby-run"
+    relation_checker = "independent-sby-relation-run"
+    proof.write_text(
+        json.dumps(
+            {
+                "status": "PROVEN",
+                "property_sha256": subproperty_hash,
+                "checker": checker,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    relation_proof.write_text(
+        json.dumps(
+            {
+                "status": "PROVEN",
+                "relation": "equivalent",
+                "original_property_sha256": property_hash,
+                "subproperty_sha256s": [subproperty_hash],
+                "checker": relation_checker,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
     certificate = tmp_path / "decomposition.json"
     certificate.write_text(
         json.dumps(
@@ -122,17 +148,17 @@ def _write_certificate(tmp_path: Path, property_path: Path) -> Path:
                 "schema_version": 1,
                 "relation": "equivalent",
                 "relation_status": "PROVEN",
-                "relation_checker": "independent-sby-relation-run",
+                "relation_checker": relation_checker,
                 "relation_proof_artifact_path": relation_proof.name,
                 "relation_proof_artifact_sha256": _sha256(relation_proof),
-                "original_property_sha256": _sha256(property_path),
+                "original_property_sha256": property_hash,
                 "subproperties": [
                     {
                         "id": "bounded_obligation_1",
                         "property_path": subproperty.name,
-                        "property_sha256": _sha256(subproperty),
+                        "property_sha256": subproperty_hash,
                         "obligation_status": "PROVEN",
-                        "checker": "independent-sby-run",
+                        "checker": checker,
                         "proof_artifact_path": proof.name,
                         "proof_artifact_sha256": _sha256(proof),
                     }

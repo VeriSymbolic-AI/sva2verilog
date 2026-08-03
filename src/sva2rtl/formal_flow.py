@@ -280,13 +280,14 @@ def _require_checker(value: object, label: str) -> str:
     return value
 
 
-def _require_proven_artifact(path: Path, label: str) -> None:
+def _require_proven_artifact(path: Path, label: str) -> dict[str, Any]:
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise ValueError(f"{label} must be a JSON result artifact") from exc
     if not isinstance(payload, dict) or payload.get("status") != FormalStatus.PROVEN.value:
         raise ValueError(f"{label} does not report PROVEN")
+    return payload
 
 
 def _validate_decomposition_certificate(
@@ -325,7 +326,9 @@ def _validate_decomposition_certificate(
     )
     if _sha256(relation_proof_path) != relation_proof_sha256:
         raise ValueError("decomposition relation proof artifact hash does not match")
-    _require_proven_artifact(relation_proof_path, "decomposition relation proof artifact")
+    relation_result = _require_proven_artifact(
+        relation_proof_path, "decomposition relation proof artifact"
+    )
     raw_members = payload.get("subproperties")
     if not isinstance(raw_members, list) or not raw_members:
         raise ValueError("decomposition certificate requires non-empty subproperties")
@@ -360,7 +363,13 @@ def _validate_decomposition_certificate(
         )
         if _sha256(proof_path) != proof_sha256:
             raise ValueError(f"proof artifact hash does not match for {identifier}")
-        _require_proven_artifact(proof_path, f"proof artifact for {identifier}")
+        proof_result = _require_proven_artifact(
+            proof_path, f"proof artifact for {identifier}"
+        )
+        if proof_result.get("property_sha256") != property_sha256:
+            raise ValueError(f"proof artifact is not bound to {identifier}")
+        if proof_result.get("checker") != checker:
+            raise ValueError(f"proof artifact checker does not match for {identifier}")
         members.append(
             _DecompositionMember(
                 identifier=identifier,
@@ -371,6 +380,14 @@ def _validate_decomposition_certificate(
                 proof_artifact_sha256=proof_sha256,
             )
         )
+    expected_subproperty_hashes = [member.property_sha256 for member in members]
+    if (
+        relation_result.get("relation") != relation
+        or relation_result.get("original_property_sha256") != claimed_original
+        or relation_result.get("subproperty_sha256s") != expected_subproperty_hashes
+        or relation_result.get("checker") != relation_checker
+    ):
+        raise ValueError("relation proof artifact is not bound to this decomposition")
     return _ValidatedDecomposition(
         relation=relation,
         original_property_sha256=claimed_original,
