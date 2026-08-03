@@ -26,10 +26,11 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
+from sva2rtl import ir as sva_ir
 from sva2rtl.ast_importer import import_all_assertions
 from sva2rtl.composer import compose
 from sva2rtl.emitter import emit_all, observed_signal_widths
-from sva2rtl.errors import PropertyNotFound, SvaCompileError
+from sva2rtl.errors import PropertyNotFound, SvaCompileError, UnsupportedConstruct
 from sva2rtl.frontend import invoke_slang
 from sva2rtl.ir import CheckerNode
 from sva2rtl.normalizer import normalize
@@ -59,6 +60,16 @@ class FormalStatus(StrEnum):
     UNSUPPORTED = "UNSUPPORTED"
     ERROR = "ERROR"
     TIMEOUT = "TIMEOUT"
+
+
+class PropertyClass(StrEnum):
+    """Semantic class used to choose a sound formal backend."""
+
+    FINITE_VERDICT = "finite-verdict"
+    SAFETY = "safety"
+    BOUNDED_LIVENESS = "bounded-liveness"
+    LIVENESS = "liveness"
+    UNSUPPORTED = "unsupported"
 
 
 @dataclass(frozen=True)
@@ -127,6 +138,7 @@ class FormalEvidence:
     bundle_dir: Path
     config: FormalRunConfig
     checker_module: str
+    property_class: PropertyClass
     manifest: dict[str, Any]
 
 
@@ -215,7 +227,112 @@ def _select_assertion(
     )
 
 
-def _compile_checker(config: FormalRunConfig) -> CheckerNode:
+def _join_property_classes(classes: tuple[PropertyClass, ...]) -> PropertyClass:
+    """Join child classes conservatively for a composed property."""
+    if PropertyClass.UNSUPPORTED in classes:
+        return PropertyClass.UNSUPPORTED
+    if PropertyClass.LIVENESS in classes:
+        return PropertyClass.LIVENESS
+    if PropertyClass.SAFETY in classes:
+        return PropertyClass.SAFETY
+    if PropertyClass.BOUNDED_LIVENESS in classes:
+        return PropertyClass.BOUNDED_LIVENESS
+    return PropertyClass.FINITE_VERDICT
+
+
+def classify_property(node: sva_ir.SVANode) -> PropertyClass:
+    """Classify temporal semantics before selecting a formal backend.
+
+    The classifier is deliberately conservative.  In particular, a nested
+    clock is unsupported by the initial single-clock formal backend and the
+    negation of an unbounded safety property is true liveness.
+    """
+    if isinstance(node, (sva_ir.BoolExpr, sva_ir.SignalFunc)):
+        return PropertyClass.FINITE_VERDICT
+    if isinstance(node, sva_ir.PropBoundedEventually):
+        return PropertyClass.BOUNDED_LIVENESS
+    if isinstance(node, sva_ir.PropBoundedAlways):
+        return PropertyClass.FINITE_VERDICT
+    if isinstance(node, sva_ir.PropUntil):
+        return PropertyClass.SAFETY
+    if isinstance(node, sva_ir.ClockedSeq):
+        return PropertyClass.UNSUPPORTED
+    if isinstance(node, (sva_ir.DisableIff, sva_ir.SeqFirstMatch)):
+        return classify_property(node.body)
+    if isinstance(node, sva_ir.PropNot):
+        inner = classify_property(node.body)
+        if inner is PropertyClass.SAFETY:
+            return PropertyClass.LIVENESS
+        if inner is PropertyClass.LIVENESS:
+            return PropertyClass.SAFETY
+        if inner is PropertyClass.UNSUPPORTED:
+            return inner
+        return PropertyClass.FINITE_VERDICT
+    if isinstance(node, sva_ir.PropIfElse):
+        branches = [classify_property(node.condition), classify_property(node.true_branch)]
+        if node.false_branch is not None:
+            branches.append(classify_property(node.false_branch))
+        return _join_property_classes(tuple(branches))
+    if isinstance(
+        node,
+        (
+            sva_ir.SeqConcat,
+            sva_ir.SeqRepetition,
+            sva_ir.SeqGotoRep,
+            sva_ir.SeqNonconsecRep,
+        ),
+    ):
+        children = node.elements if isinstance(node, sva_ir.SeqConcat) else (node.expr,)
+        return _join_property_classes(tuple(classify_property(child) for child in children))
+    if isinstance(
+        node,
+        (
+            sva_ir.PropImplication,
+            sva_ir.SeqOr,
+            sva_ir.SeqAnd,
+            sva_ir.SeqIntersect,
+        ),
+    ):
+        left = node.antecedent if isinstance(node, sva_ir.PropImplication) else node.left
+        right = node.consequent if isinstance(node, sva_ir.PropImplication) else node.right
+        return _join_property_classes((classify_property(left), classify_property(right)))
+    if isinstance(node, sva_ir.SeqWithin):
+        return _join_property_classes(
+            (classify_property(node.inner), classify_property(node.outer))
+        )
+    if isinstance(node, sva_ir.SeqThroughout):
+        return _join_property_classes(
+            (classify_property(node.condition), classify_property(node.body))
+        )
+    return PropertyClass.UNSUPPORTED
+
+
+def select_formal_backend(property_class: PropertyClass) -> str:
+    """Select the currently qualified backend or reject without weakening."""
+    if property_class in {
+        PropertyClass.FINITE_VERDICT,
+        PropertyClass.SAFETY,
+        PropertyClass.BOUNDED_LIVENESS,
+    }:
+        return "generated-monitor-safety"
+    if property_class is PropertyClass.LIVENESS:
+        raise UnsupportedConstruct(
+            message=(
+                "this property needs an open live backend or a checked "
+                "liveness-to-safety reduction; bounded truncation is unsound"
+            ),
+            construct_name="open live backend",
+        )
+    raise UnsupportedConstruct(
+        message=(
+            "the initial formal backend accepts one clock domain only; split the "
+            "property and state handoff assumptions explicitly"
+        ),
+        construct_name="single-clock formal backend",
+    )
+
+
+def _compile_checker(config: FormalRunConfig) -> tuple[CheckerNode, PropertyClass]:
     """Compile the selected SVA property without involving the DUT frontend."""
     ast = invoke_slang(config.property_file, config.slang_path)
     imported = import_all_assertions(ast)
@@ -228,8 +345,10 @@ def _compile_checker(config: FormalRunConfig) -> CheckerNode:
             ),
             source_loc=clock.source_loc,
         )
-    checker = compose(normalize(node), clock, label, original_text)
-    return optimize(checker)
+    normalized = normalize(node)
+    property_class = classify_property(normalized)
+    checker = compose(normalized, clock, label, original_text)
+    return optimize(checker), property_class
 
 
 def _width_decl(width: int) -> str:
@@ -352,7 +471,8 @@ def _prepare_output(config: FormalRunConfig) -> Path:
 def build_formal_bundle(config: FormalRunConfig) -> FormalEvidence:
     """Compile and write one replayable, source-isolated formal project."""
     bundle = _prepare_output(config)
-    checker = _compile_checker(config)
+    checker, property_class = _compile_checker(config)
+    backend = select_formal_backend(property_class)
 
     property_copy = bundle / "evidence" / "property.sv"
     property_copy.parent.mkdir(parents=True, exist_ok=True)
@@ -396,7 +516,8 @@ def build_formal_bundle(config: FormalRunConfig) -> FormalEvidence:
 
     manifest: dict[str, Any] = {
         "schema_version": 1,
-        "backend": "generated-monitor-safety",
+        "backend": backend,
+        "property_class": property_class.value,
         "config": {
             "top": config.top,
             "property": config.property_name,
@@ -436,7 +557,7 @@ def build_formal_bundle(config: FormalRunConfig) -> FormalEvidence:
         log_path="sby.log",
     )
     _write_json(bundle / "result.json", initial.to_dict())
-    return FormalEvidence(bundle, config, checker.module_name, manifest)
+    return FormalEvidence(bundle, config, checker.module_name, property_class, manifest)
 
 
 def classify_sby_result(

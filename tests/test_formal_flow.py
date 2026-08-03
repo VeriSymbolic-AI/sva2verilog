@@ -8,15 +8,30 @@ from unittest.mock import patch
 
 import pytest
 
+from sva2rtl.errors import UnsupportedConstruct
 from sva2rtl.formal_flow import (
     FormalMode,
     FormalRunConfig,
     FormalStatus,
+    PropertyClass,
     build_formal_bundle,
+    classify_property,
     classify_sby_result,
     render_formal_bind,
+    select_formal_backend,
 )
-from sva2rtl.ir import CheckerNode, SourceLoc
+from sva2rtl.ir import (
+    BoolExpr,
+    CheckerNode,
+    ClockedSeq,
+    ClockSpec,
+    PropBoundedAlways,
+    PropBoundedEventually,
+    PropNot,
+    PropUntil,
+    SeqConcat,
+    SourceLoc,
+)
 
 
 def _checker() -> CheckerNode:
@@ -37,6 +52,14 @@ def _checker() -> CheckerNode:
         observed_signal_widths=(("req", 1), ("ack", 1)),
         source_loc=SourceLoc("property.sv", 2, 3),
     )
+
+
+def _loc() -> SourceLoc:
+    return SourceLoc("property.sv", 2, 3)
+
+
+def _boolean(text: str = "req") -> BoolExpr:
+    return BoolExpr(text=text, source_loc=_loc())
 
 
 def _config(tmp_path: Path, *, mode: FormalMode = FormalMode.PROVE) -> FormalRunConfig:
@@ -118,6 +141,51 @@ def test_classify_counterexample_timeout_and_ambiguous_failure() -> None:
     assert error is FormalStatus.ERROR
 
 
+def test_classify_property_semantics_before_backend_selection() -> None:
+    bounded_sequence = SeqConcat(
+        elements=(_boolean("req"), _boolean("ack")),
+        delays=((1, 3),),
+        source_loc=_loc(),
+    )
+    bounded_eventually = PropBoundedEventually(
+        body=_boolean("ack"), lo=1, hi=4, source_loc=_loc()
+    )
+    weak_until = PropUntil(
+        left=_boolean("req"), right=_boolean("ack"), source_loc=_loc()
+    )
+    negated_until = PropNot(body=weak_until, source_loc=_loc())
+    bounded_always = PropBoundedAlways(
+        body=_boolean("req"), lo=0, hi=5, source_loc=_loc()
+    )
+    multi_clock = ClockedSeq(
+        clock=ClockSpec(edge="posedge", signal="other_clk", source_loc=_loc()),
+        body=_boolean("ack"),
+        source_loc=_loc(),
+    )
+
+    assert classify_property(_boolean()) is PropertyClass.FINITE_VERDICT
+    assert classify_property(bounded_sequence) is PropertyClass.FINITE_VERDICT
+    assert classify_property(bounded_always) is PropertyClass.FINITE_VERDICT
+    assert classify_property(bounded_eventually) is PropertyClass.BOUNDED_LIVENESS
+    assert classify_property(weak_until) is PropertyClass.SAFETY
+    assert classify_property(negated_until) is PropertyClass.LIVENESS
+    assert classify_property(multi_clock) is PropertyClass.UNSUPPORTED
+
+
+def test_backend_selection_rejects_liveness_and_unsupported_classes() -> None:
+    assert select_formal_backend(PropertyClass.FINITE_VERDICT) == (
+        "generated-monitor-safety"
+    )
+    assert select_formal_backend(PropertyClass.SAFETY) == "generated-monitor-safety"
+    assert select_formal_backend(PropertyClass.BOUNDED_LIVENESS) == (
+        "generated-monitor-safety"
+    )
+    with pytest.raises(UnsupportedConstruct, match="open live backend"):
+        select_formal_backend(PropertyClass.LIVENESS)
+    with pytest.raises(UnsupportedConstruct, match="single-clock"):
+        select_formal_backend(PropertyClass.UNSUPPORTED)
+
+
 def test_formal_bind_uses_explicit_ports_assert_and_cover() -> None:
     text = render_formal_bind(_checker(), top="dut", clock="clk", reset="rst_n")
     assert "bind dut sva2rtl_formal_bind" in text
@@ -133,7 +201,10 @@ def test_bundle_excludes_property_from_sby_and_uses_relative_manifest_paths(
     tmp_path: Path,
 ) -> None:
     config = _config(tmp_path)
-    with patch("sva2rtl.formal_flow._compile_checker", return_value=_checker()):
+    with patch(
+        "sva2rtl.formal_flow._compile_checker",
+        return_value=(_checker(), PropertyClass.FINITE_VERDICT),
+    ):
         evidence = build_formal_bundle(config)
 
     sby_text = (evidence.bundle_dir / "formal.sby").read_text(encoding="utf-8")
@@ -147,6 +218,7 @@ def test_bundle_excludes_property_from_sby_and_uses_relative_manifest_paths(
     assert "formal_bind.sv" in sby_text
     assert (evidence.bundle_dir / "evidence" / "property.sv").exists()
     assert manifest["property"]["path"] == "evidence/property.sv"
+    assert manifest["property_class"] == "finite-verdict"
     assert len(manifest["property"]["sha256"]) == 64
     serialized = json.dumps(manifest, sort_keys=True)
     assert str(tmp_path.resolve()) not in serialized
@@ -162,6 +234,9 @@ def test_existing_nonempty_bundle_requires_force(tmp_path: Path) -> None:
     config = _config(tmp_path)
     config.output_dir.mkdir()
     (config.output_dir / "keep.txt").write_text("do not overwrite\n", encoding="utf-8")
-    with patch("sva2rtl.formal_flow._compile_checker", return_value=_checker()):
+    with patch(
+        "sva2rtl.formal_flow._compile_checker",
+        return_value=(_checker(), PropertyClass.FINITE_VERDICT),
+    ):
         with pytest.raises(FileExistsError, match="--force"):
             build_formal_bundle(config)
