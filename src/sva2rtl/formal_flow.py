@@ -35,6 +35,7 @@ from sva2rtl.emitter import (
     observed_signal_widths,
 )
 from sva2rtl.errors import PropertyNotFound, SvaCompileError, UnsupportedConstruct
+from sva2rtl.formal_lowering import lower_bounded_implication
 from sva2rtl.frontend import invoke_slang
 from sva2rtl.ir import CheckerNode
 from sva2rtl.normalizer import normalize
@@ -53,6 +54,14 @@ class FormalMode(StrEnum):
 
     PROVE = "prove"
     BMC = "bmc"
+
+
+class AttemptMode(StrEnum):
+    """How overlapping bounded property attempts are represented."""
+
+    AUTO = "auto"
+    MONITOR = "monitor"
+    SYMBOLIC_WITNESS = "symbolic-witness"
 
 
 class FormalStatus(StrEnum):
@@ -88,6 +97,7 @@ class FormalRunConfig:
     clock: str = "clk"
     reset: str = "rst_n"
     mode: FormalMode = FormalMode.PROVE
+    attempt_mode: AttemptMode = AttemptMode.AUTO
     depth: int = 20
     timeout_seconds: int = 120
     engine: str = "smtbmc"
@@ -416,6 +426,30 @@ def _compile_checker(config: FormalRunConfig) -> FormalCompilation:
             ),
             source_loc=clock.source_loc,
         )
+    if config.attempt_mode is not AttemptMode.MONITOR:
+        witness = lower_bounded_implication(
+            node,
+            label=label,
+            original_text=original_text,
+            clock_signal=clock.signal,
+            clock_edge=clock.edge,
+        )
+        if witness is not None:
+            return FormalCompilation(
+                checker=witness,
+                property_class=classify_property(normalize(node)),
+                backend="symbolic-witness-safety",
+            )
+        if config.attempt_mode is AttemptMode.SYMBOLIC_WITNESS:
+            raise UnsupportedConstruct(
+                message=(
+                    "symbolic-witness mode supports only a Boolean antecedent "
+                    "with Boolean, fixed/ranged-delay, nexttime, or bounded "
+                    "consecutive consequent"
+                ),
+                construct_name="symbolic-witness property shape",
+                source_loc=node.source_loc,
+            )
     normalized = normalize(node)
     property_class = classify_property(normalized)
     invariant = _direct_invariant(normalized)
@@ -583,6 +617,151 @@ def render_direct_invariant_bind(
         + ",\n".join(bind_connections)
         + "\n);\n"
     )
+
+
+def render_symbolic_witness_bind(
+    checker: CheckerNode,
+    *,
+    top: str,
+    clock: str,
+    reset: str,
+) -> str:
+    """Render one arbitrary bounded attempt without a fixed thread budget."""
+    for identifier in (top, clock, reset):
+        if _IDENTIFIER_RE.fullmatch(identifier) is None:
+            raise ValueError(f"invalid SystemVerilog identifier: {identifier!r}")
+    widths = observed_signal_widths(checker)
+    signedness = observed_signal_signedness(checker)
+    observed = list(checker.observed_signals)
+    port_lines = [f"    input logic {clock}", f"    input logic {reset}"]
+    port_lines.extend(
+        _input_decl(port, widths.get(port, 1), signedness.get(port, False))
+        for port, _signal in observed
+    )
+    bind_connections = [f"    .{clock}({clock})", f"    .{reset}({reset})"]
+    bind_connections.extend(f"    .{port}({signal})" for port, signal in observed)
+    edge = checker.params["clock_edge"]
+    antecedent = checker.params["antecedent_expr"]
+    condition = checker.params["condition_expr"]
+    disable = checker.params["disable_expr"]
+    kind = checker.params["obligation_kind"]
+    lo = int(checker.params["min_cycles"])
+    hi = int(checker.params["max_cycles"])
+    start_offset = int(checker.params["start_offset"])
+    counter_width = int(checker.params["counter_width"])
+
+    if kind == "eventually":
+        if hi == 0:
+            obligation_logic = (
+                "            if (witness_start) begin\n"
+                f"                assert ({condition});\n"
+                f"                cover ({condition});\n"
+                "            end\n"
+            )
+        else:
+            eligible_at_start = lo == 0
+            initial_seen = f"({condition})" if eligible_at_start else "1'b0"
+            obligation_logic = (
+                "            if (witness_start) begin\n"
+                "                tracking_q <= 1'b1;\n"
+                "                age_q <= '0;\n"
+                f"                seen_q <= {initial_seen};\n"
+                "            end else if (tracking_q) begin\n"
+                "                age_q <= age_q + 1'b1;\n"
+                f"                if ((age_q + 1'b1 >= MIN_CYCLES) && ({condition}))\n"
+                "                    seen_q <= 1'b1;\n"
+                "                if (age_q + 1'b1 >= MAX_CYCLES) begin\n"
+                f"                    assert (seen_q || ({condition}));\n"
+                f"                    cover (seen_q || ({condition}));\n"
+                "                    tracking_q <= 1'b0;\n"
+                "                end\n"
+                "            end\n"
+            )
+    else:
+        start_check = start_offset == 0
+        if start_check:
+            start_body = (
+                f"                assert ({condition});\n"
+                + (
+                    f"                cover ({condition});\n"
+                    "                tracking_q <= 1'b0;\n"
+                    if lo <= 1
+                    else "                tracking_q <= 1'b1;\n"
+                    "                count_q <= 1;\n"
+                )
+            )
+        else:
+            start_body = (
+                "                tracking_q <= 1'b1;\n"
+                "                count_q <= '0;\n"
+            )
+        obligation_logic = (
+            "            if (witness_start) begin\n"
+            "                age_q <= '0;\n"
+            + start_body
+            + "            end else if (tracking_q) begin\n"
+            f"                if (age_q + 1'b1 < START_OFFSET) begin\n"
+            "                    age_q <= age_q + 1'b1;\n"
+            "                end else begin\n"
+            f"                    assert ({condition});\n"
+            f"                    if ({condition}) begin\n"
+            "                        count_q <= count_q + 1'b1;\n"
+            "                        if (count_q + 1'b1 >= MIN_CYCLES) begin\n"
+            f"                            cover ({condition});\n"
+            "                            tracking_q <= 1'b0;\n"
+            "                        end\n"
+            "                    end else begin\n"
+            "                        tracking_q <= 1'b0;\n"
+            "                    end\n"
+            "                end\n"
+            "            end\n"
+        )
+
+    return (
+        "// Generated symbolic-witness safety harness.\n"
+        "module sva2rtl_formal_bind (\n"
+        + ",\n".join(port_lines)
+        + "\n);\n"
+        f"    localparam integer MIN_CYCLES = {lo};\n"
+        f"    localparam integer MAX_CYCLES = {hi};\n"
+        f"    localparam integer START_OFFSET = {start_offset};\n"
+        f"    (* anyseq *) logic witness_select;\n"
+        "    logic formal_past_valid = 1'b0;\n"
+        "    logic tracking_q = 1'b0;\n"
+        "    logic seen_q = 1'b0;\n"
+        f"    logic [{counter_width - 1}:0] age_q = '0;\n"
+        f"    logic [{counter_width - 1}:0] count_q = '0;\n"
+        f"    wire witness_start = !tracking_q && !({disable}) && "
+        f"({antecedent}) && witness_select;\n\n"
+        f"    always @({edge} {clock}) begin\n"
+        "        formal_past_valid <= 1'b1;\n"
+        "        if (!formal_past_valid) begin\n"
+        f"            assume (!{reset});\n"
+        "            tracking_q <= 1'b0;\n"
+        "            seen_q <= 1'b0;\n"
+        "            age_q <= '0;\n"
+        "            count_q <= '0;\n"
+        "        end else begin\n"
+        f"            assume ({reset});\n"
+        f"            cover ({antecedent});\n"
+        "            cover (witness_start);\n"
+        f"            if ({disable}) begin\n"
+        "                tracking_q <= 1'b0;\n"
+        "                seen_q <= 1'b0;\n"
+        "                age_q <= '0;\n"
+        "                count_q <= '0;\n"
+        "            end else begin\n"
+        + obligation_logic
+        + "            end\n"
+        "        end\n"
+        "    end\n"
+        "endmodule\n\n"
+        f"bind {top} sva2rtl_formal_bind u_sva2rtl_formal_bind (\n"
+        + ",\n".join(bind_connections)
+        + "\n);\n"
+    )
+
+
 def _render_sby(config: FormalRunConfig, consumed_files: tuple[str, ...]) -> str:
     engine_line = f"{config.engine} {config.solver}".rstrip()
     source_args = " ".join(consumed_files)
@@ -641,7 +820,11 @@ def build_formal_bundle(config: FormalRunConfig) -> FormalEvidence:
         consumed.append(relative)
         dut_manifest.append({"path": relative, "sha256": _sha256(copied)})
 
-    modules = {} if backend == "direct-invariant-safety" else emit_all(checker)
+    modules = (
+        {}
+        if backend in {"direct-invariant-safety", "symbolic-witness-safety"}
+        else emit_all(checker)
+    )
     property_paths = {str(config.property_file), str(config.property_file.resolve())}
     generated_manifest: list[dict[str, str]] = []
     for index, (module_name, source_text) in enumerate(modules.items()):
@@ -658,6 +841,13 @@ def build_formal_bundle(config: FormalRunConfig) -> FormalEvidence:
     bind_path = bundle / "formal_bind.sv"
     if backend == "direct-invariant-safety":
         bind_text = render_direct_invariant_bind(
+            checker,
+            top=config.top,
+            clock=config.clock,
+            reset=config.reset,
+        )
+    elif backend == "symbolic-witness-safety":
+        bind_text = render_symbolic_witness_bind(
             checker,
             top=config.top,
             clock=config.clock,
@@ -684,6 +874,7 @@ def build_formal_bundle(config: FormalRunConfig) -> FormalEvidence:
             "clock": config.clock,
             "reset": config.reset,
             "mode": config.mode.value,
+            "attempt_mode": config.attempt_mode.value,
             "depth": config.depth,
             "timeout_seconds": config.timeout_seconds,
             "engine": config.engine,
@@ -704,7 +895,7 @@ def build_formal_bundle(config: FormalRunConfig) -> FormalEvidence:
         ]
         + (
             []
-            if backend == "direct-invariant-safety"
+            if backend in {"direct-invariant-safety", "symbolic-witness-safety"}
             else [
                 "monitor start is asserted on every non-reset cycle",
                 "monitor disable_i is held low",
@@ -713,7 +904,11 @@ def build_formal_bundle(config: FormalRunConfig) -> FormalEvidence:
         "covers": [
             "direct invariant sampling becomes reachable after reset"
             if backend == "direct-invariant-safety"
-            else "monitor attempt_fired becomes reachable after reset"
+            else (
+                "antecedent, witness selection, and obligation completion are reachable"
+                if backend == "symbolic-witness-safety"
+                else "monitor attempt_fired becomes reachable after reset"
+            )
         ],
     }
     _write_json(bundle / "manifest.json", manifest)

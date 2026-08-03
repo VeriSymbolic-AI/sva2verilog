@@ -13,6 +13,7 @@ from sva2rtl.errors import (
     UnsupportedConstruct,
 )
 from sva2rtl.formal_flow import (
+    AttemptMode,
     FormalMode,
     FormalRunConfig,
     FormalStatus,
@@ -56,6 +57,13 @@ _EXIT_CODES = {
     show_default=True,
     help="prove is unbounded; bmc is bounded bug finding and returns UNKNOWN on PASS",
 )
+@click.option(
+    "--attempt-mode",
+    type=click.Choice([mode.value for mode in AttemptMode], case_sensitive=False),
+    default=AttemptMode.AUTO.value,
+    show_default=True,
+    help="Represent bounded attempts with an automatic, monitor, or symbolic-witness backend",
+)
 @click.option("--depth", type=click.IntRange(min=1), default=20, show_default=True)
 @click.option("--timeout", "timeout_seconds", type=click.IntRange(min=1), default=120)
 @click.option("--engine", default="smtbmc", show_default=True, help="SBY engine token")
@@ -84,6 +92,7 @@ def main(
     clock: str,
     reset: str,
     mode: str,
+    attempt_mode: str,
     depth: int,
     timeout_seconds: int,
     engine: str,
@@ -109,6 +118,7 @@ def main(
             clock=clock,
             reset=reset,
             mode=FormalMode(mode.lower()),
+            attempt_mode=AttemptMode(attempt_mode.lower()),
             depth=depth,
             timeout_seconds=timeout_seconds,
             engine=engine,
@@ -139,4 +149,3 @@ def main(
         raise click.exceptions.Exit(1) from exc
     except (FileExistsError, ValueError) as exc:
         raise click.UsageError(str(exc)) from exc
-

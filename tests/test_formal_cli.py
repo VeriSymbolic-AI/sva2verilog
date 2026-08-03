@@ -9,7 +9,7 @@ import pytest
 from click.testing import CliRunner
 
 from sva2rtl.formal_cli import main
-from sva2rtl.formal_flow import FormalMode, FormalResult, FormalStatus
+from sva2rtl.formal_flow import AttemptMode, FormalMode, FormalResult, FormalStatus
 
 
 @pytest.fixture()
@@ -65,6 +65,7 @@ def test_help_lists_formal_inputs() -> None:
         "--clock",
         "--reset",
         "--mode",
+        "--attempt-mode",
         "--depth",
         "--timeout",
         "--engine",
@@ -123,6 +124,8 @@ def test_options_map_to_typed_config(tmp_path: Path, sources: tuple[Path, Path])
         *_args(tmp_path, sources),
         "--mode",
         "bmc",
+        "--attempt-mode",
+        "symbolic-witness",
         "--depth",
         "42",
         "--timeout",
@@ -139,6 +142,7 @@ def test_options_map_to_typed_config(tmp_path: Path, sources: tuple[Path, Path])
     assert result.exit_code == 0
     config = build.call_args.args[0]
     assert config.mode is FormalMode.BMC
+    assert config.attempt_mode is AttemptMode.SYMBOLIC_WITNESS
     assert config.depth == 42
     assert config.timeout_seconds == 17
     assert config.engine == "smtbmc"

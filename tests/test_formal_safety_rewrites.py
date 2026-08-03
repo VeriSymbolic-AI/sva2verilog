@@ -228,8 +228,8 @@ def test_unbounded_always_uses_direct_invariant_and_distinguishes_duts(
 def test_nexttime_normalization_distinguishes_real_duts(tmp_path: Path, good: bool) -> None:
     evidence = build_formal_bundle(_nexttime_config(tmp_path, good=good))
     assert evidence.property_class is PropertyClass.FINITE_VERDICT
-    assert evidence.manifest["backend"] == "generated-monitor-safety"
-    assert evidence.manifest["generated_sources"]
+    assert evidence.manifest["backend"] == "symbolic-witness-safety"
+    assert evidence.manifest["generated_sources"] == []
 
     result = run_formal_bundle(evidence)
     expected = FormalStatus.PROVEN if good else FormalStatus.FAILED
