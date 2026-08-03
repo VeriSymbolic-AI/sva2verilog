@@ -310,6 +310,10 @@ def test_build_bool_expr_constants_comparisons_and_bit_select() -> None:
     assert ne_expr.op == "ne"
     assert expr_to_sv(ne_node) == "(vec != 4'hf)"
 
+    unsized = build_bool_expr({"kind": "IntegerLiteral", "value": "7"})
+    assert isinstance(unsized, BoolConst)
+    assert unsized.signed is False
+
 
 def test_build_bool_expr_preserves_named_value_packed_width() -> None:
     """slang packed-vector type metadata reaches BoolIdent IR."""
@@ -323,6 +327,7 @@ def test_build_bool_expr_preserves_named_value_packed_width() -> None:
 
     assert isinstance(expr, BoolIdent)
     assert expr.width == 4
+    assert expr.signed is False
 
 
 def test_build_bool_expr_conversion_unwraps_to_inner_structure() -> None:

@@ -178,6 +178,15 @@ def test_mixed_signed_relational_comparison_is_unsigned() -> None:
     assert eval_bool_expr(expr, {"left": 0xFF, "right": 1}) is False
 
 
+def test_strict_greater_than_rejects_equal_operands() -> None:
+    """Keep ``gt`` distinct from ``ge`` at the equality boundary."""
+    left = BoolIdent(name="left", width=8, signed=False, source_loc=_LOC)
+    right = BoolIdent(name="right", width=8, signed=False, source_loc=_LOC)
+    expr = BoolCompare(op="gt", left=left, right=right, source_loc=_LOC)
+
+    assert eval_bool_expr(expr, {"left": 7, "right": 7}) is False
+
+
 def test_serialize_deserialize_round_trips_supported_nodes_deterministically() -> None:
     """Every supported node shape survives deterministic JSON round-trip."""
     expr: BoolNode = BoolCompare(
@@ -224,6 +233,24 @@ def test_deserialize_const_accepts_absent_or_null_optional_fields(
     assert isinstance(restored, BoolConst)
     assert restored.width is None
     assert restored.raw == ""
+
+
+@pytest.mark.parametrize("optional_value", ["missing", None])
+def test_deserialize_ident_accepts_absent_or_null_signed_field(
+    optional_value: str | None,
+) -> None:
+    payload = json.loads(
+        serialize_bool_expr(BoolIdent(name="data", width=8, signed=True, source_loc=_LOC))
+    )
+    if optional_value == "missing":
+        del payload["signed"]
+    else:
+        payload["signed"] = None
+
+    restored = deserialize_bool_expr(json.dumps(payload))
+
+    assert isinstance(restored, BoolIdent)
+    assert restored.signed is False
 
 
 @pytest.mark.parametrize(("field", "value"), [("value", True), ("width", True)])

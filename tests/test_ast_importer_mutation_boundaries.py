@@ -21,6 +21,7 @@ from sva2rtl.ast_importer import (
     _find_all_assertions_in_members,
     _find_assertion_in_members,
     _import_concurrent_assertion,
+    _local_assertion_instance,
     _reconstruct_signal_func_text,
     build_bool_expr,
     import_all_assertions,
@@ -337,6 +338,23 @@ def test_consecutive_zero_lower_bound_range_is_not_zero_length_match() -> None:
 def test_liveness_requires_both_range_endpoints(builder: object, node: dict[str, object]) -> None:
     with pytest.raises(UnsupportedConstruct, match="both range endpoints"):
         builder(node, _LOC)  # type: ignore[operator]
+
+
+def test_local_assertion_instance_rejects_malformed_wrapper_child() -> None:
+    assert _local_assertion_instance({"kind": "Simple", "expr": []}) is None
+
+
+@pytest.mark.parametrize(
+    "node",
+    [
+        {"kind": "AssertionInstance"},
+        {"kind": "NamedValue", "localVars": [{"name": "saved"}]},
+    ],
+)
+def test_local_assertion_instance_requires_kind_and_locals(
+    node: dict[str, object],
+) -> None:
+    assert _local_assertion_instance(node) is None
 
 
 def test_past_without_explicit_depth_keeps_default_rendering() -> None:
