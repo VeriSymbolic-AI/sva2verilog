@@ -27,6 +27,7 @@ Issues = "https://github.com/VeriSymbolic-AI/sva2verilog/issues"
 
 [project.scripts]
 sva2rtl = "sva2rtl.cli:main"
+sva2rtl-formal = "sva2rtl.formal_cli:main"
 
 [build-system]
 requires = ["hatchling"]
