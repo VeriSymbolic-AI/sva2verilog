@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 import shutil
 import subprocess
 import sys
@@ -103,6 +104,7 @@ def smoke_installed_wheel(wheel: Path) -> None:
         _run(["uv", "venv", "--python", sys.executable, str(venv)], cwd=work)
         python = venv / "bin" / "python"
         cli = venv / "bin" / "sva2rtl"
+        formal_cli = venv / "bin" / "sva2rtl-formal"
         _run(
             ["uv", "pip", "install", "--python", str(python), str(wheel.resolve())],
             cwd=work,
@@ -131,6 +133,49 @@ def smoke_installed_wheel(wheel: Path) -> None:
         if "module sva_p_smoke" not in generated or "attempt_fired" not in generated:
             raise RuntimeError("installed CLI generated an incomplete checker")
         _run([iverilog, "-g2012", "-tnull", str(output)], cwd=work)
+
+        formal_help = _run([str(formal_cli), "--help"], cwd=work).stdout
+        if "--logic-semantics" not in formal_help or "--property-file" not in formal_help:
+            raise RuntimeError("installed formal CLI is missing required semantic inputs")
+        dut = work / "dut.sv"
+        prop = work / "property.sv"
+        evidence = work / "formal-evidence"
+        dut.write_text(
+            "module smoke_formal(input logic clk, rst_n, a, output logic ack);\n"
+            "  assign ack = a;\n"
+            "endmodule\n",
+            encoding="utf-8",
+        )
+        prop.write_text(
+            "module smoke_spec(input logic clk, rst_n, a, ack);\n"
+            "  p: assert property (@(posedge clk) (!a) || ack);\n"
+            "endmodule\n",
+            encoding="utf-8",
+        )
+        _run(
+            [
+                str(formal_cli),
+                "--dut",
+                str(dut),
+                "--property-file",
+                str(prop),
+                "--property",
+                "p",
+                "--top",
+                "smoke_formal",
+                "--slang-path",
+                slang,
+                "--output",
+                str(evidence),
+                "--compile-only",
+            ],
+            cwd=work,
+        )
+        manifest = json.loads((evidence / "manifest.json").read_text(encoding="utf-8"))
+        if manifest["config"]["logic_semantics"] != "two-state":
+            raise RuntimeError("installed formal CLI omitted the semantic profile")
+        if "evidence/property.sv" in manifest["yosys_inputs"]:
+            raise RuntimeError("installed formal CLI leaked original SVA into Yosys inputs")
 
 
 def main(argv: list[str] | None = None) -> int:

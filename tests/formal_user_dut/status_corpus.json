@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "cases": [
+    {"id": "safety-proven", "dut": "good_dut.sv", "property": "req_ack_property.sv", "expected": "PROVEN"},
+    {"id": "safety-counterexample", "dut": "bad_dut.sv", "property": "req_ack_property.sv", "expected": "FAILED"},
+    {"id": "bounded-no-counterexample", "dut": "good_dut.sv", "property": "req_ack_property.sv", "expected": "UNKNOWN"},
+    {"id": "vacuous-cover", "dut": "vacuous_dut.sv", "property": "nexttime_property.sv", "expected": "UNKNOWN"},
+    {"id": "missing-live-engine", "dut": "live_good_dut.sv", "property": "live_property.sv", "expected": "UNKNOWN"},
+    {"id": "multiclock-boundary", "dut": "boundary_dut.sv", "property": "multiclock_property.sv", "expected": "UNSUPPORTED"},
+    {"id": "xz-boundary", "dut": "boundary_dut.sv", "property": "xz_property.sv", "expected": "UNSUPPORTED"},
+    {"id": "process-timeout", "dut": "good_dut.sv", "property": "req_ack_property.sv", "expected": "TIMEOUT"}
+  ]
+}

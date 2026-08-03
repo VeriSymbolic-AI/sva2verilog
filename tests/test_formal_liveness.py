@@ -24,6 +24,11 @@ from sva2rtl.formal_flow import (
 )
 from sva2rtl.ir import BoolExpr, ClockSpec, PropEventually, SourceLoc
 
+requires_cover_stack = pytest.mark.skipif(
+    any(shutil.which(tool) is None for tool in ("sby", "slang", "yosys", "yices-smt2")),
+    reason="requires SBY, slang, Yosys, and yices-smt2 for the cover task",
+)
+
 
 def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
@@ -109,6 +114,7 @@ def test_live_bundle_uses_yosys_primitives_and_excludes_original_sva(
 
 
 @pytest.mark.formal
+@requires_cover_stack
 def test_missing_live_engine_is_actionable_unknown_with_cover_evidence(
     tmp_path: Path,
 ) -> None:
@@ -180,6 +186,7 @@ def test_live_result_classification_is_fail_closed(
 
 
 @pytest.mark.formal
+@requires_cover_stack
 def test_fairness_is_explicit_hashed_and_changes_evidence(tmp_path: Path) -> None:
     no_fair = build_formal_bundle(_config(tmp_path, output_name="no-fair"))
     with_fair = build_formal_bundle(

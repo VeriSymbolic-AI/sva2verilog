@@ -9,7 +9,9 @@ sva2rtl is not a full IEEE 1800 assertion implementation and does not claim
 that every accepted construct is industrially complete. The authoritative
 per-construct boundary is [SUPPORT_MATRIX.md](SUPPORT_MATRIX.md); it currently
 contains **zero `Fully supported` rows**. Implemented rows remain bounded
-evidence until their complete evidence chain is closed.
+evidence until their complete evidence chain is closed. The compact
+[Formal vs Synth Monitor matrix](SUPPORT_MATRIX.md#formal-vs-synth-monitor-matrix)
+keeps proof support independent from RTL-generation support.
 
 ## What It Does
 

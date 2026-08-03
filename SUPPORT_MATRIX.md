@@ -92,6 +92,31 @@ individually audited.
 The remaining rows stay at `Bounded evidence`, `Trusted boundary`, or
 `Unsupported / rejected` as listed.
 
+## Formal vs Synth Monitor Matrix
+
+This v2.0 overlay separates the project's primary formal workflow from the
+secondary RTL-monitor product. “Formal-only” never implies a synthesizable
+finite PASS output; “monitor implemented” never implies a DUT proof.
+
+| Construct family | Formal backend/status | Formal evidence | Synth monitor status | Monitor evidence | Main boundary |
+|---|---|---|---|---|---|
+| Structured Boolean/invariant | Direct invariant or generated-monitor safety | real good/bad DUT prove/trace, cover, typed expression tests | Implemented | dual simulation, independent reference, Yosys/lint | two-state expression subset |
+| Fixed/ranged delay, nexttime, bounded repetition | Symbolic witness or generated-monitor safety | real DUT prove/fail, bounded exhaustive witness comparison | Implemented within documented bounds | dual simulation, BMC, synthesis/lint | finite delay/state/resource contract |
+| Bounded implication with overlapping starts | Symbolic witness avoids monitor T/K budget | delay-64 good/bad proofs and exhaustive small attempts | Implemented with finite thread slots | overflow fail-closed plus simulation/formal | monitor has finite concurrency; formal witness does not |
+| Bounded eventually/always, weak until | Safety/BMC/prove as row-specific evidence permits | independent references and named proof depths | Implemented | simulation, synthesis/lint | bounded liveness is not true unbounded liveness |
+| Unbounded `always p` | Formal-only direct invariant | real DUT good/bad unbounded safety proof | Rejected | N/A | no finite PASS verdict |
+| Boolean unbounded eventual / implication-to-eventual | Formal-only SBY `mode live` / Super Prove | source isolation, AIG prep, cover, missing-engine UNKNOWN; real good/bad conditional/local Linux CI | Rejected | N/A | needs qualified live solver; no arbitrary nesting |
+| Boolean strong until | Formal-only safety plus eventual discharge | obligation split, cover, conditional live solver | Rejected | N/A | fairness and live-solver boundary |
+| Restricted automatic scalar local capture | Formal-only symbolic witness with private `captured_q` | real good/bad/changing-value solver cases | Rejected | explicit composer rejection | exact one-local/fixed-delay whitelist |
+| Multi-clock temporal composition | `UNSUPPORTED` in single-clock formal profile | sanitized boundary bundle, empty Yosys inputs | Experimental trusted 2-DFF path only | structural/synthesis/lint, no event-delivery proof | split per domain; prove handoff; separate CDC signoff |
+| X/Z-dependent semantics | `UNSUPPORTED` in two-state profile | real X/Z negative sources and hashed profile | Rejected | N/A | no implicit four-state-to-two-state coercion |
+| General locals, dynamic/unbounded/nested unsupported forms | `UNSUPPORTED` | precise negative tests and boundary evidence | Rejected | N/A | checked decomposition or another semantic frontend |
+
+No row is promoted to `Fully supported` merely because both columns contain
+some evidence. Promotion still requires every applicable row-specific link and
+same-commit remote qualification; the table above is a capability split, not a
+certification shortcut.
+
 ## Evidence Cell Legend
 
 | State | Meaning |

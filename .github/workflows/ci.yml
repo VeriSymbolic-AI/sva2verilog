@@ -28,6 +28,8 @@ jobs:
           tests/test_formal_kinduction.py
           tests/test_formal_templates.py
           tests/test_sequential.py
+      - name: Reject personal identifiers and committed secrets
+        run: uv run python tools/ci/check_release_privacy.py
 
   test:
     strategy:
@@ -166,6 +168,7 @@ jobs:
           yosys --version
           sby --version
           z3 --version
+          command -v suprove
 
       - name: Install slang
         run: bash tools/ci/install_slang.sh
@@ -176,6 +179,10 @@ jobs:
           tests/test_formal_passes.py::TestConstantFoldEquiv::test_constant_true_is_equivalent
           tests/test_formal_templates.py::TestBoolExprTemplate::test_simple_boolean
           tests/test_formal_sva_equiv.py::TestBoolExprSvaEquiv::test_bool_simple_equiv
+          tests/test_formal_user_dut.py::test_good_dut_is_proven_and_property_is_not_a_yosys_input
+          tests/test_formal_user_dut.py::test_bad_dut_returns_counterexample_and_trace
+          tests/test_formal_locals.py::test_real_solver_distinguishes_good_and_bad_local_capture
+          tests/test_formal_liveness.py::test_real_live_engine_distinguishes_good_and_bad_liveness
           -v --timeout=120 --junitxml=pytest-results.xml
         env:
           SLANG_PATH: /usr/local/bin/slang
@@ -184,7 +191,7 @@ jobs:
       - name: Enforce formal smoke execution budget
         run: >
           uv run python tools/ci/check_junit.py pytest-results.xml
-          --min-passed 3 --max-skipped 0
+          --min-passed 9 --max-skipped 0
 
   coverage:
     name: coverage regression gate
@@ -259,4 +266,9 @@ jobs:
       - name: Install wheel outside the checkout and compile an SVA
         run: >
           uv run --python 3.14 python tools/ci/smoke_distribution.py
+          dist/*.whl dist/*.tar.gz
+
+      - name: Scan release archives for personal identifiers and secrets
+        run: >
+          uv run --python 3.14 python tools/ci/check_release_privacy.py
           dist/*.whl dist/*.tar.gz

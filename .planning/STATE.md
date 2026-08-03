@@ -2,10 +2,8 @@
 gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Open Formal Verification
-current_phase: 24
-current_phase_name: Evidence Closure and Release Qualification
 status: ready_to_plan
-last_updated: "2026-08-04T00:00:00Z"
+last_updated: "2026-08-03T18:08:36.233Z"
 progress:
   total_phases: 6
   completed_phases: 5
@@ -18,8 +16,8 @@ progress:
 
 ## Current Position
 
-Phase: 24 (Evidence Closure and Release Qualification) — READY TO PLAN
-Plan: Not yet planned
+Phase: 24 — EXECUTING
+Plan: 1 of ?
 Phases 19 through 23 are complete. Phase 24 is next.
 
 ## Verified v2.0 Evidence
@@ -52,8 +50,10 @@ Phases 19 through 23 are complete. Phase 24 is next.
 
 - Missing Super Prove yields actionable UNKNOWN while the AIG preparation and
   separate cover path remain testable.
+
 - Multi-clock and X/Z-dependent formal inputs produce sanitized, hashed
   UNSUPPORTED evidence without entering Yosys.
+
 - One automatic scalar local-capture shape uses private per-attempt symbolic
   witness state; good/bad/changing-value solver cases distinguish outcomes.
 

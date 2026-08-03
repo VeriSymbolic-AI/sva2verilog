@@ -155,7 +155,7 @@ def test_ci_and_nightly_enforce_test_execution_budgets() -> None:
     assert "--min-passed 1325 --max-skipped 0" in ci
     assert "--min-passed 170 --max-skipped 2" in ci
     assert "--min-passed 133 --max-skipped 0" in ci
-    assert "--min-passed 3 --max-skipped 0" in ci
+    assert "--min-passed 9 --max-skipped 0" in ci
     assert "--min-passed 1150 --max-skipped 0" in ci
     assert ci.count("not formal") == 2
     for prefix in (
@@ -170,6 +170,13 @@ def test_ci_and_nightly_enforce_test_execution_budgets() -> None:
     assert formal.count("tools/ci/check_junit.py") == 1
     assert "max-skipped: 1" in formal
     assert "min-passed: 63" in formal
+    assert "suite: open-user-dut" in formal
+    assert "min-passed: 66" in formal
+    assert "suite: open-liveness" in formal
+    assert "min-passed: 14" in formal
+    assert "tests/test_formal_status_corpus.py" in formal
+    assert "tests/test_formal_liveness.py" in formal
+    assert "command -v suprove" in formal
     assert "--min-passed ${{ matrix.min-passed }}" in formal
     assert "--max-skipped ${{ matrix.max-skipped }}" in formal
 
@@ -181,6 +188,25 @@ def test_ci_builds_and_smokes_distribution_on_python_314() -> None:
     assert "uv sync --dev --frozen --python 3.14" in workflow
     assert "uv build --out-dir dist" in workflow
     assert "tools/ci/smoke_distribution.py" in workflow
+    assert "tools/ci/check_release_privacy.py" in workflow
+
+
+def test_ci_formal_smoke_exercises_open_user_local_and_liveness_paths() -> None:
+    workflow = WORKFLOWS[0].read_text(encoding="utf-8")
+
+    assert "test_good_dut_is_proven_and_property_is_not_a_yosys_input" in workflow
+    assert "test_bad_dut_returns_counterexample_and_trace" in workflow
+    assert "test_real_solver_distinguishes_good_and_bad_local_capture" in workflow
+    assert "test_real_live_engine_distinguishes_good_and_bad_liveness" in workflow
+    assert "--min-passed 9 --max-skipped 0" in workflow
+    assert "command -v suprove" in workflow
+
+
+def test_ci_scans_source_and_built_archives_for_private_material() -> None:
+    workflow = WORKFLOWS[0].read_text(encoding="utf-8")
+
+    assert workflow.count("tools/ci/check_release_privacy.py") == 2
+    assert "dist/*.whl dist/*.tar.gz" in workflow
 
 
 def test_external_actions_and_dependency_sync_are_immutable() -> None:

@@ -83,3 +83,30 @@ def test_successful_bmc_is_unknown_not_proven(tmp_path: Path) -> None:
     result = run_formal_bundle(evidence)
     assert result.status is FormalStatus.UNKNOWN, (evidence.bundle_dir / "sby.log").read_text()
     assert "bounded" in result.message.lower()
+
+
+@pytest.mark.formal
+@requires_formal_stack
+def test_formal_timeout_kills_process_group_and_records_timeout(tmp_path: Path) -> None:
+    fake_sby = tmp_path / "slow-sby"
+    fake_sby.write_text(
+        "#!/bin/sh\n"
+        "if [ \"$1\" = \"--version\" ]; then echo 'slow-sby test'; exit 0; fi\n"
+        "sleep 30\n",
+        encoding="utf-8",
+    )
+    fake_sby.chmod(0o755)
+    base = _config(tmp_path, "good_dut.sv", FormalMode.PROVE)
+    config = FormalRunConfig(
+        **{
+            **base.__dict__,
+            "sby_path": str(fake_sby),
+            "timeout_seconds": 1,
+        }
+    )
+    evidence = build_formal_bundle(config)
+    result = run_formal_bundle(evidence)
+    assert result.status is FormalStatus.TIMEOUT
+    assert result.duration_seconds < 5
+    persisted = json.loads((evidence.bundle_dir / "result.json").read_text())
+    assert persisted["status"] == "TIMEOUT"

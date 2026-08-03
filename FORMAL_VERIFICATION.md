@@ -398,8 +398,8 @@ uv run pytest \
 
 ### 4. Full formal suite
 
-The remote Full Formal workflow runs six isolated shards. The equivalent local
-selection is:
+The remote Full Formal workflow runs eight isolated shards. The equivalent
+local selection is:
 
 ```bash
 uv run pytest \
@@ -410,6 +410,15 @@ uv run pytest \
   tests/test_v151_p2_bmc.py::TestOverlapImplNfaMiter \
   tests/test_v151_p2_bmc.py::TestNonoverlapImplNfaMiter \
   tests/test_formal_kinduction.py \
+  tests/test_formal_user_dut.py \
+  tests/test_formal_safety_rewrites.py \
+  tests/test_formal_advanced_safety.py \
+  tests/test_formal_symbolic_witness.py \
+  tests/test_formal_evidence_gates.py \
+  tests/test_formal_boundaries.py \
+  tests/test_formal_locals.py \
+  tests/test_formal_status_corpus.py \
+  tests/test_formal_liveness.py \
   -v --timeout=600
 ```
 
@@ -428,6 +437,12 @@ On a host without `suprove`, the real good/bad solver cases skip and the suite
 instead checks source isolation, AIG preparation, cover reachability, and the
 fail-closed `UNKNOWN` result. Those checks are useful pipeline evidence but are
 not a completed live proof.
+
+The checked-in real-source outcome catalog is
+`tests/formal_user_dut/status_corpus.json`. It names fixtures for `PROVEN`,
+counterexample `FAILED`, bounded/vacuous/missing-live `UNKNOWN`, semantic
+`UNSUPPORTED`, and process `TIMEOUT`. Tests verify that DUT fixtures contain no
+assertions and property fixtures remain separate evidence inputs.
 
 ### 5. Differential tests on both simulators
 
@@ -469,7 +484,15 @@ completeness.
 ```bash
 uv build --out-dir dist
 uv run python tools/ci/smoke_distribution.py dist/*.whl dist/*.tar.gz
+uv run python tools/ci/check_release_privacy.py dist/*.whl dist/*.tar.gz
+uv run python tools/ci/check_release_privacy.py
 ```
+
+The installed-distribution smoke invokes both `sva2rtl` and
+`sva2rtl-formal --compile-only` from a temporary directory, then checks the
+semantic profile and confirms the original SVA is absent from Yosys inputs.
+The privacy gate checks tracked source plus built archives without printing a
+matched secret value.
 
 ## Add or Extend an Advanced Operator Safely
 
