@@ -2,26 +2,23 @@
 gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Open Formal Verification
-current_phase: 21
-current_phase_name: Scale, Symbolic Witness, and Decomposition
 status: ready_to_plan
-stopped_at: Phase 20 complete (2/2); ready to plan Phase 21
-last_updated: "2026-08-04T01:15:00+08:00"
-last_activity: 2026-08-04
-last_activity_desc: Completed and verified safety semantics and high-ROI rewrites
+last_updated: "2026-08-03T17:29:27Z"
 progress:
   total_phases: 6
-  completed_phases: 2
-  total_plans: 4
-  completed_plans: 4
-  percent: 33
+  completed_phases: 3
+  total_plans: 6
+  completed_plans: 6
+  percent: 50
 ---
 
 # Project State: sva2rtl v2.0
 
 ## Current Position
 
-Phases 19 and 20 are complete.  Phase 21 is next.
+Phase: 22 (Open Liveness Backend) — READY TO PLAN
+Plan: Not yet planned
+Phases 19 through 21 are complete. Phase 22 is next.
 
 ## Verified v2.0 Evidence
 
@@ -31,13 +28,21 @@ Phases 19 and 20 are complete.  Phase 21 is next.
 - Nexttime uses an exact fixed-delay property rewrite.
 - Structured Boolean semantics retain width/signedness and support reductions
   plus relational comparisons through generated and direct-formal ports.
+
 - Bare temporal sequences reject after a real false-PROVEN regression was found.
 - Goto/nonconsecutive occurrence obligations classify as liveness and do not
   enter the safety backend.
+- Symbolic-witness safety handles bounded implications beyond monitor K/T
+  budgets and matches exhaustive small-trace attempt semantics.
+- Proof PASS is retained only when a separate critical-cover task is REACHED;
+  vacuous antecedents downgrade the result to UNKNOWN.
+- Logical slice manifests and input-bound decomposition proof certificates are
+  hashed into replayable evidence.
 
 ## Latest Local Qualification
 
-- Complete pytest: 1643 passed, 1 skipped, 1 xfailed.
+- Phase 21 focused formal/evidence suite: 66 passed.
+- Complete pytest baseline before Phase 21: 1643 passed, 1 skipped, 1 xfailed.
 - Verilator simulation: 174 passed, 2 reviewed skips.
 - Full Formal: 126 passed, 1 expected xfail.
 - Yosys synthesis gates: 80 passed.
@@ -45,17 +50,14 @@ Phases 19 and 20 are complete.  Phase 21 is next.
 
 ## Evidence Boundary
 
-- The general bounded formal route still inherits some monitor/NFA construction
-  limits; direct scale decoupling remains Phase 21 work.
 - True liveness and fairness remain Phase 22 work.
 - Remote same-commit CI/nightly/Full Formal evidence is not yet recorded for
   the v2.0 commits.
 
 ## Next Work
 
-Plan Phase 21 requirements SCALE-01 through SCALE-05: formal-specific scale,
-slice manifests, overlapping-attempt witness checking, decomposition
-certificates, and cover-based vacuity gating.
+Plan Phase 22 requirements LIVE-01 through LIVE-03: open live-engine discovery,
+strong-until obligation splitting, and hashed fairness assumptions.
 
 ## Performance Metrics
 
@@ -65,3 +67,5 @@ certificates, and cover-based vacuity gating.
 | 19 | 19-02 | Complete |
 | 20 | 20-01 | Complete |
 | 20 | 20-02 | Complete |
+| 21 | 21-01 | Complete |
+| 21 | 21-02 | Complete |
