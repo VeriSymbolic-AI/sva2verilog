@@ -335,7 +335,7 @@ def test_consecutive_zero_lower_bound_range_is_not_zero_length_match() -> None:
     ],
 )
 def test_liveness_requires_both_range_endpoints(builder: object, node: dict[str, object]) -> None:
-    with pytest.raises(UnsupportedConstruct, match="unbounded"):
+    with pytest.raises(UnsupportedConstruct, match="both range endpoints"):
         builder(node, _LOC)  # type: ignore[operator]
 
 
