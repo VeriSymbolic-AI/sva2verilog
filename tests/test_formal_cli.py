@@ -70,6 +70,7 @@ def test_help_lists_formal_inputs() -> None:
         "--timeout",
         "--engine",
         "--solver",
+        "--decomposition-certificate",
         "--compile-only",
     ):
         assert option in result.output

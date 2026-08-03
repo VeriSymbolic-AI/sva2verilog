@@ -77,6 +77,11 @@ _EXIT_CODES = {
 )
 @click.option("--slang-path", default="slang", envvar="SLANG_PATH", show_envvar=True)
 @click.option("--sby-path", default="sby", envvar="SBY_PATH", show_envvar=True)
+@click.option(
+    "--decomposition-certificate",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    help="Checked JSON certificate for an equivalent/stronger property decomposition",
+)
 @click.option("--force", is_flag=True, help="Replace an existing evidence directory")
 @click.option(
     "--compile-only",
@@ -100,6 +105,7 @@ def main(
     output_dir: Path,
     slang_path: str,
     sby_path: str,
+    decomposition_certificate: Path | None,
     force: bool,
     compile_only: bool,
 ) -> None:
@@ -126,6 +132,7 @@ def main(
             output_dir=output_dir,
             slang_path=slang_path,
             sby_path=sby_path,
+            decomposition_certificate=decomposition_certificate,
             force=force,
         )
         evidence = build_formal_bundle(config)

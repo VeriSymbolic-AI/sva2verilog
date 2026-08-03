@@ -75,6 +75,16 @@ class FormalStatus(StrEnum):
     TIMEOUT = "TIMEOUT"
 
 
+class CoverStatus(StrEnum):
+    """Reachability result for the separate critical-cover task."""
+
+    NOT_RUN = "NOT_RUN"
+    REACHED = "REACHED"
+    UNREACHED = "UNREACHED"
+    ERROR = "ERROR"
+    TIMEOUT = "TIMEOUT"
+
+
 class PropertyClass(StrEnum):
     """Semantic class used to choose a sound formal backend."""
 
@@ -104,6 +114,7 @@ class FormalRunConfig:
     solver: str = "yices"
     slang_path: str = "slang"
     sby_path: str = "sby"
+    decomposition_certificate: Path | None = None
     force: bool = False
 
     def __post_init__(self) -> None:
@@ -143,6 +154,14 @@ class FormalRunConfig:
         for source in (*self.dut_sources, self.property_file):
             if not source.is_file():
                 raise ValueError(f"input source does not exist: {source}")
+        if (
+            self.decomposition_certificate is not None
+            and not self.decomposition_certificate.is_file()
+        ):
+            raise ValueError(
+                "decomposition certificate does not exist: "
+                f"{self.decomposition_certificate}"
+            )
 
 
 @dataclass(frozen=True)
@@ -177,6 +196,9 @@ class FormalResult:
     tool_versions: dict[str, str]
     log_path: str
     trace_paths: tuple[str, ...] = ()
+    cover_status: CoverStatus = CoverStatus.NOT_RUN
+    cover_returncode: int | None = None
+    cover_log_path: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Return a stable JSON-compatible representation."""
@@ -190,7 +212,31 @@ class FormalResult:
             "tool_versions": dict(sorted(self.tool_versions.items())),
             "log_path": self.log_path,
             "trace_paths": list(self.trace_paths),
+            "cover_status": self.cover_status.value,
+            "cover_returncode": self.cover_returncode,
+            "cover_log_path": self.cover_log_path,
         }
+
+
+@dataclass(frozen=True)
+class _DecompositionMember:
+    identifier: str
+    property_path: Path
+    property_sha256: str
+    checker: str
+    proof_artifact_path: Path
+    proof_artifact_sha256: str
+
+
+@dataclass(frozen=True)
+class _ValidatedDecomposition:
+    relation: str
+    original_property_sha256: str
+    source_certificate_sha256: str
+    relation_checker: str
+    relation_proof_artifact_path: Path
+    relation_proof_artifact_sha256: str
+    members: tuple[_DecompositionMember, ...]
 
 
 def _sha256(path: Path) -> str:
@@ -199,6 +245,141 @@ def _sha256(path: Path) -> str:
         for block in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(block)
     return digest.hexdigest()
+
+
+def _require_sha256(value: object, label: str) -> str:
+    if not isinstance(value, str) or re.fullmatch(r"[0-9a-f]{64}", value) is None:
+        raise ValueError(f"invalid {label}: expected lowercase SHA-256")
+    return value
+
+
+def _certificate_file(base: Path, value: object, label: str) -> Path:
+    if not isinstance(value, str) or not value or "\x00" in value:
+        raise ValueError(f"invalid {label}")
+    relative = Path(value)
+    if relative.is_absolute():
+        raise ValueError(f"{label} must be relative to the certificate")
+    resolved = (base / relative).resolve()
+    try:
+        resolved.relative_to(base.resolve())
+    except ValueError as exc:
+        raise ValueError(f"{label} escapes the certificate directory") from exc
+    if not resolved.is_file():
+        raise ValueError(f"{label} does not exist: {value}")
+    return resolved
+
+
+def _require_checker(value: object, label: str) -> str:
+    if (
+        not isinstance(value, str)
+        or not value.strip()
+        or len(value) > 200
+        or any(char in value for char in ("\x00", "\n", "\r"))
+    ):
+        raise ValueError(f"invalid {label}")
+    return value
+
+
+def _require_proven_artifact(path: Path, label: str) -> None:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"{label} must be a JSON result artifact") from exc
+    if not isinstance(payload, dict) or payload.get("status") != FormalStatus.PROVEN.value:
+        raise ValueError(f"{label} does not report PROVEN")
+
+
+def _validate_decomposition_certificate(
+    certificate: Path,
+    *,
+    original_property_sha256: str,
+) -> _ValidatedDecomposition:
+    """Validate every decomposition claim against files and proof artifacts."""
+    try:
+        payload = json.loads(certificate.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"invalid decomposition certificate: {exc}") from exc
+    if not isinstance(payload, dict) or payload.get("schema_version") != 1:
+        raise ValueError("decomposition certificate requires schema_version 1")
+    relation = payload.get("relation")
+    if relation not in {"equivalent", "stronger"}:
+        raise ValueError("decomposition relation must be equivalent or stronger")
+    claimed_original = _require_sha256(
+        payload.get("original_property_sha256"), "original property hash"
+    )
+    if claimed_original != original_property_sha256:
+        raise ValueError("decomposition original property hash does not match input")
+    if payload.get("relation_status") != FormalStatus.PROVEN.value:
+        raise ValueError("decomposition relation is not PROVEN")
+    relation_checker = _require_checker(
+        payload.get("relation_checker"), "decomposition relation checker"
+    )
+    relation_proof_path = _certificate_file(
+        certificate.parent,
+        payload.get("relation_proof_artifact_path"),
+        "decomposition relation proof artifact path",
+    )
+    relation_proof_sha256 = _require_sha256(
+        payload.get("relation_proof_artifact_sha256"),
+        "decomposition relation proof artifact hash",
+    )
+    if _sha256(relation_proof_path) != relation_proof_sha256:
+        raise ValueError("decomposition relation proof artifact hash does not match")
+    _require_proven_artifact(relation_proof_path, "decomposition relation proof artifact")
+    raw_members = payload.get("subproperties")
+    if not isinstance(raw_members, list) or not raw_members:
+        raise ValueError("decomposition certificate requires non-empty subproperties")
+
+    members: list[_DecompositionMember] = []
+    for index, raw in enumerate(raw_members):
+        if not isinstance(raw, dict):
+            raise ValueError(f"decomposition subproperty {index} must be an object")
+        identifier = raw.get("id")
+        if not isinstance(identifier, str) or _IDENTIFIER_RE.fullmatch(identifier) is None:
+            raise ValueError(f"invalid decomposition subproperty id at index {index}")
+        if raw.get("obligation_status") != FormalStatus.PROVEN.value:
+            raise ValueError(f"decomposition subproperty {identifier} is not PROVEN")
+        checker = _require_checker(
+            raw.get("checker"), f"decomposition checker for {identifier}"
+        )
+        property_path = _certificate_file(
+            certificate.parent, raw.get("property_path"), "subproperty path"
+        )
+        property_sha256 = _require_sha256(
+            raw.get("property_sha256"), "subproperty hash"
+        )
+        if _sha256(property_path) != property_sha256:
+            raise ValueError(f"subproperty hash does not match for {identifier}")
+        proof_path = _certificate_file(
+            certificate.parent,
+            raw.get("proof_artifact_path"),
+            "proof artifact path",
+        )
+        proof_sha256 = _require_sha256(
+            raw.get("proof_artifact_sha256"), "proof artifact hash"
+        )
+        if _sha256(proof_path) != proof_sha256:
+            raise ValueError(f"proof artifact hash does not match for {identifier}")
+        _require_proven_artifact(proof_path, f"proof artifact for {identifier}")
+        members.append(
+            _DecompositionMember(
+                identifier=identifier,
+                property_path=property_path,
+                property_sha256=property_sha256,
+                checker=checker,
+                proof_artifact_path=proof_path,
+                proof_artifact_sha256=proof_sha256,
+            )
+        )
+    return _ValidatedDecomposition(
+        relation=relation,
+        original_property_sha256=claimed_original,
+        source_certificate_sha256=_sha256(certificate),
+        relation_checker=relation_checker,
+        relation_proof_artifact_path=relation_proof_path,
+        relation_proof_artifact_sha256=relation_proof_sha256,
+        members=tuple(members),
+    )
 
 
 def _write_text(path: Path, text: str) -> None:
@@ -210,6 +391,58 @@ def _write_text(path: Path, text: str) -> None:
 
 def _write_json(path: Path, value: dict[str, Any]) -> None:
     _write_text(path, json.dumps(value, indent=2, sort_keys=True) + "\n")
+
+
+def _materialize_decomposition(
+    bundle: Path,
+    decomposition: _ValidatedDecomposition,
+) -> dict[str, str]:
+    """Copy verified inputs under stable names and emit a path-sanitized certificate."""
+    members: list[dict[str, Any]] = []
+    target_dir = bundle / "evidence" / "decomposition"
+    target_dir.mkdir(parents=True, exist_ok=True)
+    relation_suffix = decomposition.relation_proof_artifact_path.suffix or ".json"
+    relation_relative = f"evidence/decomposition/relation_proof{relation_suffix}"
+    shutil.copyfile(
+        decomposition.relation_proof_artifact_path, bundle / relation_relative
+    )
+    for index, member in enumerate(decomposition.members):
+        property_suffix = member.property_path.suffix or ".sv"
+        proof_suffix = member.proof_artifact_path.suffix or ".json"
+        property_relative = f"evidence/decomposition/subproperty_{index:03d}{property_suffix}"
+        proof_relative = f"evidence/decomposition/proof_{index:03d}{proof_suffix}"
+        property_target = bundle / property_relative
+        proof_target = bundle / proof_relative
+        shutil.copyfile(member.property_path, property_target)
+        shutil.copyfile(member.proof_artifact_path, proof_target)
+        members.append(
+            {
+                "id": member.identifier,
+                "property_path": property_relative,
+                "property_sha256": member.property_sha256,
+                "obligation_status": FormalStatus.PROVEN.value,
+                "checker": member.checker,
+                "proof_artifact_path": proof_relative,
+                "proof_artifact_sha256": member.proof_artifact_sha256,
+            }
+        )
+    normalized = {
+        "schema_version": 1,
+        "relation": decomposition.relation,
+        "relation_status": FormalStatus.PROVEN.value,
+        "relation_checker": decomposition.relation_checker,
+        "relation_proof_artifact_path": relation_relative,
+        "relation_proof_artifact_sha256": (
+            decomposition.relation_proof_artifact_sha256
+        ),
+        "original_property_sha256": decomposition.original_property_sha256,
+        "source_certificate_sha256": decomposition.source_certificate_sha256,
+        "subproperties": members,
+    }
+    relative = "evidence/decomposition.json"
+    target = bundle / relative
+    _write_json(target, normalized)
+    return {"path": relative, "sha256": _sha256(target)}
 
 
 def _select_assertion(
@@ -762,12 +995,17 @@ def render_symbolic_witness_bind(
     )
 
 
-def _render_sby(config: FormalRunConfig, consumed_files: tuple[str, ...]) -> str:
+def _render_sby(
+    config: FormalRunConfig,
+    consumed_files: tuple[str, ...],
+    *,
+    mode: str | None = None,
+) -> str:
     engine_line = f"{config.engine} {config.solver}".rstrip()
     source_args = " ".join(consumed_files)
     return (
         "[options]\n"
-        f"mode {config.mode.value}\n"
+        f"mode {mode or config.mode.value}\n"
         f"depth {config.depth}\n"
         "wait on\n\n"
         "[engines]\n"
@@ -801,6 +1039,12 @@ def _prepare_output(config: FormalRunConfig) -> Path:
 
 def build_formal_bundle(config: FormalRunConfig) -> FormalEvidence:
     """Compile and write one replayable, source-isolated formal project."""
+    decomposition = None
+    if config.decomposition_certificate is not None:
+        decomposition = _validate_decomposition_certificate(
+            config.decomposition_certificate,
+            original_property_sha256=_sha256(config.property_file),
+        )
     bundle = _prepare_output(config)
     compilation = _compile_checker(config)
     checker = compilation.checker
@@ -863,6 +1107,39 @@ def build_formal_bundle(config: FormalRunConfig) -> FormalEvidence:
     _write_text(bind_path, bind_text)
     consumed.append("formal_bind.sv")
     _write_text(bundle / "formal.sby", _render_sby(config, tuple(consumed)))
+    _write_text(
+        bundle / "formal_cover.sby",
+        _render_sby(config, tuple(consumed), mode="cover"),
+    )
+
+    widths = observed_signal_widths(checker)
+    signedness = observed_signal_signedness(checker)
+    observed_slice = [
+        {
+            "port": port,
+            "dut_signal": signal,
+            "width": widths.get(port, 1),
+            "signed": signedness.get(port, False),
+        }
+        for port, signal in checker.observed_signals
+        if port not in {config.clock, config.reset}
+        and signal not in {config.clock, config.reset}
+    ]
+    slice_path = bundle / "evidence" / "slice.json"
+    _write_json(
+        slice_path,
+        {
+            "schema_version": 1,
+            "kind": "logical-property-cone",
+            "top": config.top,
+            "clock": config.clock,
+            "reset": config.reset,
+            "backend": backend,
+            "source_scope": "complete-dut-sources",
+            "pruning_boundary": "yosys-prep-and-formal-cone",
+            "observed_signals": observed_slice,
+        },
+    )
 
     manifest: dict[str, Any] = {
         "schema_version": 1,
@@ -888,6 +1165,14 @@ def build_formal_bundle(config: FormalRunConfig) -> FormalEvidence:
         "generated_sources": generated_manifest,
         "formal_bind": {"path": "formal_bind.sv", "sha256": _sha256(bind_path)},
         "sby": {"path": "formal.sby", "sha256": _sha256(bundle / "formal.sby")},
+        "formal_cover.sby": {
+            "path": "formal_cover.sby",
+            "sha256": _sha256(bundle / "formal_cover.sby"),
+        },
+        "property_slice": {
+            "path": "evidence/slice.json",
+            "sha256": _sha256(slice_path),
+        },
         "yosys_inputs": consumed,
         "assumptions": [
             "reset is asserted on the first sampled cycle",
@@ -911,6 +1196,8 @@ def build_formal_bundle(config: FormalRunConfig) -> FormalEvidence:
             )
         ],
     }
+    if decomposition is not None:
+        manifest["decomposition"] = _materialize_decomposition(bundle, decomposition)
     _write_json(bundle / "manifest.json", manifest)
     initial = FormalResult(
         status=FormalStatus.UNKNOWN,
@@ -947,6 +1234,22 @@ def classify_sby_result(
     return FormalStatus.ERROR, "formal engine ended without an unambiguous result"
 
 
+def classify_cover_result(
+    *,
+    returncode: int,
+    output: str,
+    timed_out: bool = False,
+) -> tuple[CoverStatus, str]:
+    """Classify a separate SBY cover task without upgrading ambiguity."""
+    if timed_out:
+        return CoverStatus.TIMEOUT, "critical cover task exceeded the configured timeout"
+    if returncode == 0 and _PASS_RE.search(output):
+        return CoverStatus.REACHED, "all critical cover statements were reached"
+    if _FAIL_RE.search(output):
+        return CoverStatus.UNREACHED, "one or more critical cover statements were not reached"
+    return CoverStatus.ERROR, "cover engine ended without an unambiguous result"
+
+
 def _probe_version(command: list[str]) -> str:
     try:
         completed = subprocess.run(
@@ -971,16 +1274,15 @@ def _trace_paths(bundle: Path) -> tuple[str, ...]:
     return tuple(sorted(set(paths)))
 
 
-def run_formal_bundle(evidence: FormalEvidence) -> FormalResult:
-    """Run SBY for a compiled bundle and persist complete output and status."""
+def _run_sby_process(
+    evidence: FormalEvidence,
+    project_file: str,
+) -> tuple[int | None, str, bool]:
+    """Run one SBY project with process-group timeout cleanup."""
     config = evidence.config
-    started = time.monotonic()
-    output = ""
-    returncode: int | None = None
-    timed_out = False
     try:
         process = subprocess.Popen(  # noqa: S603 - argv is validated and shell is disabled
-            [config.sby_path, "-f", "formal.sby"],
+            [config.sby_path, "-f", project_file],
             cwd=evidence.bundle_dir,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
@@ -988,19 +1290,28 @@ def run_formal_bundle(evidence: FormalEvidence) -> FormalResult:
             start_new_session=True,
         )
     except FileNotFoundError:
+        return None, "", False
+    try:
+        output, _ = process.communicate(timeout=config.timeout_seconds)
+        return process.returncode, output, False
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        output, _ = process.communicate()
+        return process.returncode, output, True
+
+
+def run_formal_bundle(evidence: FormalEvidence) -> FormalResult:
+    """Run SBY for a compiled bundle and persist complete output and status."""
+    config = evidence.config
+    started = time.monotonic()
+    returncode, output, timed_out = _run_sby_process(evidence, "formal.sby")
+    if returncode is None:
         status = FormalStatus.ERROR
         message = f"missing dependency: {config.sby_path}"
     else:
-        try:
-            output, _ = process.communicate(timeout=config.timeout_seconds)
-        except subprocess.TimeoutExpired:
-            timed_out = True
-            try:
-                os.killpg(process.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-            output, _ = process.communicate()
-        returncode = process.returncode
         status, message = classify_sby_result(
             mode=config.mode,
             returncode=returncode,
@@ -1009,6 +1320,30 @@ def run_formal_bundle(evidence: FormalEvidence) -> FormalResult:
         )
 
     _write_text(evidence.bundle_dir / "sby.log", output)
+    cover_status = CoverStatus.NOT_RUN
+    cover_returncode: int | None = None
+    cover_log_path: str | None = None
+    if status is FormalStatus.PROVEN:
+        cover_returncode, cover_output, cover_timed_out = _run_sby_process(
+            evidence, "formal_cover.sby"
+        )
+        cover_log_path = "cover.log"
+        _write_text(evidence.bundle_dir / cover_log_path, cover_output)
+        if cover_returncode is None:
+            cover_status = CoverStatus.ERROR
+            cover_message = f"missing dependency: {config.sby_path}"
+        else:
+            cover_status, cover_message = classify_cover_result(
+                returncode=cover_returncode,
+                output=cover_output,
+                timed_out=cover_timed_out,
+            )
+        if cover_status is not CoverStatus.REACHED:
+            status = FormalStatus.UNKNOWN
+            message = (
+                "safety proof completed, but critical cover evidence is not "
+                f"complete: {cover_message}"
+            )
     result = FormalResult(
         status=status,
         mode=config.mode,
@@ -1022,6 +1357,9 @@ def run_formal_bundle(evidence: FormalEvidence) -> FormalResult:
         },
         log_path="sby.log",
         trace_paths=_trace_paths(evidence.bundle_dir),
+        cover_status=cover_status,
+        cover_returncode=cover_returncode,
+        cover_log_path=cover_log_path,
     )
     _write_json(evidence.bundle_dir / "result.json", result.to_dict())
     return result
