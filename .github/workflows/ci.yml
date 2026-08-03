@@ -216,10 +216,16 @@ jobs:
       - name: Install slang
         run: bash tools/ci/install_slang.sh
 
+      - name: Install OSS CAD Suite for formal coverage
+        uses: YosysHQ/setup-oss-cad-suite@c7845bc0d335c8076aa22047e85972caa8a916df # v4.1.0
+        with:
+          version: "2026-07-21"
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Run aggregate and critical-module coverage gates
         run: |
-          uv run pytest tests/ --simulator=iverilog -m "not synthesis and not generated_lint and not formal and not differential_slow" --cov=src/sva2rtl --cov-branch --cov-report=term-missing --cov-report=json:coverage.json --cov-fail-under=82 -v --timeout=120 --junitxml=pytest-results.xml
-          uv run python tools/ci/check_junit.py pytest-results.xml --min-passed 1325 --max-skipped 0
+          uv run pytest tests/ --simulator=iverilog -m "not synthesis and not generated_lint and not differential_slow" --cov=src/sva2rtl --cov-branch --cov-report=term-missing --cov-report=json:coverage.json --cov-fail-under=82 -v --timeout=600 --junitxml=pytest-results.xml
+          uv run python tools/ci/check_junit.py pytest-results.xml --min-passed 1480 --max-skipped 1 --allow-skip-prefix "k-induction did not converge for"
           uv run python tools/ci/check_coverage.py coverage.json
         env:
           SLANG_PATH: /usr/local/bin/slang

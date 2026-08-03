@@ -12,6 +12,9 @@ CRITICAL_MODULE_FLOORS: dict[str, float] = {
     "src/sva2rtl/composer.py": 84.0,
     "src/sva2rtl/ast_importer.py": 79.5,
     "src/sva2rtl/cli.py": 66.0,
+    "src/sva2rtl/formal_cli.py": 85.0,
+    "src/sva2rtl/formal_flow.py": 80.0,
+    "src/sva2rtl/formal_lowering.py": 75.0,
 }
 AGGREGATE_FLOOR = 82.0
 

@@ -19,6 +19,7 @@ PROJECT_STATUS = ROOT / "PROJECT_STATUS.md"
 README = ROOT / "README.md"
 FORMAL_GUIDE = ROOT / "FORMAL_VERIFICATION.md"
 NIGHTLY_WORKFLOW = ROOT / ".github" / "workflows" / "differential-nightly.yml"
+COVERAGE_CHECK = ROOT / "tools" / "ci" / "check_coverage.py"
 CHECKOUT_NODE24_SHA = "3d3c42e5aac5ba805825da76410c181273ba90b1"
 SETUP_UV_NODE24_SHA = "c771a70e6277c0a99b617c7a806ffedaca235ff9"
 PINNED_UV_VERSION = "0.12.1"
@@ -152,12 +153,12 @@ def test_ci_and_nightly_enforce_test_execution_budgets() -> None:
 
     assert ci.count("tools/ci/check_junit.py") == 6
     assert "--min-passed 1325 --max-skipped 185" in ci
-    assert "--min-passed 1325 --max-skipped 0" in ci
+    assert "--min-passed 1480 --max-skipped 1" in ci
     assert "--min-passed 170 --max-skipped 2" in ci
     assert "--min-passed 133 --max-skipped 0" in ci
     assert "--min-passed 9 --max-skipped 0" in ci
     assert "--min-passed 1150 --max-skipped 0" in ci
-    assert ci.count("not formal") == 2
+    assert ci.count("not formal") == 1
     for prefix in (
         "sby",
         "yosys",
@@ -189,6 +190,21 @@ def test_ci_builds_and_smokes_distribution_on_python_314() -> None:
     assert "uv build --out-dir dist" in workflow
     assert "tools/ci/smoke_distribution.py" in workflow
     assert "tools/ci/check_release_privacy.py" in workflow
+
+
+def test_coverage_includes_formal_backend_and_enforces_its_floors() -> None:
+    workflow = WORKFLOWS[0].read_text(encoding="utf-8")
+    coverage_gate = COVERAGE_CHECK.read_text(encoding="utf-8")
+    coverage_command = next(
+        line for line in workflow.splitlines() if "--cov=src/sva2rtl" in line
+    )
+
+    assert "not formal" not in coverage_command
+    assert "--timeout=600" in coverage_command
+    assert "Install OSS CAD Suite for formal coverage" in workflow
+    assert '--min-passed 1480 --max-skipped 1' in workflow
+    for module in ("formal_cli.py", "formal_flow.py", "formal_lowering.py"):
+        assert module in coverage_gate
 
 
 def test_ci_formal_smoke_exercises_open_user_local_and_liveness_paths() -> None:
