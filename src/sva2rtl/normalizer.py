@@ -31,10 +31,12 @@ from sva2rtl.ir import (
     PropAlways,
     PropBoundedAlways,
     PropBoundedEventually,
+    PropEventually,
     PropIfElse,
     PropImplication,
     PropNexttime,
     PropNot,
+    PropStrongUntil,
     PropUntil,
     SeqAnd,
     SeqConcat,
@@ -238,6 +240,23 @@ def normalize(node: SVANode) -> SVANode:
                 PropUntil(
                     left=new_left,
                     right=new_right,
+                    with_=node.with_,
+                    source_loc=node.source_loc,
+                )
+            )
+        case PropEventually():
+            return _normalize_node(
+                PropEventually(
+                    body=normalize(node.body),
+                    strong=node.strong,
+                    source_loc=node.source_loc,
+                )
+            )
+        case PropStrongUntil():
+            return _normalize_node(
+                PropStrongUntil(
+                    left=normalize(node.left),
+                    right=normalize(node.right),
                     with_=node.with_,
                     source_loc=node.source_loc,
                 )

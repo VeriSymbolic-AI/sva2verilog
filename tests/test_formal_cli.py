@@ -70,6 +70,8 @@ def test_help_lists_formal_inputs() -> None:
         "--timeout",
         "--engine",
         "--solver",
+        "--suprove-path",
+        "--fairness",
         "--decomposition-certificate",
         "--compile-only",
     ):
@@ -135,6 +137,12 @@ def test_options_map_to_typed_config(tmp_path: Path, sources: tuple[Path, Path])
         "smtbmc",
         "--solver",
         "z3",
+        "--suprove-path",
+        "custom-suprove",
+        "--fairness",
+        "ready",
+        "--fairness",
+        "grant",
         "--force",
         "--compile-only",
     ]
@@ -148,6 +156,8 @@ def test_options_map_to_typed_config(tmp_path: Path, sources: tuple[Path, Path])
     assert config.timeout_seconds == 17
     assert config.engine == "smtbmc"
     assert config.solver == "z3"
+    assert config.suprove_path == "custom-suprove"
+    assert config.fairness_signals == ("ready", "grant")
     assert config.force is True
 
 

@@ -20,6 +20,8 @@ FPGA prototyping flows.
 
 **Key capabilities:**
 - Compiles the documented finite-state SVA subset into synthesizable RTL
+- Verifies selected unbounded SVA directly against a DUT with an open
+  formal-only backend, without asking Yosys to parse the original SVA
 - Token-passing composition model for bounded concurrent-attempt evaluation
 - Counter-encoded range operators for area efficiency
 - Deterministic output suitable for formal equivalence checking
@@ -106,7 +108,7 @@ verification evidence, see [SUPPORT_MATRIX.md](SUPPORT_MATRIX.md).
 | `not` | Invert pass/fail (property) | `not (prop)` |
 | `if...else` | Conditional property selection | `if (cond) p1 else p2` |
 
-### Tier 3 — Bounded Liveness Operators (v1.4)
+### Tier 3 — Bounded Monitor Operators (v1.4)
 
 | Operator | Description | Example |
 |----------|-------------|---------|
@@ -116,6 +118,21 @@ verification evidence, see [SUPPORT_MATRIX.md](SUPPORT_MATRIX.md).
 | `s_always [m:n]` | Bounded always (strong) | `s_always [0:4] a` |
 | `until` | Weak until (safety) | `a until b` |
 | `until_with` | Weak until-with (safety) | `a until_with b` |
+
+### Formal-only Unbounded Operators
+
+These forms do not generate finite-verdict monitor RTL. The separate
+`sva2rtl-formal` command lowers their proof obligations to Yosys `$live` / `$fair`
+cells and SymbiYosys `mode live`:
+
+| Property shape | Formal lowering | Synthesizable monitor |
+|---|---|---|
+| `s_eventually p` | Unbounded eventual obligation | Rejected |
+| `a |-> s_eventually b` / `a |=> s_eventually b` | Arbitrary witness attempt plus eventual discharge | Rejected |
+| `a s_until b` / `a s_until_with b` | Safety obligation plus eventual `b` | Rejected |
+
+This backend is conditional on a compatible Super Prove executable. If it is
+missing, the result is `UNKNOWN`, never a bounded or vacuous `PASS`.
 
 ### Experimental Multi-clock Properties (v1.4.1)
 
@@ -131,10 +148,11 @@ only for bounded experiments with `--experimental-multiclock`; this is not a
 CDC sign-off claim.
 
 Unbounded eventual obligations (`s_eventually a`, `s_until`, and
-`s_until_with`) have no finite completion deadline under the current monitor
-contract. They are rejected, as are unbounded `always` forms that v1 has not
-implemented. This is an explicit compiler boundary, not a claim that every
-unbounded safety property is mathematically impossible in hardware. Nested
+`s_until_with`) have no finite completion deadline under the monitor contract,
+so the synthesis CLI rejects them. The formal CLI accepts the documented
+single-clock Boolean shapes and routes them to an unbounded live engine instead
+of changing their meaning. Unbounded `always` and unsupported nested forms
+remain outside the implemented frontend. Nested
 multi-path composition (`intersect` / `within` / `throughout`) is supported only
 when it is NFA-liftable and the total state budget satisfies K ≤ 32
 (compile-time enforced).
@@ -153,12 +171,34 @@ state, counters, token-passing logic, and bounded NFAs. Icarus, Verilator,
 Yosys, and SymbiYosys therefore consume ordinary generated RTL rather than the
 original advanced operator.
 
-That translation covers useful advanced bounded forms such as ranged delay and
+The monitor translation covers useful advanced bounded forms such as ranged delay and
 repetition, implication, `first_match`, fixed goto/non-consecutive repetition,
-NFA-liftable `intersect`/`within`/`throughout`, and bounded liveness. Unsupported
-or unsafe forms fail with an actionable error instead of being silently
-approximated. See [Formal Verification and Advanced-SVA Guide](FORMAL_VERIFICATION.md)
+NFA-liftable `intersect`/`within`/`throughout`, and bounded liveness. A separate
+formal-only path lowers selected unbounded eventual and strong-until properties
+to standard Yosys formal primitives; the original SVA is retained as evidence
+but never sent to Yosys. Unsupported or unsafe forms fail with an actionable
+error instead of being silently approximated. See
+[Formal Verification and Advanced-SVA Guide](FORMAL_VERIFICATION.md)
 for the lowering model, proof workflow, limitations, and safe alternatives.
+
+### Verify a DUT without a commercial SVA frontend
+
+Keep the DUT and the SVA property in separate files, then run:
+
+```bash
+sva2rtl-formal \
+  --dut rtl/dut.sv \
+  --property-file properties/progress.sv \
+  --property req_eventually_ack \
+  --top dut \
+  --output evidence/progress
+```
+
+Safety and bounded obligations use the open Yosys/SymbiYosys path. Selected
+true-liveness obligations use `mode live` and require Super Prove; pass
+`--suprove-path /path/to/suprove` if it is not on `PATH`. User-supplied
+fairness is never inferred: each `--fairness ready` means the explicit
+assumption `GF(ready)` and is recorded and hashed in the evidence bundle.
 
 ## CLI Reference
 
@@ -326,9 +366,10 @@ from the code under test.
 | 2 | Dual-simulator co-simulation (Icarus + Verilator) | Toolchain-independent simulation agreement |
 | 3 | Bounded model checking (SymbiYosys `bmc`) | No counterexample within a stated cycle bound and harness |
 | 4 | k-induction (SymbiYosys `prove`) | Unbounded modeled equivalence for converging safety checks under stated assumptions |
-| 5 | Synthesis and lint acceptance (Yosys, Verilator) | Generated RTL is structurally synthesizable |
-| 6 | Source-level differential testing (Hypothesis) | Randomized specification-to-RTL agreement |
-| 7 | Required cover reachability | Critical pass/fail/disable/overlap states are reachable within the stated bound |
+| 5 | live proof (SymbiYosys `live`, Super Prove) | Unbounded modeled liveness for the documented formal-only shapes under stated assumptions/fairness |
+| 6 | Synthesis and lint acceptance (Yosys, Verilator) | Generated RTL is structurally synthesizable |
+| 7 | Source-level differential testing (Hypothesis) | Randomized specification-to-RTL agreement |
+| 8 | Required cover reachability | Critical pass/fail/disable/overlap states are reachable within the stated bound |
 
 Layers 3 and 4 differ in strength and this distinction is preserved throughout
 the documentation. A BMC result is a *bounded* claim: it certifies that no
@@ -365,10 +406,12 @@ which catches errors that only appear on mid-stream triggering.
 The project does not claim uniform formal correctness, and the following
 boundaries are deliberate:
 
-- Unbounded eventual obligations (`s_eventually a` without a range and strong
-  until forms) are rejected because the current monitor contract has no finite
-  completion deadline for them. Other unbounded forms, including `always`, are
-  also outside v1 even where a different streaming monitor could be designed.
+- Unbounded eventual obligations and strong-until forms are formal-only: the
+  synthesis backend rejects them, while the formal backend currently accepts
+  only documented single-clock Boolean/root-implication shapes. A real live
+  proof is conditional on Super Prove; otherwise the result is `UNKNOWN`.
+- Other unbounded forms, nested liveness combinations, liveness under property
+  negation/conditionals, and general sequence eventuality remain unsupported.
 - Multi-clock generation is disabled unless explicitly opted into as an
   experiment. Its 2-DFF level synchronizer remains a *trusted boundary*: full
   event delivery, clock-domain-crossing, and metastability proof are out of scope.
@@ -399,8 +442,9 @@ The safe fallback depends on the requirement:
   state, then verify that auxiliary logic as part of the trusted boundary.
 - Keep the original SVA and use a simulator with the required assertion support
   when no synthesizable monitor is needed.
-- Use a commercial formal platform on the original property for unsupported
-  full-SVA or liveness semantics, and still review assumptions and covers.
+- For documented unbounded shapes, use `sva2rtl-formal` with the open live
+  backend. For other full-SVA semantics, use an independently supporting formal
+  frontend (open or commercial) and still review assumptions and covers.
 - Replace experimental multi-clock level synchronization with a reviewed
   handshake, toggle, or asynchronous FIFO and run dedicated CDC analysis.
 - Decompose a state-heavy property into smaller obligations only with an

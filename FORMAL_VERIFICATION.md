@@ -7,13 +7,13 @@ open-source tools, and what to do when a property is outside that subset.
 The short version is:
 
 1. `slang` parses and elaborates the original SystemVerilog project.
-2. sva2rtl lowers a supported finite-state SVA property to ordinary
-   synthesizable RTL.
+2. sva2rtl classifies the property before choosing a backend: finite/safety
+   forms lower to monitor or proof RTL; selected unbounded forms lower to
+   Yosys `$live` / `$fair` proof obligations.
 3. Icarus and Verilator execute the generated monitor against an independent
    behavioral reference.
-4. SymbiYosys drives the generated monitor and an independently authored
-   reference monitor with the same unconstrained inputs and searches for an
-   observable disagreement.
+4. `sva2rtl-formal` keeps the original SVA out of Yosys, binds generated proof
+   logic to the DUT, and runs safety, cover, or live tasks as appropriate.
 5. Yosys and Verilator separately check synthesis and lint acceptance.
 
 This is a verification workflow, not a blanket correctness certificate. The
@@ -41,11 +41,13 @@ original high-level operator. It converts each supported bounded operator into
 explicit state, counters, token movement, and output logic first. The
 downstream tool sees normal SystemVerilog or Verilog-2001 RTL.
 
-This currently covers fixed and ranged delay/repetition, implication,
+The monitor backend currently covers fixed and ranged delay/repetition, implication,
 `first_match`, fixed goto/non-consecutive repetition, bounded NFA-liftable
 `intersect`/`within`/`throughout`, bounded eventually/always, and weak
-until forms. It does not make every legal SVA property synthesizable or prove
-that every implemented row is industrially complete.
+until forms. The formal-only backend additionally covers documented Boolean
+`s_eventually`, implication-to-`s_eventually`, and strong-until shapes. It does
+not make every legal SVA property synthesizable or prove that every implemented
+row is industrially complete.
 
 ## Evidence Model
 
@@ -57,6 +59,7 @@ Each verification layer answers a different question:
 | Icarus + Verilator | Do two simulation engines agree with the reference on exercised traces? | Unexercised states or synthesis correctness |
 | BMC (`sby`, mode `bmc`) | Is there a counterexample within depth `k`? | Behavior after `k` cycles |
 | Induction (`sby`, mode `prove`) | Does the modeled safety/equivalence invariant hold for all reachable states when the proof converges? | Behavior excluded by harness assumptions |
+| Liveness (`sby`, mode `live`) | Does every selected modeled obligation eventually discharge under the listed fairness assumptions? | Unsupported shapes, unfair environments, or hardware PASS generation |
 | Cover (`sby`, mode `cover`) | Can critical pass/fail/disable/overlap states be reached within the bound? | Equivalence by itself |
 | Yosys synthesis + Verilator lint | Is the generated structure accepted by independent RTL tools? | Temporal semantic equivalence |
 | Mutation testing | Can the selected tests detect reviewed injected faults? | Completeness outside the mutation model |
@@ -75,6 +78,10 @@ on `PATH`:
 - `iverilog`
 - Verilator 5.028 for exact CI parity
 - Yosys, SymbiYosys (`sby`), and Z3 from one coherent OSS CAD Suite release
+- For unbounded live proof only: Super Prove (`suprove`), currently listed by
+  [OSS CAD Suite](https://github.com/YosysHQ/oss-cad-suite-build#architecture-support)
+  for Linux x64; other platforms may need a compatible remote runner or their
+  own build
 - `uv` 0.12.1 for exact CI parity
 
 The workflows pin the exact tool installers and versions. For results intended
@@ -95,6 +102,7 @@ verilator --version
 yosys --version
 sby --version
 z3 --version
+suprove --version
 ```
 
 Then install the locked Python dependencies:
@@ -142,6 +150,97 @@ sva2rtl rtl/top.sv \
 
 Compilation alone establishes only that the property was accepted and RTL was
 emitted. It does not establish semantic equivalence.
+
+## Verify a User DUT Directly
+
+The formal CLI is the primary workaround for open formal frontends that cannot
+parse advanced SVA. Put assertion-free design sources under `--dut` and keep the
+original assertion in a separate property file:
+
+```systemverilog
+module progress_spec(input logic clk, rst_n, req, ack, ready);
+  req_eventually_ack: assert property (
+    @(posedge clk) disable iff (!rst_n)
+    req |-> s_eventually ack
+  );
+endmodule
+```
+
+```bash
+sva2rtl-formal \
+  --dut rtl/dut.sv \
+  --property-file properties/progress.sv \
+  --property req_eventually_ack \
+  --top dut \
+  --suprove-path /path/to/suprove \
+  --output evidence/req-eventually-ack
+```
+
+The evidence bundle contains copied and hashed DUT/property inputs,
+`formal_bind.sv`, `formal.sby`, a separate cover task, the property slice,
+tool discovery, logs, traces, and `result.json`. The original property is an
+evidence input only and is intentionally absent from `yosys_inputs`; Yosys sees
+the DUT plus generated formal primitives.
+
+### Supported formal-only liveness shapes
+
+| Original property | Generated proof obligations |
+|---|---|
+| `s_eventually p` | `GF(p)` |
+| `a |-> s_eventually b` | Every arbitrarily selected matching antecedent attempt eventually reaches `b` |
+| `a |=> s_eventually b` | The same obligation, armed one sample later |
+| `a s_until b` | Invariant `a || b` plus `GF(b)` |
+| `a s_until_with b` | Invariant `a` before/at completion plus `GF(b)` |
+
+Operands in this initial route must be structured Boolean expressions in one
+clock domain. Nested liveness, property conditionals/negation around liveness,
+unbounded `always`, local-variable semantics, and arbitrary sequence operands
+remain unsupported. The ordinary monitor CLI rejects these unbounded nodes so
+formal-only IR cannot accidentally become a misleading finite PASS output.
+
+### Fairness is explicit, never guessed
+
+Some DUTs can satisfy progress only when their environment is fair. For
+example, `--fairness ready` adds the model assumption `GF(ready)`—`ready` must
+be true infinitely often:
+
+```bash
+sva2rtl-formal \
+  --dut rtl/dut.sv \
+  --property-file properties/progress.sv \
+  --property req_eventually_ack \
+  --top dut \
+  --fairness ready \
+  --output evidence/progress-with-fairness
+```
+
+Every fairness signal is identifier-validated, serialized to
+`evidence/fairness.json`, and hashed by the manifest. Fairness is an assumption
+about the model, not a discovered fact about the design. A proof under an
+unjustified fairness assumption can hide a real deadlock, so it requires the
+same review as any other formal assumption.
+
+### What happens without Super Prove?
+
+The compiler still builds the live AIG and runs the independent cover task, but
+the primary result is `UNKNOWN` with installation guidance. BMC may find a
+finite counterexample to a progress encoding, but a bounded no-counterexample
+result cannot prove that something eventually happens at an unknown future
+time. Safe choices are:
+
+1. Run the unchanged evidence bundle on a Linux x64 OSS CAD Suite worker that
+   includes `suprove`.
+2. Use a real, reviewed finite deadline only if the protocol specification
+   actually has one; then verify the bounded property as safety.
+3. Decompose the property into smaller obligations only with a checked
+   equivalent/stronger relation certificate and `PROVEN` member artifacts.
+4. Use another independently supporting formal frontend. Do not relabel its
+   result as sva2rtl evidence unless inputs, assumptions, and semantics match.
+
+This route partially replaces a commercial SVA tool: it removes the commercial
+frontend requirement for the exact supported shapes and uses open formal IR.
+It does not replace broad IEEE 1800 SVA semantics, commercial debug capacity,
+CDC sign-off, or large industrial proof engines.
 
 ## Build a Non-Circular Formal Miter
 
@@ -210,6 +309,7 @@ Project policy is fail-closed:
 |---|---|
 | BMC PASS at depth 20 | No modeled disagreement was found in cycles 0 through 20 under the listed assumptions |
 | `prove` PASS | The modeled equivalence invariant was proven for all reachable states under the listed assumptions |
+| `live` PASS plus cover PASS | The modeled liveness obligation was proven under the recorded assumptions and fairness |
 | Cover PASS at depth 20 | The named outcome is reachable within 20 cycles |
 | BMC/prove FAIL | A counterexample or proof failure exists; inspect the trace and fix the implementation, reference, or invalid assumption |
 | Cover FAIL after proof PASS | Evidence is UNKNOWN because the proof may be vacuous or the bound may be too small |
@@ -279,6 +379,18 @@ uv run pytest \
 One dynamically classified bounded-liveness induction non-convergence is the
 only currently admitted xfail in the checked-in workflow. A counterexample,
 tool failure, unexpected skip, or any other xfail is a hard failure.
+
+The command above qualifies the safety/equivalence shards. The live backend has
+a separate conditional gate:
+
+```bash
+uv run pytest tests/test_formal_liveness.py -v --timeout=600
+```
+
+On a host without `suprove`, the real good/bad solver cases skip and the suite
+instead checks source isolation, AIG preparation, cover reachability, and the
+fail-closed `UNKNOWN` result. Those checks are useful pipeline evidence but are
+not a completed live proof.
 
 ### 5. Differential tests on both simulators
 
@@ -362,11 +474,11 @@ The current v1.7.1 boundary is deliberately finite and fail-closed:
   unsupported.
 - NFA-lifted nested multi-path composition has a compile-time state budget
   `K <= 32`; bounded implication concurrency has finite thread slots.
-- Unbounded eventual obligations have no finite completion deadline under the
-  current pass/fail monitor interface. Unbounded `always` and other legal forms
-  are also not implemented even where a different streaming monitor could be
-  designed. Rejection is a v1 scope decision, not a claim that every such form
-  is mathematically impossible in hardware.
+- Unbounded eventual and strong-until obligations have no finite completion
+  deadline under the pass/fail monitor interface. They are formal-only for the
+  exact shapes listed above; Super Prove absence yields `UNKNOWN`. Unbounded
+  `always` and other legal forms are not implemented even where a different
+  streaming monitor could be designed.
 - Experimental multi-clock output uses a 2-DFF level synchronizer. It can miss
   narrow pulses or merge events and is not CDC or metastability sign-off.
 - slang is a trusted parsing/elaboration boundary. The maintained real-project
@@ -386,7 +498,7 @@ property through the compiler:
 | Ranged goto/non-consecutive repetition | Expand a small finite range into explicit fixed-count properties, or write a bounded reference-state monitor | More properties/RTL and more proof state |
 | Local variables, complex expressions, arrays | Compute auxiliary RTL signals first, then assert over scalar supported signals | Auxiliary logic becomes part of the trusted/modelled boundary |
 | Full legal SVA needed only in simulation | Keep the original assertion and use a simulator with the required SVA semantics | No synthesizable FPGA monitor |
-| Full SVA or unbounded/liveness proof needed | Use a commercial formal platform or another independently supported frontend on the original property | Licensing/tool access; still requires assumption and cover review |
+| Full SVA or unbounded/liveness proof needed | Use `sva2rtl-formal` for the documented shapes; otherwise use another independently supported open or commercial frontend on the original property | Open live proof still requires Super Prove and explicit assumptions; unsupported SVA remains outside this tool |
 | Multi-clock event delivery | Use a reviewed handshake, toggle, or asynchronous FIFO CDC protocol and verify each domain separately; run CDC analysis | Higher area/latency but avoids the lossy level synchronizer |
 | Online hardware verdict is impossible or misleading | Evaluate traces offline, or split a liveness goal into safety assertions plus explicit progress covers/fairness assumptions | Produces different evidence, not a finite hardware PASS certificate |
 | Property is too large for the state/thread budget | Decompose it into independently checkable obligations with an explicit composition argument | Decomposition can miss interactions if the argument is incomplete |
@@ -415,5 +527,8 @@ evidence only when the run head SHA equals the intended executable commit.
 - [Supported constructs and diagnostics](SUPPORTED_CONSTRUCTS.md)
 - [Industrial validation gaps](INDUSTRIAL_VALIDATION_GAPS.md)
 - [YosysHQ SBY documentation](https://yosyshq.readthedocs.io/projects/sby/en/stable/)
+- [SBY live mode and `aiger suprove`](https://symbiyosys.readthedocs.io/en/latest/reference.html)
+- [Yosys formal `$live` and `$fair` cells](https://yosyshq.readthedocs.io/projects/yosys/en/v0.59.1/cmd/index_formal.html)
+- [OSS CAD Suite architecture support](https://github.com/YosysHQ/oss-cad-suite-build#architecture-support)
 - [YosysHQ formal Verilog extensions](https://yosyshq.readthedocs.io/projects/sby/en/latest/verilog.html)
 - [Verilator language support](https://verilator.org/guide/latest/languages.html)

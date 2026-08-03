@@ -78,6 +78,20 @@ _EXIT_CODES = {
 @click.option("--slang-path", default="slang", envvar="SLANG_PATH", show_envvar=True)
 @click.option("--sby-path", default="sby", envvar="SBY_PATH", show_envvar=True)
 @click.option(
+    "--suprove-path",
+    default="suprove",
+    envvar="SUPROVE_PATH",
+    show_envvar=True,
+    help="Super Prove executable used by SBY mode live",
+)
+@click.option(
+    "--fairness",
+    "fairness_signals",
+    multiple=True,
+    metavar="SIGNAL",
+    help="Explicit GF(signal) user/model fairness assumption (repeatable)",
+)
+@click.option(
     "--decomposition-certificate",
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
     help="Checked JSON certificate for an equivalent/stronger property decomposition",
@@ -105,6 +119,8 @@ def main(
     output_dir: Path,
     slang_path: str,
     sby_path: str,
+    suprove_path: str,
+    fairness_signals: tuple[str, ...],
     decomposition_certificate: Path | None,
     force: bool,
     compile_only: bool,
@@ -132,6 +148,8 @@ def main(
             output_dir=output_dir,
             slang_path=slang_path,
             sby_path=sby_path,
+            suprove_path=suprove_path,
+            fairness_signals=fairness_signals,
             decomposition_certificate=decomposition_certificate,
             force=force,
         )

@@ -41,10 +41,12 @@ from sva2rtl.ir import (
     PropAlways,
     PropBoundedAlways,
     PropBoundedEventually,
+    PropEventually,
     PropIfElse,
     PropImplication,
     PropNexttime,
     PropNot,
+    PropStrongUntil,
     PropUntil,
     SeqAnd,
     SeqConcat,
@@ -1391,24 +1393,34 @@ def _build_bounded_eventually(
     node: dict[str, Any],
     source_loc: SourceLoc,
 ) -> tuple[SVANode, str]:
-    """Build PropBoundedEventually from a v11 Unary SEventually/Eventually node.
+    """Build bounded or formal-only eventually IR from a slang Unary node.
 
-    Bounded form requires ``min``/``max`` (the ``[lo:hi]`` range). Unbounded forms
-    (no range) and non-boolean operands are rejected — honesty-first: unbounded
-    liveness is not synthesizable on finite state, and sequence operands need the
-    v1.5 NFA engine. See SUPPORTED_CONSTRUCTS.md.
+    Bounded forms produce ``PropBoundedEventually`` for monitor and formal use.
+    Unbounded forms produce ``PropEventually`` for the formal-only live backend.
     """
     op = node.get("op", "")
     strong = op == "SEventually"
     kw = "s_eventually" if strong else "eventually"
-    if "min" not in node or "max" not in node:
+    has_min = "min" in node
+    has_max = "max" in node
+    if has_min != has_max:
         raise UnsupportedConstruct(
-            message=(
-                f"unbounded '{kw}' is not synthesizable on finite state — use the "
-                f"bounded form '{kw} [m:n] p' with an explicit cycle range."
-            ),
-            construct_name=f"unbounded {kw}",
+            message=f"'{kw}' must provide both range endpoints or neither",
+            construct_name=f"partial {kw} range",
             source_loc=source_loc,
+        )
+    body_ir = _dispatch_expr_to_ir(node.get("expr", {}))
+    if not isinstance(body_ir, BoolExpr):
+        raise UnsupportedConstruct(
+            message=f"'{kw}' currently supports only a boolean-expression operand",
+            construct_name=f"{kw} with non-boolean operand",
+            source_loc=source_loc,
+        )
+    body_text = _reconstruct_node_text(body_ir)
+    if not has_min:
+        return (
+            PropEventually(body=body_ir, strong=strong, source_loc=source_loc),
+            f"{kw} ({body_text})",
         )
     lo = int(node["min"])
     hi = int(node["max"])
@@ -1419,18 +1431,6 @@ def _build_bounded_eventually(
                 f"{source_loc}: require 0 <= m <= n."
             )
         )
-    body_ir = _dispatch_expr_to_ir(node.get("expr", {}))
-    if not isinstance(body_ir, BoolExpr):
-        raise UnsupportedConstruct(
-            message=(
-                f"'{kw} [m:n]' currently supports only a boolean-expression "
-                "operand; sequence/property operands are deferred to the v1.5 NFA "
-                "engine."
-            ),
-            construct_name=f"{kw} with non-boolean operand",
-            source_loc=source_loc,
-        )
-    body_text = _reconstruct_node_text(body_ir)
     text = f"{kw} [{lo}:{hi}] ({body_text})"
     return (
         PropBoundedEventually(body=body_ir, lo=lo, hi=hi, strong=strong, source_loc=source_loc),
@@ -1559,12 +1559,10 @@ def _build_until(
     node: dict[str, Any],
     source_loc: SourceLoc,
 ) -> tuple[SVANode, str]:
-    """Build PropUntil from a v11 Binary Until/UntilWith node (weak forms only).
+    """Build weak-until monitor IR or formal-only strong-until IR.
 
-    Strong forms (``s_until`` / ``s_until_with``) are rejected — honesty-first:
-    they impose an unbounded eventual obligation (the right operand MUST eventually
-    hold), which is not synthesizable on finite state.  Both operands must reduce
-    to boolean expressions (sequence/property operands → v1.5 NFA engine).
+    Strong forms preserve the unbounded eventual discharge in
+    ``PropStrongUntil`` and remain unavailable to monitor composition.
     """
     op = node.get("op", "")
     strong = op in ("SUntil", "SUntilWith")
@@ -1575,16 +1573,6 @@ def _build_until(
         "SUntil": "s_until",
         "SUntilWith": "s_until_with",
     }.get(op, op)
-    if strong:
-        raise UnsupportedConstruct(
-            message=(
-                f"strong '{kw}' imposes an unbounded eventual obligation (the "
-                "right-hand side must eventually hold) and is not synthesizable on "
-                f"finite state — use the weak form '{kw.replace('s_', '', 1)}'."
-            ),
-            construct_name=f"strong {kw}",
-            source_loc=source_loc,
-        )
     left_ir = _dispatch_expr_to_ir(node.get("left", {}))
     right_ir = _dispatch_expr_to_ir(node.get("right", {}))
     if not isinstance(left_ir, BoolExpr) or not isinstance(right_ir, BoolExpr):
@@ -1599,10 +1587,17 @@ def _build_until(
     left_text = _reconstruct_node_text(left_ir)
     right_text = _reconstruct_node_text(right_ir)
     text = f"({left_text}) {kw} ({right_text})"
-    return (
-        PropUntil(left=left_ir, right=right_ir, with_=with_, source_loc=source_loc),
-        text,
-    )
+    if strong:
+        return (
+            PropStrongUntil(
+                left=left_ir,
+                right=right_ir,
+                with_=with_,
+                source_loc=source_loc,
+            ),
+            text,
+        )
+    return PropUntil(left=left_ir, right=right_ir, with_=with_, source_loc=source_loc), text
 
 
 def _build_prop_not(
@@ -1987,6 +1982,15 @@ def _reconstruct_node_text(node: SVANode) -> str:
     if isinstance(node, PropAlways):
         keyword = "s_always" if node.strong else "always"
         return f"{keyword} ({_reconstruct_node_text(node.body)})"
+    if isinstance(node, PropEventually):
+        keyword = "s_eventually" if node.strong else "eventually"
+        return f"{keyword} ({_reconstruct_node_text(node.body)})"
+    if isinstance(node, PropStrongUntil):
+        keyword = "s_until_with" if node.with_ else "s_until"
+        return (
+            f"({_reconstruct_node_text(node.left)}) {keyword} "
+            f"({_reconstruct_node_text(node.right)})"
+        )
     if isinstance(node, PropNexttime):
         keyword = "s_nexttime" if node.strong else "nexttime"
         suffix = "" if node.cycles == 1 else f"[{node.cycles}]"

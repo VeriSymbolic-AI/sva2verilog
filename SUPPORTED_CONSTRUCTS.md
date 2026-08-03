@@ -67,11 +67,10 @@ work; mutation and coverage release metrics are tracked in
 ## Tier 3 Operators (v1.4 Part A — Bounded Liveness)
 
 Bounded-liveness operators carry an explicit cycle window `[m:n]`, which gives
-the current pass/fail monitor a hard deadline and a finite resource budget. The
-**unbounded** forms are rejected at compile time because v1 does not define a
-complete finite-time verdict and resource contract for them. This is a compiler
-scope boundary; it is not a claim that every unbounded safety monitor is
-mathematically impossible in hardware.
+the pass/fail monitor a hard deadline and a finite resource budget. Unbounded
+forms have no finite PASS deadline and are therefore rejected by the monitor
+composer. Selected unbounded shapes are nevertheless imported into formal-only
+IR and handled by `sva2rtl-formal`; they never enter RTL-monitor composition.
 
 | Operator | Category | Description | Example SVA | Generated Template |
 |----------|----------|-------------|-------------|-------------------|
@@ -89,14 +88,19 @@ Notes for v1.4 Part A:
 - Equivalence is established **non-circularly**: the generated monitor is proven
   by SymbiYosys BMC against an independent IEEE-1800 reference monitor authored
   from `∃ k ∈ [m,n] : a(t0+k)` semantics (not derived from the implementation).
-- Unbounded `s_eventually a` / `always a` / `s_until` / `s_until_with` raise
-  `UnsupportedConstruct` with a source location and a remediation hint. The
-  eventual/strong-until forms have no finite completion deadline under the
-  current contract; unbounded `always` is also outside the implemented v1
-  streaming-monitor subset.
+- Unbounded `s_eventually a`, `a |-> s_eventually b`,
+  `a |=> s_eventually b`, `a s_until b`, and `a s_until_with b` with Boolean
+  operands are formal-only. The monitor composer rejects them; the formal CLI
+  lowers them to Yosys `$live` plus any required safety obligation.
+- The formal-only live result is `PROVEN` only after a real SymbiYosys
+  `mode live` / Super Prove pass and required cover reachability. Missing
+  Super Prove is `UNKNOWN`; bounded BMC is never promoted to a liveness proof.
+- Unbounded `always`, nested liveness shapes, and other unbounded forms remain
+  outside the implemented formal frontend.
 - Weak `until` / `until_with` are safety properties (no liveness obligation) and
-  are implemented in the current finite-state subset; the strong `s_until` /
-  `s_until_with` forms are rejected.
+  are implemented in the finite-state monitor subset. Strong `s_until` /
+  `s_until_with` are formal-only and split into weak-until safety plus eventual
+  discharge.
 
 ## Composition Model
 
@@ -278,10 +282,10 @@ The following operators remain unsupported or deliberately rejected:
 |----------|----------|--------|
 | `nexttime` | Temporal | Not supported |
 | `eventually`/`s_eventually` (bounded `[m:n]`) | Liveness | **Supported** (v1.4 Part A) |
-| `eventually`/`s_eventually` (unbounded) | Liveness | Rejected — no finite completion deadline in the v1 monitor contract |
+| `eventually`/`s_eventually` (unbounded Boolean/root implication shapes) | Liveness | Formal-only with open live backend; monitor generation rejected |
 | `always [m:n]` / `s_always [m:n]` (bounded) | Liveness | **Supported** (v1.4 Part A) |
 | `until` / `until_with` (weak) | Safety | **Supported** (v1.4 Part A) |
-| `s_until` / `s_until_with` (strong) | Liveness | Rejected — requires unbounded eventual obligation |
+| `s_until` / `s_until_with` (strong Boolean operands) | Liveness | Formal-only safety + eventual-discharge proof; monitor generation rejected |
 | `always` (unbounded) | Temporal | Rejected — legal streaming safety form, but not implemented by v1 |
 | `[->M:N]` / `[=M:N]` where `M < N` | Repetition | Rejected — v1 supports fixed counts only |
 | `intersect`/`within` with local variables | Sequence | Not supported |
@@ -371,7 +375,8 @@ The following constructs are recognized by the parser but produce clear error me
 | `[->M:N]` / `[=M:N]` where `M < N` | SVA-E002 | Use fixed `[->N]` / `[=N]`, or split into explicit properties |
 | `##[0:$]` | SVA-E002 | Use `##[0:MAX]` with explicit bound |
 | Unsupported multi-clock forms (`##N` where N≠1, cross-clock `intersect`, overlapping cross-clock `|->`) | SVA-E003 | Use allowed path-one forms (`##1`, `|=>`) or split into single-clock properties |
-| `nexttime` / unbounded `always` / unbounded `eventually` / `s_until` | SVA-E001 | Outside the v1 monitor contract; use a semantically justified bounded form or an alternative flow |
+| `nexttime` / unbounded `always` / unsupported nested liveness | SVA-E001 | Outside the implemented unbounded frontend; decompose with a checked relation or use another supporting frontend |
+| unbounded `s_eventually` / strong `s_until` in the documented Boolean shapes | — | Use `sva2rtl-formal`; synthesizable monitor generation remains intentionally rejected |
 | bounded `eventually`/`s_eventually [m:n]` | — | Supported since v1.4 Part A |
 
 ## Validation

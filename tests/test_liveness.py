@@ -4,7 +4,7 @@ Phase A1 coverage (frontend + IR + normalizer):
 - LIVE-01 (frontend): ``s_eventually [m:n] p`` / ``eventually [m:n] p`` import to
   ``PropBoundedEventually`` with the correct bounds and operand.
 - LIVE-04 (honesty): unbounded liveness and non-boolean operands raise
-  ``UnsupportedConstruct``; inverted bounds raise.
+  formal-only liveness IR; inverted bounds raise.
 
 The slang AST node shapes used here were captured by
 ``tools/audit/probe_liveness_ast.py`` against slang 11.0.0.
@@ -28,6 +28,8 @@ from sva2rtl.ir import (
     PropAlways,
     PropBoundedAlways,
     PropBoundedEventually,
+    PropEventually,
+    PropStrongUntil,
     PropUntil,
     SourceLoc,
 )
@@ -108,14 +110,16 @@ def test_s_eventually_single_offset() -> None:
 # ── LIVE-04 honesty: rejections ────────────────────────────────────────────
 
 
-def test_unbounded_s_eventually_rejected() -> None:
-    with pytest.raises(UnsupportedConstruct, match="unbounded"):
-        _dispatch_expr_to_ir(_eventually_node("SEventually", None, None))
+def test_unbounded_s_eventually_imports_formal_only_ir() -> None:
+    ir = _dispatch_expr_to_ir(_eventually_node("SEventually", None, None))
+    assert isinstance(ir, PropEventually)
+    assert ir.strong is True
 
 
-def test_unbounded_eventually_rejected() -> None:
-    with pytest.raises(UnsupportedConstruct, match="unbounded"):
-        _dispatch_expr_to_ir(_eventually_node("Eventually", None, None))
+def test_unbounded_eventually_imports_formal_only_ir() -> None:
+    ir = _dispatch_expr_to_ir(_eventually_node("Eventually", None, None))
+    assert isinstance(ir, PropEventually)
+    assert ir.strong is False
 
 
 def test_inverted_bounds_rejected() -> None:
@@ -232,14 +236,16 @@ def test_until_with_weak_imports() -> None:
     assert ir.with_ is True
 
 
-def test_strong_s_until_rejected() -> None:
-    with pytest.raises(UnsupportedConstruct, match="strong"):
-        _dispatch_expr_to_ir(_until_node("SUntil"))
+def test_strong_s_until_imports_formal_only_ir() -> None:
+    ir = _dispatch_expr_to_ir(_until_node("SUntil"))
+    assert isinstance(ir, PropStrongUntil)
+    assert ir.with_ is False
 
 
-def test_strong_s_until_with_rejected() -> None:
-    with pytest.raises(UnsupportedConstruct, match="strong"):
-        _dispatch_expr_to_ir(_until_node("SUntilWith"))
+def test_strong_s_until_with_imports_formal_only_ir() -> None:
+    ir = _dispatch_expr_to_ir(_until_node("SUntilWith"))
+    assert isinstance(ir, PropStrongUntil)
+    assert ir.with_ is True
 
 
 def test_until_non_boolean_operand_rejected() -> None:

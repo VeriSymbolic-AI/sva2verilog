@@ -35,7 +35,7 @@ from sva2rtl.emitter import (
     observed_signal_widths,
 )
 from sva2rtl.errors import PropertyNotFound, SvaCompileError, UnsupportedConstruct
-from sva2rtl.formal_lowering import lower_bounded_implication
+from sva2rtl.formal_lowering import lower_bounded_implication, lower_liveness_property
 from sva2rtl.frontend import invoke_slang
 from sva2rtl.ir import CheckerNode
 from sva2rtl.normalizer import normalize
@@ -114,6 +114,8 @@ class FormalRunConfig:
     solver: str = "yices"
     slang_path: str = "slang"
     sby_path: str = "sby"
+    suprove_path: str = "suprove"
+    fairness_signals: tuple[str, ...] = ()
     decomposition_certificate: Path | None = None
     force: bool = False
 
@@ -144,6 +146,7 @@ class FormalRunConfig:
             ("solver", self.solver),
             ("slang path", self.slang_path),
             ("sby path", self.sby_path),
+            ("suprove path", self.suprove_path),
         ):
             if not value or any(char in value for char in ("\x00", "\n", "\r")):
                 raise ValueError(f"invalid {label}: {value!r}")
@@ -151,6 +154,11 @@ class FormalRunConfig:
             raise ValueError(f"invalid engine token: {self.engine!r}")
         if _TOOL_TOKEN_RE.fullmatch(self.solver) is None:
             raise ValueError(f"invalid solver token: {self.solver!r}")
+        if len(set(self.fairness_signals)) != len(self.fairness_signals):
+            raise ValueError("fairness signals must be unique")
+        for fairness_signal in self.fairness_signals:
+            if _IDENTIFIER_RE.fullmatch(fairness_signal) is None:
+                raise ValueError(f"invalid fairness signal: {fairness_signal!r}")
         for source in (*self.dut_sources, self.property_file):
             if not source.is_file():
                 raise ValueError(f"input source does not exist: {source}")
@@ -182,6 +190,16 @@ class FormalCompilation:
     checker: CheckerNode
     property_class: PropertyClass
     backend: str
+
+
+@dataclass(frozen=True)
+class LiveBackendInfo:
+    """Discovered unbounded liveness engine and its evidence metadata."""
+
+    available: bool
+    path: str
+    version: str
+    guidance: str
 
 
 @dataclass(frozen=True)
@@ -524,6 +542,8 @@ def classify_property(node: sva_ir.SVANode) -> PropertyClass:
         return PropertyClass.FINITE_VERDICT
     if isinstance(node, sva_ir.PropBoundedEventually):
         return PropertyClass.BOUNDED_LIVENESS
+    if isinstance(node, (sva_ir.PropEventually, sva_ir.PropStrongUntil)):
+        return PropertyClass.LIVENESS
     if isinstance(node, sva_ir.PropBoundedAlways):
         return PropertyClass.FINITE_VERDICT
     if isinstance(node, sva_ir.PropAlways):
@@ -700,6 +720,24 @@ def _compile_checker(config: FormalRunConfig) -> FormalCompilation:
                 construct_name="symbolic-witness property shape",
                 source_loc=node.source_loc,
             )
+    live = lower_liveness_property(
+        node,
+        label=label,
+        original_text=original_text,
+        clock_signal=clock.signal,
+        clock_edge=clock.edge,
+    )
+    if live is not None:
+        if config.mode is FormalMode.BMC:
+            raise ValueError(
+                "true liveness requires --mode prove with a live engine; "
+                "a bounded BMC PASS cannot discharge eventuality"
+            )
+        return FormalCompilation(
+            checker=live,
+            property_class=PropertyClass.LIVENESS,
+            backend="open-live-suprove",
+        )
     normalized = normalize(node)
     property_class = classify_property(normalized)
     invariant = _direct_invariant(normalized)
@@ -1012,24 +1050,167 @@ def render_symbolic_witness_bind(
     )
 
 
+def render_liveness_bind(
+    checker: CheckerNode,
+    *,
+    top: str,
+    clock: str,
+    reset: str,
+    fairness_signals: tuple[str, ...] = (),
+) -> str:
+    """Render formal-only Yosys live/fair primitives and safety obligations."""
+    for identifier in (top, clock, reset, *fairness_signals):
+        if _IDENTIFIER_RE.fullmatch(identifier) is None:
+            raise ValueError(f"invalid SystemVerilog identifier: {identifier!r}")
+    widths = observed_signal_widths(checker)
+    signedness = observed_signal_signedness(checker)
+    observed = list(checker.observed_signals)
+    port_lines = [f"    input logic {clock}", f"    input logic {reset}"]
+    port_lines.extend(
+        _input_decl(port, widths.get(port, 1), signedness.get(port, False))
+        for port, _signal in observed
+    )
+    fairness_ports = [f"fair_{index}" for index in range(len(fairness_signals))]
+    port_lines.extend(f"    input logic {port}" for port in fairness_ports)
+    bind_connections = [f"    .{clock}({clock})", f"    .{reset}({reset})"]
+    bind_connections.extend(f"    .{port}({signal})" for port, signal in observed)
+    bind_connections.extend(
+        f"    .{port}({signal})"
+        for port, signal in zip(fairness_ports, fairness_signals, strict=True)
+    )
+    edge = checker.params["clock_edge"]
+    antecedent = checker.params["antecedent_expr"]
+    eventual = checker.params["eventual_expr"]
+    disable = checker.params["disable_expr"]
+    safety = checker.params["safety_expr"]
+    uses_witness = checker.params["uses_witness"] == "1"
+    start_offset = int(checker.params["start_offset"])
+
+    declarations = ""
+    sequential = ""
+    if uses_witness:
+        declarations = (
+            "    (* anyseq *) logic witness_select;\n"
+            "    logic pending_q = 1'b0;\n"
+            "    logic armed_q = 1'b0;\n"
+            f"    wire witness_start = !pending_q && !armed_q && !({disable}) "
+            f"&& ({antecedent}) && witness_select;\n"
+        )
+        live_expression = f"(({disable}) || ({eventual}) || (!pending_q && !armed_q))"
+        start_logic = (
+            "                armed_q <= 1'b1;\n"
+            if start_offset == 1
+            else (
+                f"                if (!({eventual}))\n"
+                "                    pending_q <= 1'b1;\n"
+            )
+        )
+        sequential = (
+            f"            cover ({antecedent});\n"
+            "            cover (witness_start);\n"
+            f"            cover ({eventual});\n"
+            f"            if ({disable}) begin\n"
+            "                pending_q <= 1'b0;\n"
+            "                armed_q <= 1'b0;\n"
+            "            end else begin\n"
+            f"                if (pending_q && ({eventual}))\n"
+            "                    pending_q <= 1'b0;\n"
+            "                if (armed_q) begin\n"
+            "                    armed_q <= 1'b0;\n"
+            f"                    if (!({eventual}))\n"
+            "                        pending_q <= 1'b1;\n"
+            "                end\n"
+            "                if (witness_start) begin\n"
+            + start_logic
+            + "                end\n"
+            "            end\n"
+        )
+    else:
+        live_expression = f"(({disable}) || ({eventual}))"
+        sequential = f"            cover ({eventual});\n"
+
+    safety_logic = ""
+    if safety:
+        safety_logic = (
+            "            // strong-until safety obligation\n"
+            f"            if (!({disable})) assert ({safety});\n"
+        )
+    fairness_cells = "".join(
+        r"    \$fair fair_obligation_"
+        f"{index} (.A({port}), .EN(formal_past_valid && {reset}));\n"
+        for index, port in enumerate(fairness_ports)
+    )
+    fairness_covers = "".join(
+        f"            cover ({port});\n" for port in fairness_ports
+    )
+
+    return (
+        "// Generated open-formal liveness harness. Original SVA is absent.\n"
+        "(* blackbox *) module \\$live (input A, input EN); endmodule\n"
+        + (
+            "(* blackbox *) module \\$fair (input A, input EN); endmodule\n"
+            if fairness_ports
+            else ""
+        )
+        + "module sva2rtl_formal_bind (\n"
+        + ",\n".join(port_lines)
+        + "\n);\n"
+        "    logic formal_past_valid = 1'b0;\n"
+        + declarations
+        + f"    wire live_condition = {live_expression};\n"
+        r"    \$live eventual_discharge "
+        f"(.A(live_condition), .EN(formal_past_valid && {reset}));\n"
+        + fairness_cells
+        + "\n"
+        + f"    always @({edge} {clock}) begin\n"
+        "        formal_past_valid <= 1'b1;\n"
+        "        if (!formal_past_valid) begin\n"
+        f"            assume (!{reset});\n"
+        + ("            pending_q <= 1'b0;\n" if uses_witness else "")
+        + ("            armed_q <= 1'b0;\n" if uses_witness else "")
+        + "        end else begin\n"
+        f"            assume ({reset});\n"
+        + safety_logic
+        + sequential
+        + fairness_covers
+        + "        end\n"
+        "    end\n"
+        "endmodule\n\n"
+        f"bind {top} sva2rtl_formal_bind u_sva2rtl_formal_bind (\n"
+        + ",\n".join(bind_connections)
+        + "\n);\n"
+    )
+
+
 def _render_sby(
     config: FormalRunConfig,
     consumed_files: tuple[str, ...],
     *,
     mode: str | None = None,
+    engine_line: str | None = None,
+    formal_primitives: bool = False,
+    fairness_primitives: bool = False,
 ) -> str:
-    engine_line = f"{config.engine} {config.solver}".rstrip()
+    selected_mode = mode or config.mode.value
+    selected_engine = engine_line or f"{config.engine} {config.solver}".rstrip()
     source_args = " ".join(consumed_files)
+    depth_line = "" if selected_mode == "live" else f"depth {config.depth}\n"
+    multiclock = "multiclock on\n" if selected_mode == "live" else ""
+    primitive_cleanup = "delete =\\$live\n" if formal_primitives else ""
+    if fairness_primitives:
+        primitive_cleanup += "delete =\\$fair\n"
     return (
         "[options]\n"
-        f"mode {mode or config.mode.value}\n"
-        f"depth {config.depth}\n"
+        f"mode {selected_mode}\n"
+        f"{depth_line}"
+        f"{multiclock}"
         "wait on\n\n"
         "[engines]\n"
-        f"{engine_line}\n\n"
+        f"{selected_engine}\n\n"
         "[script]\n"
         "plugin -i slang\n"
         f"read_slang --top {config.top} {source_args}\n"
+        f"{primitive_cleanup}"
         f"prep -top {config.top}\n\n"
         "[files]\n"
         + "\n".join(consumed_files)
@@ -1083,7 +1264,12 @@ def build_formal_bundle(config: FormalRunConfig) -> FormalEvidence:
 
     modules = (
         {}
-        if backend in {"direct-invariant-safety", "symbolic-witness-safety"}
+        if backend
+        in {
+            "direct-invariant-safety",
+            "symbolic-witness-safety",
+            "open-live-suprove",
+        }
         else emit_all(checker)
     )
     property_paths = {str(config.property_file), str(config.property_file.resolve())}
@@ -1114,6 +1300,14 @@ def build_formal_bundle(config: FormalRunConfig) -> FormalEvidence:
             clock=config.clock,
             reset=config.reset,
         )
+    elif backend == "open-live-suprove":
+        bind_text = render_liveness_bind(
+            checker,
+            top=config.top,
+            clock=config.clock,
+            reset=config.reset,
+            fairness_signals=config.fairness_signals,
+        )
     else:
         bind_text = render_formal_bind(
             checker,
@@ -1123,10 +1317,27 @@ def build_formal_bundle(config: FormalRunConfig) -> FormalEvidence:
         )
     _write_text(bind_path, bind_text)
     consumed.append("formal_bind.sv")
-    _write_text(bundle / "formal.sby", _render_sby(config, tuple(consumed)))
+    if backend == "open-live-suprove":
+        formal_sby_text = _render_sby(
+            config,
+            tuple(consumed),
+            mode="live",
+            engine_line="aiger suprove",
+            formal_primitives=True,
+            fairness_primitives=bool(config.fairness_signals),
+        )
+    else:
+        formal_sby_text = _render_sby(config, tuple(consumed))
+    _write_text(bundle / "formal.sby", formal_sby_text)
     _write_text(
         bundle / "formal_cover.sby",
-        _render_sby(config, tuple(consumed), mode="cover"),
+        _render_sby(
+            config,
+            tuple(consumed),
+            mode="cover",
+            formal_primitives=backend == "open-live-suprove",
+            fairness_primitives=bool(config.fairness_signals),
+        ),
     )
 
     widths = observed_signal_widths(checker)
@@ -1157,6 +1368,22 @@ def build_formal_bundle(config: FormalRunConfig) -> FormalEvidence:
             "observed_signals": observed_slice,
         },
     )
+    fairness_path = bundle / "evidence" / "fairness.json"
+    _write_json(
+        fairness_path,
+        {
+            "schema_version": 1,
+            "assumptions": [
+                {
+                    "kind": "user/model-assumption",
+                    "semantics": f"GF({signal})",
+                    "signal": signal,
+                }
+                for signal in config.fairness_signals
+            ],
+        },
+    )
+    live_info = discover_live_backend(config) if backend == "open-live-suprove" else None
 
     manifest: dict[str, Any] = {
         "schema_version": 1,
@@ -1173,6 +1400,7 @@ def build_formal_bundle(config: FormalRunConfig) -> FormalEvidence:
             "timeout_seconds": config.timeout_seconds,
             "engine": config.engine,
             "solver": config.solver,
+            "fairness_signals": list(config.fairness_signals),
         },
         "property": {
             "path": "evidence/property.sv",
@@ -1190,14 +1418,27 @@ def build_formal_bundle(config: FormalRunConfig) -> FormalEvidence:
             "path": "evidence/slice.json",
             "sha256": _sha256(slice_path),
         },
+        "fairness": {
+            "path": "evidence/fairness.json",
+            "sha256": _sha256(fairness_path),
+        },
         "yosys_inputs": consumed,
         "assumptions": [
             "reset is asserted on the first sampled cycle",
             "reset is deasserted on every later sampled cycle",
         ]
+        + [
+            f"user/model fairness assumption: GF({signal})"
+            for signal in config.fairness_signals
+        ]
         + (
             []
-            if backend in {"direct-invariant-safety", "symbolic-witness-safety"}
+            if backend
+            in {
+                "direct-invariant-safety",
+                "symbolic-witness-safety",
+                "open-live-suprove",
+            }
             else [
                 "monitor start is asserted on every non-reset cycle",
                 "monitor disable_i is held low",
@@ -1209,10 +1450,30 @@ def build_formal_bundle(config: FormalRunConfig) -> FormalEvidence:
             else (
                 "antecedent, witness selection, and obligation completion are reachable"
                 if backend == "symbolic-witness-safety"
-                else "monitor attempt_fired becomes reachable after reset"
+                else (
+                    "liveness antecedent, selection, discharge, and fairness signals "
+                    "are reachable"
+                    if backend == "open-live-suprove"
+                    else "monitor attempt_fired becomes reachable after reset"
+                )
             )
         ],
     }
+    if live_info is not None:
+        manifest["live_engine"] = {
+            "name": "suprove",
+            "sby_mode": "live",
+            "engine": "aiger suprove",
+            "available": live_info.available,
+            "executable": Path(live_info.path).name if live_info.path else "suprove",
+            "version": live_info.version,
+            "guidance": live_info.guidance,
+        }
+        manifest["obligations"] = (
+            ["weak-until-safety", "eventual-discharge"]
+            if checker.params["obligation_kind"] == "strong-until"
+            else ["eventual-discharge"]
+        )
     if decomposition is not None:
         manifest["decomposition"] = _materialize_decomposition(bundle, decomposition)
     _write_json(bundle / "manifest.json", manifest)
@@ -1267,6 +1528,22 @@ def classify_cover_result(
     return CoverStatus.ERROR, "cover engine ended without an unambiguous result"
 
 
+def classify_live_result(
+    *,
+    returncode: int,
+    output: str,
+    timed_out: bool = False,
+) -> tuple[FormalStatus, str]:
+    """Classify only a real unbounded live task as liveness proof evidence."""
+    if timed_out:
+        return FormalStatus.TIMEOUT, "unbounded liveness run exceeded the timeout"
+    if _FAIL_RE.search(output):
+        return FormalStatus.FAILED, "live engine found a liveness counterexample"
+    if returncode == 0 and _PASS_RE.search(output):
+        return FormalStatus.PROVEN, "unbounded liveness proof completed"
+    return FormalStatus.ERROR, "live engine ended without an unambiguous result"
+
+
 def _probe_version(command: list[str]) -> str:
     try:
         completed = subprocess.run(
@@ -1280,6 +1557,34 @@ def _probe_version(command: list[str]) -> str:
         return "missing"
     combined = (completed.stdout + completed.stderr).strip().splitlines()
     return combined[0][:200] if combined else f"exit {completed.returncode}"
+
+
+def discover_live_backend(config: FormalRunConfig) -> LiveBackendInfo:
+    """Discover Super Prove without confusing SBY's ``--live`` output flag."""
+    requested = config.suprove_path
+    resolved = shutil.which(requested)
+    if resolved is None:
+        candidate = Path(requested)
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            resolved = str(candidate.resolve())
+    guidance = (
+        "Install an OSS CAD Suite build containing Super Prove on Linux x64, "
+        "or pass --suprove-path to a compatible executable. Bounded BMC can "
+        "find bugs but cannot prove this unbounded liveness obligation."
+    )
+    if resolved is None:
+        return LiveBackendInfo(
+            available=False,
+            path=requested,
+            version="missing",
+            guidance=guidance,
+        )
+    return LiveBackendInfo(
+        available=True,
+        path=resolved,
+        version=_probe_version([resolved, "--version"]),
+        guidance="qualified SBY mode live / aiger suprove path discovered",
+    )
 
 
 def _trace_paths(bundle: Path) -> tuple[str, ...]:
@@ -1297,9 +1602,17 @@ def _run_sby_process(
 ) -> tuple[int | None, str, bool]:
     """Run one SBY project with process-group timeout cleanup."""
     config = evidence.config
+    command = [config.sby_path, "-f", project_file]
+    if (
+        evidence.manifest.get("backend") == "open-live-suprove"
+        and project_file == "formal.sby"
+    ):
+        live_info = discover_live_backend(config)
+        if live_info.available:
+            command.extend(("--suprove", live_info.path))
     try:
         process = subprocess.Popen(  # noqa: S603 - argv is validated and shell is disabled
-            [config.sby_path, "-f", project_file],
+            command,
             cwd=evidence.bundle_dir,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
@@ -1324,23 +1637,37 @@ def run_formal_bundle(evidence: FormalEvidence) -> FormalResult:
     """Run SBY for a compiled bundle and persist complete output and status."""
     config = evidence.config
     started = time.monotonic()
-    returncode, output, timed_out = _run_sby_process(evidence, "formal.sby")
-    if returncode is None:
-        status = FormalStatus.ERROR
-        message = f"missing dependency: {config.sby_path}"
+    is_live = evidence.manifest.get("backend") == "open-live-suprove"
+    live_info = discover_live_backend(config) if is_live else None
+    if live_info is not None and not live_info.available:
+        returncode, output, timed_out = None, live_info.guidance, False
+        status = FormalStatus.UNKNOWN
+        message = f"live backend is unavailable: {live_info.guidance}"
     else:
-        status, message = classify_sby_result(
-            mode=config.mode,
-            returncode=returncode,
-            output=output,
-            timed_out=timed_out,
-        )
+        returncode, output, timed_out = _run_sby_process(evidence, "formal.sby")
+    if live_info is None or live_info.available:
+        if returncode is None:
+            status = FormalStatus.ERROR
+            message = f"missing dependency: {config.sby_path}"
+        elif is_live:
+            status, message = classify_live_result(
+                returncode=returncode,
+                output=output,
+                timed_out=timed_out,
+            )
+        else:
+            status, message = classify_sby_result(
+                mode=config.mode,
+                returncode=returncode,
+                output=output,
+                timed_out=timed_out,
+            )
 
     _write_text(evidence.bundle_dir / "sby.log", output)
     cover_status = CoverStatus.NOT_RUN
     cover_returncode: int | None = None
     cover_log_path: str | None = None
-    if status is FormalStatus.PROVEN:
+    if status is FormalStatus.PROVEN or is_live:
         cover_returncode, cover_output, cover_timed_out = _run_sby_process(
             evidence, "formal_cover.sby"
         )
@@ -1355,7 +1682,7 @@ def run_formal_bundle(evidence: FormalEvidence) -> FormalResult:
                 output=cover_output,
                 timed_out=cover_timed_out,
             )
-        if cover_status is not CoverStatus.REACHED:
+        if status is FormalStatus.PROVEN and cover_status is not CoverStatus.REACHED:
             status = FormalStatus.UNKNOWN
             message = (
                 "safety proof completed, but critical cover evidence is not "
@@ -1371,7 +1698,8 @@ def run_formal_bundle(evidence: FormalEvidence) -> FormalResult:
             "sby": _probe_version([config.sby_path, "--version"]),
             "slang": _probe_version([config.slang_path, "--version"]),
             "yosys": _probe_version(["yosys", "-V"]),
-        },
+        }
+        | ({"suprove": live_info.version} if live_info is not None else {}),
         log_path="sby.log",
         trace_paths=_trace_paths(evidence.bundle_dir),
         cover_status=cover_status,

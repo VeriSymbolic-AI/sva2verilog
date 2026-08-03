@@ -531,6 +531,19 @@ class PropBoundedEventually(SVANode):
 
 
 @dataclass(frozen=True)
+class PropEventually(SVANode):
+    """Unbounded eventually property for formal-only liveness checking.
+
+    There is no finite completion bound and therefore no synthesizable monitor
+    PASS signal. The open-formal backend lowers this node to a Yosys ``$live``
+    obligation; the monitor composer deliberately rejects it.
+    """
+
+    body: SVANode
+    strong: bool = True
+
+
+@dataclass(frozen=True)
 class PropBoundedAlways(SVANode):
     """Bounded always: ``always [lo:hi] p`` / ``s_always [lo:hi] p``.
 
@@ -617,6 +630,21 @@ class PropUntil(SVANode):
         left:   Boolean expression that must hold until ``right`` (BoolExpr).
         right:  Boolean expression whose first occurrence discharges the obligation.
         with_:  True for ``until_with`` (``left`` required at the ``right`` cycle).
+    """
+
+    left: SVANode
+    right: SVANode
+    with_: bool = False
+
+
+@dataclass(frozen=True)
+class PropStrongUntil(SVANode):
+    """Strong until split into safety and eventual discharge in formal.
+
+    ``left s_until right`` requires the weak-until safety rule and requires
+    ``right`` eventually. ``with_`` additionally requires ``left`` on the
+    discharge cycle. This node is formal-only and never enters monitor
+    composition.
     """
 
     left: SVANode

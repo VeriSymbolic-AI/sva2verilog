@@ -24,8 +24,10 @@ from sva2rtl.ir import (
     BoolExpr,
     CheckerNode,
     DisableIff,
+    PropEventually,
     PropImplication,
     PropNexttime,
+    PropStrongUntil,
     SeqConcat,
     SeqRepetition,
     SourceLoc,
@@ -182,6 +184,99 @@ def lower_bounded_implication(
             "max_cycles": str(hi),
             "start_offset": str(start_offset),
             "counter_width": str(counter_width),
+            "clock_signal": clock_signal,
+            "clock_edge": clock_edge,
+            "source_loc": str(node.source_loc),
+            "sva2rtl_version": __version__,
+            "original_text": original_text,
+        },
+        observed_signals=observed,
+        observed_signal_widths=widths,
+        observed_signal_signedness=signedness,
+        source_loc=node.source_loc,
+    )
+
+
+def lower_liveness_property(
+    node: SVANode,
+    *,
+    label: str | None,
+    original_text: str,
+    clock_signal: str = "clk",
+    clock_edge: str = "posedge",
+) -> CheckerNode | None:
+    """Lower the deliberately small true-liveness kernel to formal metadata."""
+    body, disable = _unwrap_disable(node)
+    antecedent: BoolExpr | None = None
+    eventual: BoolExpr | None = None
+    safety_left: BoolExpr | None = None
+    safety_with = False
+    start_offset = 0
+    obligation_kind = "eventually"
+
+    if isinstance(body, PropEventually) and isinstance(body.body, BoolExpr):
+        eventual = body.body
+    elif (
+        isinstance(body, PropImplication)
+        and isinstance(body.antecedent, BoolExpr)
+        and isinstance(body.consequent, PropEventually)
+        and isinstance(body.consequent.body, BoolExpr)
+    ):
+        antecedent = body.antecedent
+        eventual = body.consequent.body
+        start_offset = 0 if body.overlapping else 1
+    elif (
+        isinstance(body, PropStrongUntil)
+        and isinstance(body.left, BoolExpr)
+        and isinstance(body.right, BoolExpr)
+    ):
+        eventual = body.right
+        safety_left = body.left
+        safety_with = body.with_
+        obligation_kind = "strong-until"
+    else:
+        return None
+
+    expressions = (
+        ((antecedent,) if antecedent is not None else ())
+        + ((safety_left,) if safety_left is not None else ())
+        + (eventual,)
+        + ((disable,) if disable is not None else ())
+    )
+    aliases, observed, widths, signedness = _typed_aliases(expressions)
+    rendered_eventual = _render(eventual, aliases)
+    rendered_antecedent = (
+        _render(antecedent, aliases) if antecedent is not None else "1'b1"
+    )
+    rendered_disable = _render(disable, aliases) if disable is not None else "1'b0"
+    rendered_left = _render(safety_left, aliases) if safety_left is not None else None
+    if (
+        rendered_eventual is None
+        or rendered_antecedent is None
+        or rendered_disable is None
+    ):
+        return None
+    safety_expr = ""
+    if rendered_left is not None:
+        safety_expr = (
+            rendered_left
+            if safety_with
+            else f"(({rendered_left}) || ({rendered_eventual}))"
+        )
+
+    module_name = module_name_from_label(label, original_text)
+    return CheckerNode(
+        template_name="formal_liveness",
+        module_name=module_name,
+        params={
+            "module_name": module_name,
+            "antecedent_expr": rendered_antecedent,
+            "eventual_expr": rendered_eventual,
+            "disable_expr": rendered_disable,
+            "safety_expr": safety_expr,
+            "uses_witness": "1" if antecedent is not None else "0",
+            "start_offset": str(start_offset),
+            "obligation_kind": obligation_kind,
             "clock_signal": clock_signal,
             "clock_edge": clock_edge,
             "source_loc": str(node.source_loc),
