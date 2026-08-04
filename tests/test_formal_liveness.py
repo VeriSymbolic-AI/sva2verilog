@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 from sva2rtl.composer import compose
-from sva2rtl.errors import UnsupportedConstruct
+from sva2rtl.errors import SvaCompileError, UnsupportedConstruct
 from sva2rtl.formal_flow import (
     CoverStatus,
     FormalRunConfig,
@@ -211,6 +211,28 @@ def test_fairness_is_explicit_hashed_and_changes_evidence(tmp_path: Path) -> Non
     result = run_formal_bundle(with_fair)
     assert result.status is FormalStatus.UNKNOWN
     assert result.cover_status is CoverStatus.REACHED
+
+
+def test_vector_fairness_signal_rejects_instead_of_truncating(tmp_path: Path) -> None:
+    dut, prop = _sources(tmp_path)
+    dut.write_text(
+        "module dut(input logic clk, input logic rst_n, input logic req, "
+        "input logic hold, input logic [1:0] ready, output logic ack);\n"
+        "  assign ack = ready[0];\n"
+        "endmodule\n",
+        encoding="utf-8",
+    )
+    config = FormalRunConfig(
+        dut_sources=(dut,),
+        property_file=prop,
+        property_name="p",
+        top="dut",
+        output_dir=tmp_path / "evidence",
+        fairness_signals=("ready",),
+    )
+
+    with pytest.raises(SvaCompileError, match="fairness.*type mismatch"):
+        build_formal_bundle(config)
 
 
 @pytest.mark.skipif(

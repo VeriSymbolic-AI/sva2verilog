@@ -110,7 +110,7 @@ finite PASS output; “monitor implemented” never implies a DUT proof.
 | Restricted automatic scalar local capture | Formal-only symbolic witness with private `captured_q` | real good/bad/changing-value solver cases | Rejected | explicit composer rejection | exact one-local/fixed-delay whitelist |
 | Multi-clock temporal composition | `UNSUPPORTED` in single-clock formal profile | sanitized boundary bundle, empty Yosys inputs | Experimental trusted 2-DFF path only | structural/synthesis/lint, no event-delivery proof | split per domain; prove handoff; separate CDC signoff |
 | X/Z-dependent semantics | `UNSUPPORTED` in two-state profile | real X/Z negative sources and hashed profile | Rejected | N/A | no implicit four-state-to-two-state coercion |
-| General locals, dynamic/unbounded/nested unsupported forms | `UNSUPPORTED` | precise negative tests and boundary evidence | Rejected | N/A | checked decomposition or another semantic frontend |
+| General locals, dynamic/unbounded/nested unsupported forms | `UNSUPPORTED`, or replay-bound external decomposition evidence | precise negative tests; schema-v2 subproof/relation bundles require PROVEN+REACHED, manifest/input hashes, checker and formal-context binding, PASS logs, and deterministic replay | Rejected | N/A | the relation model is a reviewed trusted boundary; fabricated status JSON, BMC aggregation, mismatched proof context, and mismatched DUT/property types reject |
 
 No row is promoted to `Fully supported` merely because both columns contain
 some evidence. Promotion still requires every applicable row-specific link and

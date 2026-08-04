@@ -60,18 +60,18 @@ qualification is executing.
 
 ## Latest Local Qualification
 
-- Complete Icarus/default suite: 1702 passed, 3 conditional skips, 1 expected
+- Complete Icarus/default suite: 1722 passed, 3 conditional skips, 1 expected
   dynamically classified k-induction xfail.
 - Verilator simulation/fast differential selection: 174 passed, 1 selected-out
   skip; explicit fixed-seed fast differential: 16 passed per backend.
 - Rotating-seed slow differential: 1 passed per backend.
-- Full Formal selection: 204 passed, 2 conditional live-solver skips, 1 expected
+- Full Formal selection: 212 passed, 2 conditional live-solver skips, 1 expected
   k-induction xfail; generated RTL synthesis/lint: 133 passed.
 - Critical mutation modules: bool semantics 25/25, behavioral oracle 135/135,
   composer 51/51, AST importer 124/124; RTL template mutations 12/12.
-- Aggregate branch coverage: 86.98%; formal CLI/flow/lowering are independently
+- Aggregate branch coverage: 86.89%; formal CLI/flow/lowering are independently
   gated at 85%/80%/75% minimums.
-- Python 3.14 semantic axis: 1309 passed; wheel/sdist external-install smoke and
+- Python 3.14 semantic axis: 1321 passed; wheel/sdist external-install smoke and
   source/archive privacy scans passed.
 - Ruff, strict mypy, lock check, shell syntax, and diff check passed.
 
@@ -85,7 +85,7 @@ qualification is executing.
 
 ## Next Work
 
-Push the final anonymous main commit, then require exact-head success for push
+Commit and push the final anonymous main candidate, then require exact-head success for push
 CI, nightly differential/mutation, and all eight Full Formal shards. Linux must
 run both real live good/bad cases with no skip before EVID-05 can close.
 

@@ -21,13 +21,14 @@ import shutil
 import signal
 import subprocess
 import time
+from collections.abc import Iterator
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from sva2rtl import ir as sva_ir
-from sva2rtl.ast_importer import import_all_assertions
+from sva2rtl.ast_importer import import_all_assertions, parse_slang_integral_type
 from sva2rtl.composer import compose
 from sva2rtl.emitter import (
     emit_all,
@@ -40,7 +41,7 @@ from sva2rtl.formal_lowering import (
     lower_liveness_property,
     lower_local_capture,
 )
-from sva2rtl.frontend import invoke_slang
+from sva2rtl.frontend import SlangCompilationContext, invoke_slang
 from sva2rtl.ir import CheckerNode
 from sva2rtl.normalizer import normalize
 from sva2rtl.optimizer import optimize
@@ -51,6 +52,8 @@ _PASS_RE = re.compile(r"(?:DONE\s*\(PASS|STATUS:\s*PASS(?:ED)?)", re.IGNORECASE)
 _FAIL_RE = re.compile(
     r"(?:DONE\s*\(FAIL|STATUS:\s*FAIL(?:ED)?|counterexample)", re.IGNORECASE
 )
+_EVIDENCE_MARKER = ".sva2rtl-evidence"
+_EVIDENCE_MARKER_TEXT = "sva2rtl formal evidence directory\n"
 
 
 class FormalMode(StrEnum):
@@ -175,6 +178,14 @@ class FormalRunConfig:
         for source in (*self.dut_sources, self.property_file):
             if not source.is_file():
                 raise ValueError(f"input source does not exist: {source}")
+        for source in self.dut_sources:
+            if source.resolve() == self.property_file.resolve() or os.path.samefile(
+                source, self.property_file
+            ):
+                raise ValueError(
+                    "DUT and property inputs must be separate files; the original "
+                    "SVA source may never enter Yosys inputs"
+                )
         if (
             self.decomposition_certificate is not None
             and not self.decomposition_certificate.is_file()
@@ -230,11 +241,17 @@ class FormalResult:
     cover_status: CoverStatus = CoverStatus.NOT_RUN
     cover_returncode: int | None = None
     cover_log_path: str | None = None
+    manifest_sha256: str = ""
+    property_sha256: str = ""
+    checker: str = ""
+    replay_commands: tuple[tuple[str, ...], ...] = ()
+    log_sha256: str = ""
+    cover_log_sha256: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         """Return a stable JSON-compatible representation."""
         return {
-            "schema_version": 1,
+            "schema_version": 2,
             "status": self.status.value,
             "mode": self.mode.value,
             "message": self.message,
@@ -246,6 +263,12 @@ class FormalResult:
             "cover_status": self.cover_status.value,
             "cover_returncode": self.cover_returncode,
             "cover_log_path": self.cover_log_path,
+            "manifest_sha256": self.manifest_sha256,
+            "property_sha256": self.property_sha256,
+            "checker": self.checker,
+            "replay_commands": [list(command) for command in self.replay_commands],
+            "log_sha256": self.log_sha256,
+            "cover_log_sha256": self.cover_log_sha256,
         }
 
 
@@ -263,11 +286,22 @@ class _DecompositionMember:
 class _ValidatedDecomposition:
     relation: str
     original_property_sha256: str
+    dut_source_sha256s: tuple[str, ...]
     source_certificate_sha256: str
     relation_checker: str
     relation_proof_artifact_path: Path
     relation_proof_artifact_sha256: str
     members: tuple[_DecompositionMember, ...]
+
+
+@dataclass(frozen=True)
+class _DutSignal:
+    """One elaborated signal visible in the selected DUT top scope."""
+
+    name: str
+    width: int
+    signed: bool
+    kind: str
 
 
 def _sha256(path: Path) -> str:
@@ -276,6 +310,177 @@ def _sha256(path: Path) -> str:
         for block in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(block)
     return digest.hexdigest()
+
+
+def _walk_ast(value: object) -> Iterator[dict[str, Any]]:
+    """Yield every dictionary node from a slang JSON value."""
+    if isinstance(value, dict):
+        yield value
+        for child in value.values():
+            yield from _walk_ast(child)
+    elif isinstance(value, list):
+        for child in value:
+            yield from _walk_ast(child)
+
+
+def _dut_top_body(ast: dict[str, object], top: str) -> dict[str, object]:
+    design = ast.get("design")
+    if not isinstance(design, dict):
+        raise SvaCompileError(message="slang DUT AST is missing the design root")
+    members = design.get("members")
+    if not isinstance(members, list):
+        raise SvaCompileError(message="slang DUT AST is missing top-level instances")
+    matches = [
+        member
+        for member in members
+        if isinstance(member, dict)
+        and member.get("kind") == "Instance"
+        and member.get("name") == top
+    ]
+    if len(matches) != 1 or not isinstance(matches[0].get("body"), dict):
+        raise SvaCompileError(
+            message=f"formal DUT contract requires exactly one elaborated top {top!r}"
+        )
+    return cast(dict[str, object], matches[0]["body"])
+
+
+def _elaborate_dut_signals(config: FormalRunConfig) -> dict[str, _DutSignal]:
+    """Elaborate the DUT independently and reject assertion-bearing inputs."""
+    ast = invoke_slang(
+        config.dut_sources[0],
+        config.slang_path,
+        context=SlangCompilationContext(
+            source_files=config.dut_sources[1:],
+            top_modules=(config.top,),
+        ),
+    )
+    for node in _walk_ast(ast):
+        node_kind = node.get("kind")
+        if isinstance(node_kind, str) and "Assertion" in node_kind:
+            assertion_kind = str(node.get("assertionKind", "concurrent assertion"))
+            raise SvaCompileError(
+                message=(
+                    f"DUT sources must be assertion-free; found {assertion_kind} "
+                    f"({node_kind}). "
+                    "Keep the original SVA only in --property-file so it cannot "
+                    "enter the Yosys model."
+                )
+            )
+
+    body = _dut_top_body(ast, config.top)
+    members = body.get("members")
+    if not isinstance(members, list):
+        raise SvaCompileError(message=f"DUT top {config.top!r} has no visible members")
+    signals: dict[str, _DutSignal] = {}
+    for member in members:
+        if (
+            not isinstance(member, dict)
+            or member.get("kind") not in {"Port", "Variable", "Net"}
+            or not isinstance(member.get("name"), str)
+            or not member["name"]
+        ):
+            continue
+        name = member["name"]
+        type_text = member.get("type")
+        if not isinstance(type_text, str):
+            continue
+        width, signed = parse_slang_integral_type(type_text)
+        candidate = _DutSignal(name, width, signed, str(member["kind"]))
+        previous = signals.get(name)
+        if previous is not None and (previous.width, previous.signed) != (
+            width,
+            signed,
+        ):
+            raise SvaCompileError(
+                message=f"DUT signal {name!r} has inconsistent elaborated types"
+            )
+        signals[name] = candidate
+    return signals
+
+
+def _validate_dut_contract(
+    config: FormalRunConfig,
+    checker: CheckerNode,
+) -> dict[str, Any]:
+    """Fail before proof when property and DUT signal contracts differ."""
+    dut_signals = _elaborate_dut_signals(config)
+    widths = observed_signal_widths(checker)
+    signedness = observed_signal_signedness(checker)
+    checked: list[dict[str, Any]] = []
+
+    def require(
+        signal: str,
+        *,
+        role: str,
+        expected_width: int,
+        expected_signed: bool | None,
+        property_port: str | None = None,
+    ) -> None:
+        actual = dut_signals.get(signal)
+        if actual is None:
+            raise SvaCompileError(
+                message=f"formal {role} signal {signal!r} does not exist in DUT top {config.top!r}"
+            )
+        signed_mismatch = (
+            expected_signed is not None and actual.signed != expected_signed
+        )
+        if actual.width != expected_width or signed_mismatch:
+            expected_type = (
+                f"width={expected_width}"
+                + (f", signed={expected_signed}" if expected_signed is not None else "")
+            )
+            raise SvaCompileError(
+                message=(
+                    f"formal {role} signal {signal!r} type mismatch: property expects "
+                    f"{expected_type}; DUT elaborates width={actual.width}, "
+                    f"signed={actual.signed}. Refusing a silently truncated or "
+                    "extended proof model."
+                )
+            )
+        checked.append(
+            {
+                "role": role,
+                "property_port": property_port,
+                "dut_signal": signal,
+                "width": actual.width,
+                "signed": actual.signed,
+                "kind": actual.kind,
+            }
+        )
+
+    require(
+        config.clock,
+        role="clock",
+        expected_width=1,
+        expected_signed=None,
+    )
+    require(
+        config.reset,
+        role="reset",
+        expected_width=1,
+        expected_signed=None,
+    )
+    for port, observed_signal in checker.observed_signals:
+        require(
+            observed_signal,
+            role="property-observation",
+            property_port=port,
+            expected_width=widths.get(port, 1),
+            expected_signed=signedness.get(port, False),
+        )
+    for fairness_signal in config.fairness_signals:
+        require(
+            fairness_signal,
+            role="fairness",
+            expected_width=1,
+            expected_signed=None,
+        )
+    return {
+        "schema_version": 1,
+        "top": config.top,
+        "status": "MATCHED",
+        "signals": checked,
+    }
 
 
 def _require_sha256(value: object, label: str) -> str:
@@ -318,21 +523,117 @@ def _require_proven_artifact(path: Path, label: str) -> dict[str, Any]:
         raise ValueError(f"{label} must be a JSON result artifact") from exc
     if not isinstance(payload, dict) or payload.get("status") != FormalStatus.PROVEN.value:
         raise ValueError(f"{label} does not report PROVEN")
+    if payload.get("schema_version") != 2:
+        raise ValueError(f"{label} is not a current replay-bound result artifact")
+    if payload.get("mode") != FormalMode.PROVE.value:
+        raise ValueError(f"{label} is not an unbounded prove result")
+    if payload.get("cover_status") != CoverStatus.REACHED.value:
+        raise ValueError(f"{label} does not have complete cover evidence")
+    if payload.get("returncode") != 0 or payload.get("cover_returncode") != 0:
+        raise ValueError(f"{label} does not record successful proof and cover exits")
+    manifest_path = path.parent / "manifest.json"
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"{label} is missing its replay manifest") from exc
+    if not isinstance(manifest, dict):
+        raise ValueError(f"{label} replay manifest must be a JSON object")
+    if payload.get("manifest_sha256") != _sha256(manifest_path):
+        raise ValueError(f"{label} is not bound to its replay manifest")
+    _verify_manifest_artifacts(path.parent, manifest, label)
+    if not isinstance(manifest.get("interface_contract"), dict):
+        raise ValueError(f"{label} predates mandatory DUT/property interface checking")
+    if manifest.get("checker") != payload.get("checker"):
+        raise ValueError(f"{label} checker is not bound to its replay manifest")
+    property_entry = manifest.get("property")
+    if not isinstance(property_entry, dict) or payload.get("property_sha256") != property_entry.get(
+        "sha256"
+    ):
+        raise ValueError(f"{label} is not bound to its property input")
+    replay_commands = payload.get("replay_commands")
+    if replay_commands != [
+        ["sby", "-f", "formal.sby"],
+        ["sby", "-f", "formal_cover.sby"],
+    ]:
+        raise ValueError(f"{label} does not declare deterministic replay commands")
+    for key, hash_key in (
+        ("log_path", "log_sha256"),
+        ("cover_log_path", "cover_log_sha256"),
+    ):
+        relative = payload.get(key)
+        if not isinstance(relative, str) or not relative:
+            raise ValueError(f"{label} is missing {key}")
+        log_path = (path.parent / relative).resolve()
+        try:
+            log_path.relative_to(path.parent.resolve())
+        except ValueError as exc:
+            raise ValueError(f"{label} {key} escapes its replay bundle") from exc
+        if not log_path.is_file() or _PASS_RE.search(
+            log_path.read_text(encoding="utf-8", errors="replace")
+        ) is None:
+            raise ValueError(f"{label} {key} does not contain PASS evidence")
+        if payload.get(hash_key) != _sha256(log_path):
+            raise ValueError(f"{label} {key} hash does not match")
+    payload["_verified_manifest"] = manifest
     return payload
 
 
 def _validate_decomposition_certificate(
     certificate: Path,
     *,
-    original_property_sha256: str,
+    config: FormalRunConfig,
+    expected_original_property_sha256: str | None = None,
+    expected_dut_source_sha256s: tuple[str, ...] | None = None,
 ) -> _ValidatedDecomposition:
     """Validate every decomposition claim against files and proof artifacts."""
+    original_property_sha256 = (
+        expected_original_property_sha256
+        if expected_original_property_sha256 is not None
+        else _sha256(config.property_file)
+    )
+    dut_source_sha256s = (
+        expected_dut_source_sha256s
+        if expected_dut_source_sha256s is not None
+        else tuple(_sha256(source) for source in config.dut_sources)
+    )
+    expected_context: dict[str, object] = {
+        "top": config.top,
+        "clock": config.clock,
+        "reset": config.reset,
+        "mode": FormalMode.PROVE.value,
+        "attempt_mode": config.attempt_mode.value,
+        "logic_semantics": config.logic_semantics.value,
+        "fairness_signals": list(config.fairness_signals),
+    }
+
+    def require_context(result: dict[str, Any], label: str) -> None:
+        manifest = result.get("_verified_manifest")
+        manifest_config = manifest.get("config") if isinstance(manifest, dict) else None
+        if not isinstance(manifest_config, dict) or any(
+            manifest_config.get(key) != value for key, value in expected_context.items()
+        ):
+            raise ValueError(
+                f"{label} formal context does not match current top, clock, reset, "
+                "prove mode, attempt model, logic semantics, and fairness assumptions"
+            )
+
+    def require_dut_inputs(result: dict[str, Any], label: str) -> None:
+        manifest = result.get("_verified_manifest")
+        raw_sources = manifest.get("dut_sources") if isinstance(manifest, dict) else None
+        if (
+            not isinstance(raw_sources, list)
+            or not all(isinstance(entry, dict) for entry in raw_sources)
+            or [entry.get("sha256") for entry in raw_sources]
+            != list(dut_source_sha256s)
+        ):
+            raise ValueError(f"{label} DUT inputs do not match current inputs")
+
     try:
         payload = json.loads(certificate.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise ValueError(f"invalid decomposition certificate: {exc}") from exc
-    if not isinstance(payload, dict) or payload.get("schema_version") != 1:
-        raise ValueError("decomposition certificate requires schema_version 1")
+    if not isinstance(payload, dict) or payload.get("schema_version") != 2:
+        raise ValueError("decomposition certificate requires schema_version 2")
     relation = payload.get("relation")
     if relation not in {"equivalent", "stronger"}:
         raise ValueError("decomposition relation must be equivalent or stronger")
@@ -341,6 +642,9 @@ def _validate_decomposition_certificate(
     )
     if claimed_original != original_property_sha256:
         raise ValueError("decomposition original property hash does not match input")
+    claimed_dut_hashes = payload.get("dut_source_sha256s")
+    if claimed_dut_hashes != list(dut_source_sha256s):
+        raise ValueError("decomposition DUT source hashes do not match current inputs")
     if payload.get("relation_status") != FormalStatus.PROVEN.value:
         raise ValueError("decomposition relation is not PROVEN")
     relation_checker = _require_checker(
@@ -360,6 +664,8 @@ def _validate_decomposition_certificate(
     relation_result = _require_proven_artifact(
         relation_proof_path, "decomposition relation proof artifact"
     )
+    require_context(relation_result, "decomposition relation proof artifact")
+    require_dut_inputs(relation_result, "decomposition relation proof artifact")
     raw_members = payload.get("subproperties")
     if not isinstance(raw_members, list) or not raw_members:
         raise ValueError("decomposition certificate requires non-empty subproperties")
@@ -397,6 +703,8 @@ def _validate_decomposition_certificate(
         proof_result = _require_proven_artifact(
             proof_path, f"proof artifact for {identifier}"
         )
+        require_context(proof_result, f"proof artifact for {identifier}")
+        require_dut_inputs(proof_result, f"proof artifact for {identifier}")
         if proof_result.get("property_sha256") != property_sha256:
             raise ValueError(f"proof artifact is not bound to {identifier}")
         if proof_result.get("checker") != checker:
@@ -417,11 +725,13 @@ def _validate_decomposition_certificate(
         or relation_result.get("original_property_sha256") != claimed_original
         or relation_result.get("subproperty_sha256s") != expected_subproperty_hashes
         or relation_result.get("checker") != relation_checker
+        or relation_result.get("dut_source_sha256s") != list(dut_source_sha256s)
     ):
         raise ValueError("relation proof artifact is not bound to this decomposition")
     return _ValidatedDecomposition(
         relation=relation,
         original_property_sha256=claimed_original,
+        dut_source_sha256s=dut_source_sha256s,
         source_certificate_sha256=_sha256(certificate),
         relation_checker=relation_checker,
         relation_proof_artifact_path=relation_proof_path,
@@ -441,28 +751,168 @@ def _write_json(path: Path, value: dict[str, Any]) -> None:
     _write_text(path, json.dumps(value, indent=2, sort_keys=True) + "\n")
 
 
+def _result_binding(
+    bundle: Path,
+    manifest: dict[str, Any],
+    checker: str,
+    replay_commands: tuple[tuple[str, ...], ...] = (
+        ("sby", "-f", "formal.sby"),
+        ("sby", "-f", "formal_cover.sby"),
+    ),
+) -> dict[str, Any]:
+    if manifest.get("checker") != checker:
+        raise ValueError("formal manifest checker does not match result binding")
+    property_entry = manifest.get("property")
+    property_sha256 = (
+        str(property_entry.get("sha256", ""))
+        if isinstance(property_entry, dict)
+        else ""
+    )
+    return {
+        "manifest_sha256": _sha256(bundle / "manifest.json"),
+        "property_sha256": property_sha256,
+        "checker": checker,
+        "replay_commands": replay_commands,
+    }
+
+
+def _manifest_artifacts(value: object) -> Iterator[tuple[str, str]]:
+    """Yield every path/hash artifact pair in a manifest value."""
+    if isinstance(value, dict):
+        path = value.get("path")
+        sha256 = value.get("sha256")
+        if isinstance(path, str) and isinstance(sha256, str):
+            yield path, sha256
+        for child in value.values():
+            yield from _manifest_artifacts(child)
+    elif isinstance(value, list):
+        for child in value:
+            yield from _manifest_artifacts(child)
+
+
+def _verify_manifest_artifacts(
+    bundle_dir: Path,
+    manifest: dict[str, Any],
+    label: str = "formal evidence",
+) -> None:
+    bundle = bundle_dir.resolve()
+    for relative, expected_sha256 in _manifest_artifacts(manifest):
+        artifact = (bundle / relative).resolve()
+        try:
+            artifact.relative_to(bundle)
+        except ValueError as exc:
+            raise ValueError(f"{label} artifact escapes its bundle: {relative}") from exc
+        if not artifact.is_file():
+            raise ValueError(f"{label} artifact is missing: {relative}")
+        if _sha256(artifact) != expected_sha256:
+            raise ValueError(f"{label} artifact hash changed: {relative}")
+
+
+def _verify_evidence_integrity(evidence: FormalEvidence) -> None:
+    """Rehash every declared proof input immediately before solver execution."""
+    manifest_path = evidence.bundle_dir / "manifest.json"
+    try:
+        disk_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("formal manifest is missing or invalid before replay") from exc
+    if disk_manifest != evidence.manifest:
+        raise ValueError("formal manifest changed after bundle construction")
+    _verify_manifest_artifacts(evidence.bundle_dir, disk_manifest, "formal replay")
+
+    property_entry = disk_manifest.get("property")
+    property_path = property_entry.get("path") if isinstance(property_entry, dict) else None
+    yosys_inputs = disk_manifest.get("yosys_inputs")
+    if not isinstance(yosys_inputs, list) or not all(
+        isinstance(item, str) for item in yosys_inputs
+    ):
+        raise ValueError("formal manifest has invalid Yosys input inventory")
+    if isinstance(property_path, str) and property_path in yosys_inputs:
+        raise ValueError("original SVA property appears in Yosys inputs")
+
+
+def _manifest_input_hashes(
+    manifest: dict[str, Any],
+) -> tuple[str, tuple[str, ...]]:
+    """Return strictly validated property and ordered DUT hashes."""
+    property_entry = manifest.get("property")
+    if not isinstance(property_entry, dict):
+        raise ValueError("formal manifest is missing its property input")
+    property_sha256 = _require_sha256(
+        property_entry.get("sha256"), "formal manifest property hash"
+    )
+    raw_dut_sources = manifest.get("dut_sources")
+    if not isinstance(raw_dut_sources, list) or not all(
+        isinstance(entry, dict) for entry in raw_dut_sources
+    ):
+        raise ValueError("formal manifest has invalid DUT source inventory")
+    dut_source_sha256s = tuple(
+        _require_sha256(entry.get("sha256"), "formal manifest DUT source hash")
+        for entry in raw_dut_sources
+    )
+    if not dut_source_sha256s:
+        raise ValueError("formal manifest requires at least one DUT source")
+    return property_sha256, dut_source_sha256s
+
+
 def _materialize_decomposition(
     bundle: Path,
     decomposition: _ValidatedDecomposition,
 ) -> dict[str, str]:
     """Copy verified inputs under stable names and emit a path-sanitized certificate."""
+    def copy_replay_bundle(result_path: Path, relative_dir: str) -> str:
+        source_dir = result_path.parent.resolve()
+        target = bundle / relative_dir
+        target.mkdir(parents=True, exist_ok=True)
+        manifest = json.loads((source_dir / "manifest.json").read_text(encoding="utf-8"))
+        if not isinstance(manifest, dict):
+            raise ValueError("decomposition replay manifest must be a JSON object")
+        shutil.copyfile(source_dir / "manifest.json", target / "manifest.json")
+        shutil.copyfile(result_path, target / "result.json")
+        for artifact_path, _artifact_sha256 in _manifest_artifacts(manifest):
+            source = (source_dir / artifact_path).resolve()
+            source.relative_to(source_dir)
+            destination = target / artifact_path
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(source, destination)
+        result_payload = json.loads(result_path.read_text(encoding="utf-8"))
+        if not isinstance(result_payload, dict):
+            raise ValueError("decomposition replay result must be a JSON object")
+        for key in ("log_path", "cover_log_path"):
+            log_relative = result_payload.get(key)
+            if isinstance(log_relative, str) and log_relative:
+                source = (source_dir / log_relative).resolve()
+                source.relative_to(source_dir)
+                destination = target / log_relative
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(source, destination)
+        for trace_relative in result_payload.get("trace_paths", []):
+            if isinstance(trace_relative, str):
+                source = (source_dir / trace_relative).resolve()
+                source.relative_to(source_dir)
+                destination = target / trace_relative
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(source, destination)
+        return (Path(relative_dir) / "result.json").relative_to("evidence").as_posix()
+
     members: list[dict[str, Any]] = []
     target_dir = bundle / "evidence" / "decomposition"
     target_dir.mkdir(parents=True, exist_ok=True)
-    relation_suffix = decomposition.relation_proof_artifact_path.suffix or ".json"
-    relation_relative = f"evidence/decomposition/relation_proof{relation_suffix}"
-    shutil.copyfile(
-        decomposition.relation_proof_artifact_path, bundle / relation_relative
+    relation_relative = copy_replay_bundle(
+        decomposition.relation_proof_artifact_path,
+        "evidence/decomposition/relation_bundle",
     )
     for index, member in enumerate(decomposition.members):
         property_suffix = member.property_path.suffix or ".sv"
-        proof_suffix = member.proof_artifact_path.suffix or ".json"
-        property_relative = f"evidence/decomposition/subproperty_{index:03d}{property_suffix}"
-        proof_relative = f"evidence/decomposition/proof_{index:03d}{proof_suffix}"
-        property_target = bundle / property_relative
-        proof_target = bundle / proof_relative
+        property_bundle_relative = (
+            f"evidence/decomposition/subproperty_{index:03d}{property_suffix}"
+        )
+        property_relative = Path(property_bundle_relative).relative_to("evidence").as_posix()
+        proof_relative = copy_replay_bundle(
+            member.proof_artifact_path,
+            f"evidence/decomposition/proof_bundle_{index:03d}",
+        )
+        property_target = bundle / property_bundle_relative
         shutil.copyfile(member.property_path, property_target)
-        shutil.copyfile(member.proof_artifact_path, proof_target)
         members.append(
             {
                 "id": member.identifier,
@@ -475,7 +925,7 @@ def _materialize_decomposition(
             }
         )
     normalized = {
-        "schema_version": 1,
+        "schema_version": 2,
         "relation": decomposition.relation,
         "relation_status": FormalStatus.PROVEN.value,
         "relation_checker": decomposition.relation_checker,
@@ -484,6 +934,7 @@ def _materialize_decomposition(
             decomposition.relation_proof_artifact_sha256
         ),
         "original_property_sha256": decomposition.original_property_sha256,
+        "dut_source_sha256s": list(decomposition.dut_source_sha256s),
         "source_certificate_sha256": decomposition.source_certificate_sha256,
         "subproperties": members,
     }
@@ -1338,21 +1789,150 @@ def _render_sby(
     )
 
 
-def _prepare_output(config: FormalRunConfig) -> Path:
+def _decomposition_input_paths(
+    config: FormalRunConfig,
+    decomposition: _ValidatedDecomposition | None = None,
+) -> tuple[Path, ...]:
+    paths: list[Path] = []
+    if config.decomposition_certificate is not None:
+        paths.append(config.decomposition_certificate)
+    if decomposition is not None:
+        paths.append(decomposition.relation_proof_artifact_path)
+        for member in decomposition.members:
+            paths.extend((member.property_path, member.proof_artifact_path))
+    return tuple(paths)
+
+
+def _prepare_output(
+    config: FormalRunConfig,
+    *,
+    decomposition: _ValidatedDecomposition | None = None,
+) -> Path:
     output = config.output_dir.resolve()
+    source_paths = tuple(
+        source.resolve()
+        for source in (
+            *config.dut_sources,
+            config.property_file,
+            *_decomposition_input_paths(config, decomposition),
+        )
+    )
+    filesystem_root = Path(output.anchor).resolve()
+    dangerous_exact = {filesystem_root, Path.cwd().resolve(), Path.home().resolve()}
+    if output in dangerous_exact:
+        raise ValueError(f"refusing dangerous formal evidence output directory: {output}")
+    for source in source_paths:
+        if output == source or output in source.parents:
+            raise ValueError(
+                f"formal evidence output {output} contains input source {source}; "
+                "choose a dedicated leaf directory"
+            )
     if output.exists():
-        nonempty = not output.is_dir() or any(output.iterdir())
+        if not output.is_dir():
+            raise FileExistsError(
+                f"formal evidence output exists and is not a directory: {output}"
+            )
+        nonempty = any(output.iterdir())
         if nonempty and not config.force:
             raise FileExistsError(
                 f"formal evidence directory is not empty: {output}; use --force"
             )
         if config.force:
-            if output.is_dir():
+            marker = output / _EVIDENCE_MARKER
+            if nonempty and (
+                not marker.is_file()
+                or marker.read_text(encoding="utf-8") != _EVIDENCE_MARKER_TEXT
+            ):
+                raise FileExistsError(
+                    f"refusing --force for unmarked directory: {output}; only a "
+                    "previous sva2rtl formal evidence directory can be replaced"
+                )
+            if nonempty:
                 shutil.rmtree(output)
-            else:
-                output.unlink()
     output.mkdir(parents=True, exist_ok=True)
+    _write_text(output / _EVIDENCE_MARKER, _EVIDENCE_MARKER_TEXT)
     return output
+
+
+def _build_verified_decomposition_bundle(
+    config: FormalRunConfig,
+    decomposition: _ValidatedDecomposition,
+    original_error: UnsupportedConstruct,
+) -> FormalEvidence:
+    """Aggregate replay-bound proofs when the original shape is unsupported."""
+    if config.mode is not FormalMode.PROVE:
+        raise ValueError("verified decomposition aggregation requires --mode prove")
+    bundle = _prepare_output(config, decomposition=decomposition)
+    evidence_dir = bundle / "evidence"
+    evidence_dir.mkdir(parents=True, exist_ok=True)
+    property_copy = evidence_dir / "property.sv"
+    shutil.copyfile(config.property_file, property_copy)
+    dut_manifest: list[dict[str, str]] = []
+    for index, source in enumerate(config.dut_sources):
+        relative = f"evidence/dut_{index:03d}.sv"
+        copied = bundle / relative
+        shutil.copyfile(source, copied)
+        dut_manifest.append({"path": relative, "sha256": _sha256(copied)})
+    decomposition_entry = _materialize_decomposition(bundle, decomposition)
+    manifest: dict[str, Any] = {
+        "schema_version": 1,
+        "backend": "verified-decomposition",
+        "checker": decomposition.relation_checker,
+        "property_class": PropertyClass.UNSUPPORTED.value,
+        "config": {
+            "top": config.top,
+            "property": config.property_name,
+            "clock": config.clock,
+            "reset": config.reset,
+            "mode": config.mode.value,
+            "attempt_mode": config.attempt_mode.value,
+            "logic_semantics": config.logic_semantics.value,
+            "fairness_signals": list(config.fairness_signals),
+        },
+        "property": {
+            "path": "evidence/property.sv",
+            "sha256": _sha256(property_copy),
+        },
+        "dut_sources": dut_manifest,
+        "decomposition": decomposition_entry,
+        "original_boundary": {
+            "construct": original_error.construct_name,
+            "message": original_error.message,
+        },
+        "yosys_inputs": [],
+        "assumptions": [
+            "final result depends on replay-bound subproperty proofs and a "
+            "human-reviewed relation property whose proof bundle is bound here"
+        ],
+        "covers": [
+            "every imported subproperty proof and relation proof records REACHED cover"
+        ],
+    }
+    _write_json(bundle / "manifest.json", manifest)
+    binding = _result_binding(
+        bundle,
+        manifest,
+        decomposition.relation_checker,
+        replay_commands=(),
+    )
+    initial = FormalResult(
+        status=FormalStatus.UNKNOWN,
+        mode=config.mode,
+        message="verified decomposition bundle compiled but not yet aggregated",
+        returncode=None,
+        duration_seconds=0.0,
+        tool_versions={},
+        log_path="",
+        **binding,
+    )
+    _write_json(bundle / "result.json", initial.to_dict())
+    return FormalEvidence(
+        bundle,
+        config,
+        decomposition.relation_checker,
+        PropertyClass.UNSUPPORTED,
+        manifest,
+    )
 
 
 def build_formal_bundle(config: FormalRunConfig) -> FormalEvidence:
@@ -1361,13 +1941,19 @@ def build_formal_bundle(config: FormalRunConfig) -> FormalEvidence:
     if config.decomposition_certificate is not None:
         decomposition = _validate_decomposition_certificate(
             config.decomposition_certificate,
-            original_property_sha256=_sha256(config.property_file),
+            config=config,
         )
-    bundle = _prepare_output(config)
-    compilation = _compile_checker(config)
+    try:
+        compilation = _compile_checker(config)
+    except UnsupportedConstruct as exc:
+        if decomposition is None:
+            raise
+        return _build_verified_decomposition_bundle(config, decomposition, exc)
     checker = compilation.checker
     property_class = compilation.property_class
     backend = compilation.backend
+    interface_contract = _validate_dut_contract(config, checker)
+    bundle = _prepare_output(config, decomposition=decomposition)
 
     property_copy = bundle / "evidence" / "property.sv"
     property_copy.parent.mkdir(parents=True, exist_ok=True)
@@ -1522,11 +2108,14 @@ def build_formal_bundle(config: FormalRunConfig) -> FormalEvidence:
             "local_variable_semantics": "restricted-symbolic-witness-only",
         },
     )
+    interface_contract_path = bundle / "evidence" / "interface_contract.json"
+    _write_json(interface_contract_path, interface_contract)
     live_info = discover_live_backend(config) if backend == "open-live-suprove" else None
 
     manifest: dict[str, Any] = {
         "schema_version": 1,
         "backend": backend,
+        "checker": checker.module_name,
         "property_class": property_class.value,
         "config": {
             "top": config.top,
@@ -1565,6 +2154,10 @@ def build_formal_bundle(config: FormalRunConfig) -> FormalEvidence:
         "semantic_profile": {
             "path": "evidence/semantic_profile.json",
             "sha256": _sha256(semantic_profile_path),
+        },
+        "interface_contract": {
+            "path": "evidence/interface_contract.json",
+            "sha256": _sha256(interface_contract_path),
         },
         "yosys_inputs": consumed,
         "assumptions": [
@@ -1622,6 +2215,7 @@ def build_formal_bundle(config: FormalRunConfig) -> FormalEvidence:
     if decomposition is not None:
         manifest["decomposition"] = _materialize_decomposition(bundle, decomposition)
     _write_json(bundle / "manifest.json", manifest)
+    binding = _result_binding(bundle, manifest, checker.module_name)
     initial = FormalResult(
         status=FormalStatus.UNKNOWN,
         mode=config.mode,
@@ -1630,6 +2224,7 @@ def build_formal_bundle(config: FormalRunConfig) -> FormalEvidence:
         duration_seconds=0.0,
         tool_versions={},
         log_path="sby.log",
+        **binding,
     )
     _write_json(bundle / "result.json", initial.to_dict())
     return FormalEvidence(bundle, config, checker.module_name, property_class, manifest)
@@ -1685,6 +2280,7 @@ def write_unsupported_evidence(
     manifest: dict[str, Any] = {
         "schema_version": 1,
         "backend": "unsupported-boundary",
+        "checker": "unsupported-boundary",
         "property_class": PropertyClass.UNSUPPORTED.value,
         "status": FormalStatus.UNSUPPORTED.value,
         "config": {
@@ -1710,6 +2306,7 @@ def write_unsupported_evidence(
         "covers": [],
     }
     _write_json(bundle / "manifest.json", manifest)
+    binding = _result_binding(bundle, manifest, "unsupported-boundary")
     result = FormalResult(
         status=FormalStatus.UNSUPPORTED,
         mode=config.mode,
@@ -1718,6 +2315,10 @@ def write_unsupported_evidence(
         duration_seconds=0.0,
         tool_versions={"slang": _probe_version([config.slang_path, "--version"])},
         log_path="",
+        replay_commands=(),
+        manifest_sha256=binding["manifest_sha256"],
+        property_sha256=binding["property_sha256"],
+        checker=binding["checker"],
     )
     result_path = bundle / "result.json"
     _write_json(result_path, result.to_dict())
@@ -1869,8 +2470,55 @@ def _run_sby_process(
 
 def run_formal_bundle(evidence: FormalEvidence) -> FormalResult:
     """Run SBY for a compiled bundle and persist complete output and status."""
+    _verify_evidence_integrity(evidence)
     config = evidence.config
     started = time.monotonic()
+    if evidence.manifest.get("backend") == "verified-decomposition":
+        decomposition_entry = evidence.manifest.get("decomposition")
+        if not isinstance(decomposition_entry, dict) or not isinstance(
+            decomposition_entry.get("path"), str
+        ):
+            raise ValueError("verified decomposition manifest is missing its certificate")
+        property_sha256, dut_source_sha256s = _manifest_input_hashes(evidence.manifest)
+        _validate_decomposition_certificate(
+            evidence.bundle_dir / decomposition_entry["path"],
+            config=config,
+            expected_original_property_sha256=property_sha256,
+            expected_dut_source_sha256s=dut_source_sha256s,
+        )
+        log_text = (
+            "STATUS: PASSED\n"
+            "Replay-bound subproperty proof bundles and the human-reviewed "
+            "relation-model proof were integrity-validated.\n"
+        )
+        _write_text(evidence.bundle_dir / "aggregation.log", log_text)
+        binding = _result_binding(
+            evidence.bundle_dir,
+            evidence.manifest,
+            evidence.checker_module,
+            replay_commands=(),
+        )
+        result = FormalResult(
+            status=FormalStatus.PROVEN,
+            mode=FormalMode.PROVE,
+            message=(
+                "unsupported original property discharged by replay-bound proven "
+                "subproperties under a human-reviewed proven relation model"
+            ),
+            returncode=0,
+            duration_seconds=time.monotonic() - started,
+            tool_versions={"aggregator": "sva2rtl"},
+            log_path="aggregation.log",
+            trace_paths=_trace_paths(evidence.bundle_dir),
+            cover_status=CoverStatus.REACHED,
+            cover_returncode=0,
+            cover_log_path="aggregation.log",
+            log_sha256=_sha256(evidence.bundle_dir / "aggregation.log"),
+            cover_log_sha256=_sha256(evidence.bundle_dir / "aggregation.log"),
+            **binding,
+        )
+        _write_json(evidence.bundle_dir / "result.json", result.to_dict())
+        return result
     is_live = evidence.manifest.get("backend") == "open-live-suprove"
     live_info = discover_live_backend(config) if is_live else None
     if live_info is not None and not live_info.available:
@@ -1922,6 +2570,7 @@ def run_formal_bundle(evidence: FormalEvidence) -> FormalResult:
                 "safety proof completed, but critical cover evidence is not "
                 f"complete: {cover_message}"
             )
+    binding = _result_binding(evidence.bundle_dir, evidence.manifest, evidence.checker_module)
     result = FormalResult(
         status=status,
         mode=config.mode,
@@ -1939,6 +2588,11 @@ def run_formal_bundle(evidence: FormalEvidence) -> FormalResult:
         cover_status=cover_status,
         cover_returncode=cover_returncode,
         cover_log_path=cover_log_path,
+        log_sha256=_sha256(evidence.bundle_dir / "sby.log"),
+        cover_log_sha256=(
+            _sha256(evidence.bundle_dir / cover_log_path) if cover_log_path else ""
+        ),
+        **binding,
     )
     _write_json(evidence.bundle_dir / "result.json", result.to_dict())
     return result

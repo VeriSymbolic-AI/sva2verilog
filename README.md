@@ -209,6 +209,13 @@ Multi-clock properties never collapse to the primary clock; they produce
 handoff. One formal-only scalar local-capture shape is documented in the
 [formal guide](FORMAL_VERIFICATION.md#explicit-hard-boundary-profiles).
 
+Before any solver starts, sva2rtl separately elaborates the DUT with slang and
+requires every property observation to match the DUT signal's width and
+signedness. Clock, reset, and fairness conditions must be scalar. DUT files
+containing concurrent assertions, assumptions, or covers are rejected so the
+original SVA cannot re-enter Yosys through `--dut`. The checked contract is
+stored and hashed as `evidence/interface_contract.json`.
+
 ## CLI Reference
 
 | Flag | Description |

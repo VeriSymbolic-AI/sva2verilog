@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import json
+import shutil
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
-from sva2rtl.errors import UnsupportedConstruct
+from sva2rtl.errors import SvaCompileError, UnsupportedConstruct
 from sva2rtl.formal_flow import (
     FormalCompilation,
     FormalMode,
@@ -19,7 +21,9 @@ from sva2rtl.formal_flow import (
     classify_property,
     classify_sby_result,
     render_formal_bind,
+    run_formal_bundle,
     select_formal_backend,
+    write_unsupported_evidence,
 )
 from sva2rtl.ir import (
     BoolExpr,
@@ -249,3 +253,172 @@ def test_existing_nonempty_bundle_requires_force(tmp_path: Path) -> None:
     ):
         with pytest.raises(FileExistsError, match="--force"):
             build_formal_bundle(config)
+
+
+@pytest.mark.skipif(shutil.which("slang") is None, reason="slang is not installed")
+def test_dut_property_width_mismatch_rejects_before_false_proven(tmp_path: Path) -> None:
+    dut = tmp_path / "dut.sv"
+    prop = tmp_path / "property.sv"
+    dut.write_text(
+        "module dut(input logic clk, rst_n, output logic [1:0] data);\n"
+        "  assign data = 2;\n"
+        "endmodule\n",
+        encoding="utf-8",
+    )
+    prop.write_text(
+        "module spec(input logic clk, rst_n, input logic data);\n"
+        "  p: assert property (@(posedge clk) disable iff (!rst_n) !data);\n"
+        "endmodule\n",
+        encoding="utf-8",
+    )
+    config = FormalRunConfig(
+        dut_sources=(dut,),
+        property_file=prop,
+        property_name="p",
+        top="dut",
+        output_dir=tmp_path / "evidence",
+    )
+
+    with pytest.raises(SvaCompileError, match="type mismatch"):
+        build_formal_bundle(config)
+    assert not config.output_dir.exists()
+
+
+def test_same_dut_and_property_file_is_rejected(tmp_path: Path) -> None:
+    combined = tmp_path / "combined.sv"
+    combined.write_text(
+        "module dut(input logic clk, rst_n, a);\n"
+        "  p: assert property (@(posedge clk) a);\n"
+        "endmodule\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="must be separate"):
+        FormalRunConfig(
+            dut_sources=(combined,),
+            property_file=combined,
+            property_name="p",
+            top="dut",
+            output_dir=tmp_path / "evidence",
+        )
+
+
+@pytest.mark.skipif(shutil.which("slang") is None, reason="slang is not installed")
+def test_assertion_bearing_dut_is_rejected_before_yosys(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    config.dut_sources[0].write_text(
+        "module dut(input logic clk, rst_n, req, ack);\n"
+        "  hidden: assume property (@(posedge clk) req |-> ack);\n"
+        "endmodule\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(SvaCompileError, match="assertion-free"):
+        build_formal_bundle(config)
+    assert not config.output_dir.exists()
+
+
+@pytest.mark.skipif(shutil.which("slang") is None, reason="slang is not installed")
+@pytest.mark.parametrize("assertion_keyword", ["assume", "assert", "cover"])
+def test_immediate_assertion_bearing_dut_is_rejected_before_yosys(
+    tmp_path: Path,
+    assertion_keyword: str,
+) -> None:
+    config = _config(tmp_path)
+    config.dut_sources[0].write_text(
+        "module dut(input logic clk, rst_n, req, ack);\n"
+        "  always_ff @(posedge clk) begin\n"
+        f"    {assertion_keyword} (req);\n"
+        "  end\n"
+        "endmodule\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(SvaCompileError, match="assertion-free"):
+        build_formal_bundle(config)
+    assert not config.output_dir.exists()
+
+
+@pytest.mark.skipif(shutil.which("slang") is None, reason="slang is not installed")
+def test_force_refuses_unmarked_or_input_ancestor_directories(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    unrelated = tmp_path / "unmarked-output"
+    unrelated.mkdir()
+    sentinel = unrelated / "keep.txt"
+    sentinel.write_text("valuable\n", encoding="utf-8")
+
+    with pytest.raises(FileExistsError, match="unmarked"):
+        build_formal_bundle(replace(config, output_dir=unrelated, force=True))
+    assert sentinel.read_text(encoding="utf-8") == "valuable\n"
+
+    with pytest.raises(ValueError, match="contains input source"):
+        build_formal_bundle(replace(config, output_dir=tmp_path, force=True))
+    assert config.dut_sources[0].is_file() and config.property_file.is_file()
+
+
+@pytest.mark.skipif(shutil.which("slang") is None, reason="slang is not installed")
+def test_force_can_replace_only_a_previous_evidence_bundle(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    build_formal_bundle(config)
+    stale = config.output_dir / "stale.txt"
+    stale.write_text("old\n", encoding="utf-8")
+
+    rebuilt = build_formal_bundle(replace(config, force=True))
+
+    assert not stale.exists()
+    assert (rebuilt.bundle_dir / ".sva2rtl-evidence").is_file()
+
+
+@pytest.mark.skipif(shutil.which("slang") is None, reason="slang is not installed")
+def test_force_refuses_to_delete_a_decomposition_input(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    build_formal_bundle(config)
+    certificate = config.output_dir / "decomposition-input.json"
+    certificate.write_text("{}\n", encoding="utf-8")
+    protected = replace(
+        config,
+        decomposition_certificate=certificate,
+        force=True,
+    )
+
+    with pytest.raises(ValueError, match="contains input source"):
+        write_unsupported_evidence(
+            protected,
+            UnsupportedConstruct(
+                message="test-only unsupported shape",
+                construct_name="test-only boundary",
+            ),
+        )
+    assert certificate.is_file()
+
+
+@pytest.mark.skipif(shutil.which("slang") is None, reason="slang is not installed")
+def test_solver_refuses_modified_hashed_input(tmp_path: Path) -> None:
+    evidence = build_formal_bundle(_config(tmp_path))
+    bind = evidence.bundle_dir / "formal_bind.sv"
+    bind.write_text(bind.read_text(encoding="utf-8") + "// tampered\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="hash changed"):
+        run_formal_bundle(evidence)
+
+
+@pytest.mark.skipif(shutil.which("slang") is None, reason="slang is not installed")
+def test_result_and_manifest_bind_replay_to_checked_inputs(tmp_path: Path) -> None:
+    evidence = build_formal_bundle(_config(tmp_path))
+    result = json.loads(
+        (evidence.bundle_dir / "result.json").read_text(encoding="utf-8")
+    )
+    contract_entry = evidence.manifest["interface_contract"]
+    contract = json.loads(
+        (evidence.bundle_dir / contract_entry["path"]).read_text(encoding="utf-8")
+    )
+
+    assert result["schema_version"] == 2
+    assert result["manifest_sha256"]
+    assert result["property_sha256"] == evidence.manifest["property"]["sha256"]
+    assert result["checker"] == evidence.checker_module
+    assert result["replay_commands"] == [
+        ["sby", "-f", "formal.sby"],
+        ["sby", "-f", "formal_cover.sby"],
+    ]
+    assert contract["status"] == "MATCHED"

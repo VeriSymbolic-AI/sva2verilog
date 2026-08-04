@@ -182,6 +182,15 @@ tool discovery, logs, traces, and `result.json`. The original property is an
 evidence input only and is intentionally absent from `yosys_inputs`; Yosys sees
 the DUT plus generated formal primitives.
 
+This separation is enforced rather than assumed. Before bundle creation, slang
+elaborates the selected DUT top independently. Concurrent and immediate
+assert, assume, or cover statements in any `--dut` source are errors. Every
+observed signal must exist in the DUT and exactly match the property
+declaration's packed width and signedness; clock and reset must be one bit. The resulting
+`evidence/interface_contract.json` is hashed by the manifest. A property that
+declares a 1-bit signal while the DUT exposes a vector is rejected instead of
+silently proving only the low bit.
+
 ### Supported formal-only liveness shapes
 
 | Original property | Generated proof obligations |
@@ -219,6 +228,91 @@ Every fairness signal is identifier-validated, serialized to
 about the model, not a discovered fact about the design. A proof under an
 unjustified fairness assumption can hide a real deadlock, so it requires the
 same review as any other formal assumption.
+
+Fairness identifiers must resolve to a one-bit DUT signal. For a vector
+condition, create and review an explicit one-bit RTL predicate (for example a
+reduction OR) and use that predicate as the fairness signal; implicit vector
+truncation is never allowed.
+
+### Replay-bound decomposition for an unsupported original
+
+An unsupported original property can be discharged through engineering
+decomposition only when every evidence link is independently replayable. Pass a
+schema-version-2 JSON certificate with `--decomposition-certificate`. It must
+bind all of the following by SHA-256:
+
+- the unchanged original property and ordered DUT sources;
+- every subproperty source and its `sva2rtl-formal` `result.json`;
+- a separate equivalent-or-stronger relation proof for
+  `(and subproperties) -> original`;
+- the exact checker identities and ordered subproperty hashes.
+
+Each referenced result must be an unbounded `PROVEN` result with `REACHED`
+cover, zero proof/cover exit codes, a matching manifest hash, matching property
+and DUT hashes, a manifest-bound checker identity, deterministic replay
+commands, and PASS logs. Its selected top, clock, reset, unbounded proof mode,
+attempt model, two-state profile, and fairness assumptions must exactly match
+the aggregate run. The complete
+relation and member replay bundles are copied under
+`evidence/decomposition/`. A hand-written JSON file containing only
+`"status": "PROVEN"` is rejected.
+
+This aggregate route requires `--mode prove`; it never upgrades a BMC run into
+an unbounded result. If the original shape is unsupported but this chain validates, the original SVA
+is retained only as hashed evidence and the aggregate has empty `yosys_inputs`.
+The aggregator revalidates every copied proof before reporting `PROVEN`. This
+does not invent a decomposition or certify that a human-authored relation model
+expresses the intended requirement: the relation property itself remains a
+reviewed formal-model boundary, exactly like assumptions in any proof harness.
+Use a wrong relation model and the proof answers the wrong question.
+
+Certificate paths are relative to the certificate file. The minimal shape is:
+
+```json
+{
+  "schema_version": 2,
+  "relation": "equivalent",
+  "relation_status": "PROVEN",
+  "relation_checker": "sva_relation_checker",
+  "relation_proof_artifact_path": "relation-proof/result.json",
+  "relation_proof_artifact_sha256": "<sha256>",
+  "original_property_sha256": "<sha256>",
+  "dut_source_sha256s": ["<sha256-in---dut-order>"],
+  "subproperties": [
+    {
+      "id": "bounded_obligation_1",
+      "property_path": "properties/bounded_obligation_1.sv",
+      "property_sha256": "<sha256>",
+      "obligation_status": "PROVEN",
+      "checker": "sva_bounded_obligation_1",
+      "proof_artifact_path": "proof-1/result.json",
+      "proof_artifact_sha256": "<sha256>"
+    }
+  ]
+}
+```
+
+The relation result additionally records `relation`,
+`original_property_sha256`, ordered `subproperty_sha256s`, and ordered
+`dut_source_sha256s`; these must agree with the certificate. Create the proof
+and cover runs first, add the relation claim to that replay-bound result, then
+hash the final result file into the certificate. Changing any source, result,
+manifest, or log requires regenerating the certificate.
+
+After bundle construction, aggregation uses the copied and manifest-hashed
+property/DUT snapshot rather than reopening the caller's original paths. The
+bundle therefore remains inspectable and aggregatable if the workspace files
+move later; changing a copied bundle input still fails the pre-run hash gate.
+
+The result schema binds each normal proof to `manifest_sha256`,
+`property_sha256`, checker identity, and explicit replay commands. Inputs are
+rehashed immediately before solver execution; modifying a generated bind,
+source, project, profile, or manifest invalidates the run.
+
+`--force` can replace only a directory previously created by this formal
+workflow and carrying its private evidence marker. It refuses filesystem/home/
+working roots, DUT/property/decomposition-input ancestors, regular files, and
+arbitrary non-evidence directories.
 
 ### What happens without Super Prove?
 

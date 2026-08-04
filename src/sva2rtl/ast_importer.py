@@ -542,6 +542,23 @@ def _named_value_type(node: dict[str, Any], source_loc: SourceLoc) -> tuple[int,
     )
 
 
+def parse_slang_integral_type(
+    type_text: str,
+    source_loc: SourceLoc | None = None,
+) -> tuple[int, bool]:
+    """Return width and signedness for a supported slang AST integral type.
+
+    Formal DUT interface validation consumes the elaborated ``type`` strings
+    emitted by slang.  Keeping that interpretation here ensures property and
+    DUT types use one fail-closed implementation instead of two subtly
+    different parsers.
+    """
+    return _named_value_type(
+        {"type": type_text},
+        source_loc or SourceLoc("<dut-interface>", 0, 0),
+    )
+
+
 def _named_value_width(node: dict[str, Any], source_loc: SourceLoc) -> int:
     """Compatibility width projection used by scalar sampled-value checks."""
     width, _signed = _named_value_type(node, source_loc)

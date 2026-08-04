@@ -105,9 +105,16 @@ _EXIT_CODES = {
 @click.option(
     "--decomposition-certificate",
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
-    help="Checked JSON certificate for an equivalent/stronger property decomposition",
+    help=(
+        "Schema-v2 replay-bound certificate for an equivalent/stronger "
+        "property decomposition"
+    ),
 )
-@click.option("--force", is_flag=True, help="Replace an existing evidence directory")
+@click.option(
+    "--force",
+    is_flag=True,
+    help="Replace only a previous marked sva2rtl formal evidence directory",
+)
 @click.option(
     "--compile-only",
     is_flag=True,
@@ -183,7 +190,10 @@ def main(
     except UnsupportedConstruct as exc:
         click.echo(str(exc), err=True)
         if config is not None:
-            result_path = write_unsupported_evidence(config, exc)
+            try:
+                result_path = write_unsupported_evidence(config, exc)
+            except (FileExistsError, ValueError) as evidence_exc:
+                raise click.UsageError(str(evidence_exc)) from evidence_exc
             click.echo(f"Evidence: {result_path}", err=True)
         raise click.exceptions.Exit(_EXIT_CODES[FormalStatus.UNSUPPORTED]) from exc
     except PropertyNotFound as exc:
