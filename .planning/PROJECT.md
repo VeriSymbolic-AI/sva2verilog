@@ -55,9 +55,9 @@ Verification capability milestone on 2026-08-04.
 - Critical covers, explicit fairness, typed interfaces, decomposition proof
   bindings, multi-clock/XZ rejection profiles, package smoke, and privacy gates
   are part of the release contract.
-- Exact executable `e1405b65e79f924e4f0eee5c2fd0230d35eec22b` passed CI
-  `30891680942` (13/13), nightly `30891694691` (3/3), and Full Formal
-  `30891700576` (8/8). The Linux live shard ran real good/bad Super Prove cases
+- Exact executable `e3526836912086fdc274528ca7735dd7b6a028e1` passed CI
+  `30908155956` (13/13), nightly `30908168285` (3/3), and Full Formal
+  `30908170695` (8/8). The Linux live shard ran real good/bad Super Prove cases
   with no skip.
 - The support matrix remains at zero Fully supported rows because same-commit
   workflow success does not fill row-specific independent-reference,

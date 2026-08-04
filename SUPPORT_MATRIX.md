@@ -43,7 +43,7 @@ Latest follow-on hardening baseline: commit
 - Full Formal run [`30686820029`](https://github.com/VeriSymbolic-AI/sva2verilog/actions/runs/30686820029):
   all six formal shards passed.
 
-The latest remotely qualified executable is commit
+The pre-v2 v1.7.1 remotely qualified executable was commit
 `c957bdf3d3ed9cf145f23057d9e2a94d555c30e3` on 2026-08-02. It records full
 Icarus 1580 passed / 1 skipped / 1 dynamically classified k-induction xfail,
 generated RTL 133/133, Full Formal 126 passed / 1 identical bounded-liveness
@@ -85,6 +85,17 @@ independent-reference, proof-depth, real-source, rejection, CDC, or
 industrial-corpus gaps, and therefore does not change any support status by
 itself.
 
+The final v2.0 implementation qualification baseline is
+`e3526836912086fdc274528ca7735dd7b6a028e1` on 2026-08-04:
+
+- CI run [`30908155956`](https://github.com/VeriSymbolic-AI/sva2verilog/actions/runs/30908155956)
+  passed all 13 jobs.
+- Differential nightly run [`30908168285`](https://github.com/VeriSymbolic-AI/sva2verilog/actions/runs/30908168285)
+  passed all three jobs.
+- Full Formal run [`30908170695`](https://github.com/VeriSymbolic-AI/sva2verilog/actions/runs/30908170695)
+  passed all eight shards. Open liveness executed 17/17 tests with no skip, and
+  the open user-DUT shard executed 75/75 tests with no skip.
+
 ## Support Status Legend
 
 | Status | Meaning |
@@ -96,7 +107,7 @@ itself.
 
 Current v1.7/v2.0 evidence: **0 construct rows are promoted to `Fully supported`**.
 Same-commit dual-simulator, generated-lint, nightly, and Full Formal evidence is
-present for executable `e1405b6`. The six strongest rows (`##N`, `[*N]`, sampled
+present for executable `e352683`. The six strongest rows (`##N`, `[*N]`, sampled
 value functions, overlapping implication, `first_match`, and `disable iff`)
 remain `Bounded evidence` until their row-specific real-source,
 independent-reference, full-contract/formal, and unsupported-variant links are
@@ -117,9 +128,9 @@ finite PASS output; “monitor implemented” never implies a DUT proof.
 | Bounded implication with overlapping starts | Symbolic witness avoids monitor T/K budget | delay-64 good/bad proofs and exhaustive small attempts | Implemented with finite thread slots | overflow fail-closed plus simulation/formal | monitor has finite concurrency; formal witness does not |
 | Bounded eventually/always, weak until | Safety/BMC/prove as row-specific evidence permits | independent references and named proof depths | Implemented | simulation, synthesis/lint | bounded liveness is not true unbounded liveness |
 | Unbounded `always p` | Formal-only direct invariant | real DUT good/bad unbounded safety proof | Rejected | N/A | no finite PASS verdict |
-| Boolean unbounded eventual / implication-to-eventual | Formal-only SBY `mode live` / Super Prove | source isolation, AIG prep, cover, missing-engine UNKNOWN; real good/bad Linux qualification in Full Formal `30891700576` | Rejected | N/A | needs qualified live solver; no arbitrary nesting |
-| Boolean strong until | Formal-only safety plus eventual discharge | obligation split, cover, and qualified Linux live solver in Full Formal `30891700576` | Rejected | N/A | explicit fairness and live-solver boundary |
-| Restricted automatic scalar local capture | Formal-only symbolic witness with private `captured_q` | real good/bad/changing-value solver cases; user-DUT shard 75/75 in Full Formal `30891700576` | Rejected | explicit composer rejection with `sva2rtl-formal` routing | exact one-local/fixed-delay whitelist |
+| Boolean unbounded eventual / implication-to-eventual | Formal-only SBY `mode live` / Super Prove | source isolation, AIG prep, cover, missing-engine UNKNOWN; real good/bad Linux qualification in Full Formal `30908170695` | Rejected | N/A | needs qualified live solver; no arbitrary nesting |
+| Boolean strong until | Formal-only safety plus eventual discharge | obligation split, cover, and qualified Linux live solver in Full Formal `30908170695` | Rejected | N/A | explicit fairness and live-solver boundary |
+| Restricted automatic scalar local capture | Formal-only symbolic witness with private `captured_q` | real good/bad/changing-value solver cases; user-DUT shard 75/75 in Full Formal `30908170695` | Rejected | explicit composer rejection with `sva2rtl-formal` routing | exact one-local/fixed-delay whitelist |
 | Multi-clock temporal composition | `UNSUPPORTED` in single-clock formal profile | sanitized boundary bundle, empty Yosys inputs | Experimental trusted 2-DFF path only | structural/synthesis/lint, no event-delivery proof | split per domain; prove handoff; separate CDC signoff |
 | X/Z-dependent semantics | `UNSUPPORTED` in two-state profile | real X/Z negative sources and hashed profile | Rejected | N/A | no implicit four-state-to-two-state coercion |
 | General locals, dynamic/unbounded/nested unsupported forms | `UNSUPPORTED`, or replay-bound external decomposition evidence | precise negative tests; schema-v2 subproof/relation bundles require PROVEN+REACHED, manifest/input hashes, checker and formal-context binding, PASS logs, and deterministic replay | Rejected | N/A | the relation model is a reviewed trusted boundary; fabricated status JSON, BMC aggregation, mismatched proof context, and mismatched DUT/property types reject |

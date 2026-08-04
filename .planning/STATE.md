@@ -65,18 +65,18 @@ verifications, end-to-end flows, and exact-commit remote evidence.
 
 ## Latest Local Qualification
 
-- Complete Icarus/default suite: 1733 passed, 3 conditional skips, 1 expected
+- Complete Icarus/default suite: 1736 passed, 3 conditional skips, 1 expected
   dynamically classified k-induction xfail.
-- Verilator simulation/fast differential selection: 174 passed, 1 selected-out
-  skip; explicit fixed-seed fast differential: 16 passed per backend.
+- Verilator simulation selection: 174 passed, 1 reviewed skip; explicit
+  fixed-seed fast differential: 16 passed per backend.
 - Rotating-seed slow differential: 1 passed per backend.
-- Full Formal selection: 214 passed, 2 conditional live-solver skips, 1 expected
+- Full Formal selection: 216 passed, 2 conditional live-solver skips, 1 expected
   k-induction xfail; generated RTL synthesis/lint: 133 passed.
 - Critical mutation modules: bool semantics 25/25, behavioral oracle 135/135,
   composer 51/51, AST importer 123/123; RTL template mutations 12/12. Across
   the four Python surfaces, 334/334 covered mutants were killed and 56
   uncovered candidates remain outside the score.
-- Aggregate branch coverage: 86.99%; formal CLI/flow/lowering are independently
+- Aggregate branch coverage: 87.03%; formal CLI/flow/lowering are independently
   gated at 85%/80%/75% minimums.
 - Python 3.14 semantic axis: 1330 passed; wheel/sdist external-install smoke and
   source/archive privacy scans passed.
@@ -84,10 +84,10 @@ verifications, end-to-end flows, and exact-commit remote evidence.
 - The first exact-SHA remote attempt exposed a stale Icarus skip budget and a
   Python matrix environment-selection defect. Both CI contracts were corrected
   and regression-tested.
-- Exact executable `e1405b65e79f924e4f0eee5c2fd0230d35eec22b`: CI run
-  `30891680942` passed 13/13 jobs, nightly run `30891694691` passed 3/3 jobs,
-  and Full Formal run `30891700576` passed 8/8 shards.
-- The Linux open-liveness shard executed 15/15 tests with no skip using Super
+- Exact executable `e3526836912086fdc274528ca7735dd7b6a028e1`: CI run
+  `30908155956` passed 13/13 jobs, nightly run `30908168285` passed 3/3 jobs,
+  and Full Formal run `30908170695` passed 8/8 shards.
+- The Linux open-liveness shard executed 17/17 tests with no skip using Super
   Prove; the open-user-DUT shard executed 75/75 tests with no skip.
 
 ## Evidence Boundary

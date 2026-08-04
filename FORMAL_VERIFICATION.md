@@ -691,12 +691,12 @@ Record each run ID, head SHA, conclusion, and job conclusions. Update support
 evidence only when the run head SHA equals the intended executable commit.
 
 The completed v2.0 executable baseline is
-`e1405b65e79f924e4f0eee5c2fd0230d35eec22b`: CI
-[`30891680942`](https://github.com/VeriSymbolic-AI/sva2verilog/actions/runs/30891680942)
+`e3526836912086fdc274528ca7735dd7b6a028e1`: CI
+[`30908155956`](https://github.com/VeriSymbolic-AI/sva2verilog/actions/runs/30908155956)
 passed 13/13 jobs, nightly
-[`30891694691`](https://github.com/VeriSymbolic-AI/sva2verilog/actions/runs/30891694691)
+[`30908168285`](https://github.com/VeriSymbolic-AI/sva2verilog/actions/runs/30908168285)
 passed 3/3 jobs, and Full Formal
-[`30891700576`](https://github.com/VeriSymbolic-AI/sva2verilog/actions/runs/30891700576)
+[`30908170695`](https://github.com/VeriSymbolic-AI/sva2verilog/actions/runs/30908170695)
 passed 8/8 shards. This is workflow-level evidence for that exact executable,
 not automatic promotion of any support-matrix row.
 

@@ -14,10 +14,10 @@ DUT；原始高级 SVA 只作为证据输入，不进入 Yosys。次后端 `sva2
 分别报告形式化支持与 monitor 支持，不能相互冒充。
 
 v2.0 能力里程碑已完成。精确可执行基线
-`e1405b65e79f924e4f0eee5c2fd0230d35eec22b` 的主 CI run
-`30891680942` 为 13/13，nightly run `30891694691` 为 3/3，Full Formal
-run `30891700576` 为 8/8。Linux open-liveness 分片使用 Super Prove 实际执行
-15/15 且无 skip；open-user-DUT 分片执行 75/75 且无 skip。该结论只绑定于
+`e3526836912086fdc274528ca7735dd7b6a028e1` 的主 CI run
+`30908155956` 为 13/13，nightly run `30908168285` 为 3/3，Full Formal
+run `30908170695` 为 8/8。Linux open-liveness 分片使用 Super Prove 实际执行
+17/17 且无 skip；open-user-DUT 分片执行 75/75 且无 skip。该结论只绑定于
 该提交和所记录的模型/假设/工具，不等同于全部 IEEE SVA 或芯片级签核。
 
 - v2.0 结果契约：`PROVEN`、`FAILED`、`UNKNOWN`、`UNSUPPORTED`、`ERROR`、
@@ -43,11 +43,11 @@ run `30891700576` 为 8/8。Linux open-liveness 分片使用 Super Prove 实际�
 - nightly differential：run `30683026683` 的 Icarus、Verilator 与完整
   mutation 三个 job 全部通过；干净 checkout 暴露的 `.artifacts` 父目录
   缺失问题已先由回归测试复现，再在同一基线中修复并远端验证
-- 最新同提交资格：`1841ed4` 的主 CI run `30686814681` 全部 13 个 job
+- 历史同提交资格：`1841ed4` 的主 CI run `30686814681` 全部 13 个 job
   通过；nightly run `30686818970` 的三个 job 通过；Full Formal run
   `30686820029` 的六个分片通过。该组运行实际使用 Node.js 24 actions，
   并覆盖最新 CDC 注入、oracle mutation 与测试隔离修复
-- 最新同提交资格：`c957bdf`；完整 Icarus 1580 passed / 1 skipped /
+- 历史同提交资格：`c957bdf`；完整 Icarus 1580 passed / 1 skipped /
   1 个动态分类的 bounded-liveness xfail，完整 Verilator simulation 174
   passed / 1 个已审查 skip，branch coverage 88.12%，generated RTL 133
   passed，Full Formal 126 passed / 1 个相同 xfail；ruff 与 strict mypy 通过
