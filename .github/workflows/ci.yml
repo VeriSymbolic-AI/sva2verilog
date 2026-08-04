@@ -39,6 +39,8 @@ jobs:
         python: ["3.12", "3.13"]
         simulator: [iverilog, verilator]
     runs-on: ${{ matrix.os }}
+    env:
+      UV_PYTHON: ${{ matrix.python }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
@@ -50,7 +52,7 @@ jobs:
         run: uv python install ${{ matrix.python }}
 
       - name: Install dependencies
-        run: uv sync --dev --frozen
+        run: uv sync --dev --frozen --python ${{ matrix.python }}
 
       - name: Install iverilog (Linux)
         if: matrix.simulator == 'iverilog' && runner.os == 'Linux'
@@ -86,10 +88,12 @@ jobs:
         if: matrix.simulator == 'iverilog'
         run: >
           uv run python tools/ci/check_junit.py pytest-results.xml
-          --min-passed 1325 --max-skipped 185
+          --min-passed 1500 --max-skipped 228
           --allow-skip-prefix "sby"
           --allow-skip-prefix "yosys"
+          --allow-skip-prefix "suprove"
           --allow-skip-prefix "verilator"
+          --allow-skip-prefix "requires slang, Yosys read_slang plugin, SBY, and yices-smt2"
           --allow-skip-prefix "select with -m differential_slow"
           --allow-skip-prefix "k-induction did not converge for"
 

@@ -152,7 +152,7 @@ def test_ci_and_nightly_enforce_test_execution_budgets() -> None:
     formal = FORMAL_WORKFLOW.read_text(encoding="utf-8")
 
     assert ci.count("tools/ci/check_junit.py") == 6
-    assert "--min-passed 1325 --max-skipped 185" in ci
+    assert "--min-passed 1500 --max-skipped 228" in ci
     assert "--min-passed 1480 --max-skipped 1" in ci
     assert "--min-passed 170 --max-skipped 2" in ci
     assert "--min-passed 133 --max-skipped 0" in ci
@@ -162,7 +162,9 @@ def test_ci_and_nightly_enforce_test_execution_budgets() -> None:
     for prefix in (
         "sby",
         "yosys",
+        "suprove",
         "verilator",
+        "requires slang, Yosys read_slang plugin, SBY, and yices-smt2",
         "select with -m differential_slow",
         "k-induction did not converge for",
     ):
@@ -180,6 +182,15 @@ def test_ci_and_nightly_enforce_test_execution_budgets() -> None:
     assert "command -v suprove" in formal
     assert "--min-passed ${{ matrix.min-passed }}" in formal
     assert "--max-skipped ${{ matrix.max-skipped }}" in formal
+
+
+def test_ci_matrix_syncs_the_requested_python_version() -> None:
+    workflow = WORKFLOWS[0].read_text(encoding="utf-8")
+    test_job = workflow[workflow.index("  test:") : workflow.index("  generated-rtl:")]
+
+    assert "uv python install ${{ matrix.python }}" in test_job
+    assert "uv sync --dev --frozen --python ${{ matrix.python }}" in test_job
+    assert "UV_PYTHON: ${{ matrix.python }}" in test_job
 
 
 def test_ci_builds_and_smokes_distribution_on_python_314() -> None:

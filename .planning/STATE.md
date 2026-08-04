@@ -80,6 +80,9 @@ qualification is executing.
 - Python 3.14 semantic axis: 1330 passed; wheel/sdist external-install smoke and
   source/archive privacy scans passed.
 - Ruff, strict mypy, lock check, shell syntax, and diff check passed.
+- The first exact-SHA remote attempt exposed a stale Icarus skip budget and a
+  Python matrix environment-selection defect. Both CI contracts are corrected;
+  a replacement exact-SHA qualification is required.
 
 ## Evidence Boundary
 
