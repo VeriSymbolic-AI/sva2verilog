@@ -1,18 +1,34 @@
-# sva2verilog 项目进展报告
+# sva2rtl 项目进展报告
 
-> 更新日期：2026-08-02
+> 更新日期：2026-08-04
 > 仓库：public GitHub repository
 > 当前版本：v1.7.1
+> 当前能力里程碑：v2.0 Open Formal Verification
 
 ## 当前状态
 
-sva2verilog 是一个开源的 SystemVerilog Assertion (SVA) 到可综合 RTL
-监控器编译器。v1.7.1 已于 2026-07-31 发布，修复了 v1.7.0 的完整契约语义
-缺陷。发布后的首个可执行代码与工作流基线 `b055105` 已完成同提交远端资格
-闭环；后续高优先级加固与 F-11 真实工程 frontend 远端基线已经推进到
-`c957bdf`。该提交同时关闭 F-15/F-16/F-18/F-19、将当前版本改为
-Apache-2.0，并补齐 README、形式化验证与高级 SVA 降级方案。所有远端结论均
-绑定到该精确 SHA；后续纯文档提交仍不倒推为新的可执行证明对象。
+sva2rtl 现为 formal-first 的开源 SVA 编译器。主后端 `sva2rtl-formal`
+把受支持的 SVA 语义变成普通 Yosys/SymbiYosys proof harness，直接验证用户
+DUT；原始高级 SVA 只作为证据输入，不进入 Yosys。次后端 `sva2rtl` 继续生成
+有限判定、可综合的 RTL monitor。两条路径共享 slang 派生的类型语义，但
+分别报告形式化支持与 monitor 支持，不能相互冒充。
+
+v2.0 能力里程碑已完成。精确可执行基线
+`e1405b65e79f924e4f0eee5c2fd0230d35eec22b` 的主 CI run
+`30891680942` 为 13/13，nightly run `30891694691` 为 3/3，Full Formal
+run `30891700576` 为 8/8。Linux open-liveness 分片使用 Super Prove 实际执行
+15/15 且无 skip；open-user-DUT 分片执行 75/75 且无 skip。该结论只绑定于
+该提交和所记录的模型/假设/工具，不等同于全部 IEEE SVA 或芯片级签核。
+
+- v2.0 结果契约：`PROVEN`、`FAILED`、`UNKNOWN`、`UNSUPPORTED`、`ERROR`、
+  `TIMEOUT`；BMC 无反例、关键 cover 不可达、缺 live engine、未检查分解均
+  不得成为 `PROVEN`
+- 形式化专用能力：无界 `always`、受限 Boolean eventual/strong-until、
+  超 monitor K/T 预算的 symbolic witness、受限 automatic scalar local
+- 明确硬边界：multi-clock 与 X/Z 在初始 profile 中生成无 Yosys 输入的
+  `UNSUPPORTED` 证据；一般 locals 与未支持嵌套形式拒绝
+- 当前支持矩阵仍为 0 个 Fully supported；三套远端工作流全绿只关闭通用
+  资格门禁，不补齐逐算子的独立 reference、证明深度、CDC 和工业 corpus
 
 - 发布状态：tag `v1.7.1` 指向 `8b5c063`；发布后资格基线为 `b055105`
 - 当前许可证：Apache License 2.0（SPDX：`Apache-2.0`）；根目录

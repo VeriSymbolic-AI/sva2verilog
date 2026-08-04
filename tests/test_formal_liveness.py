@@ -9,7 +9,9 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from click.testing import CliRunner
 
+from sva2rtl.cli import main as monitor_main
 from sva2rtl.composer import compose
 from sva2rtl.errors import SvaCompileError, UnsupportedConstruct
 from sva2rtl.formal_flow import (
@@ -22,7 +24,13 @@ from sva2rtl.formal_flow import (
     discover_live_backend,
     run_formal_bundle,
 )
-from sva2rtl.ir import BoolExpr, ClockSpec, PropEventually, SourceLoc
+from sva2rtl.ir import (
+    BoolExpr,
+    ClockSpec,
+    PropEventually,
+    PropImplication,
+    SourceLoc,
+)
 
 requires_cover_stack = pytest.mark.skipif(
     any(shutil.which(tool) is None for tool in ("sby", "slang", "yosys", "yices-smt2")),
@@ -90,6 +98,46 @@ def test_formal_only_eventually_cannot_enter_monitor_composer() -> None:
     clock = ClockSpec(edge="posedge", signal="clk", source_loc=loc)
     with pytest.raises(UnsupportedConstruct, match="PropEventually"):
         compose(node, clock, "p", "s_eventually ack")
+
+
+def test_nested_formal_only_eventually_routes_user_to_formal_cli() -> None:
+    loc = SourceLoc("live.sv", 1, 1)
+    node = PropImplication(
+        antecedent=BoolExpr(text="req", source_loc=loc),
+        consequent=PropEventually(
+            body=BoolExpr(text="ack", source_loc=loc),
+            strong=True,
+            source_loc=loc,
+        ),
+        overlapping=True,
+        source_loc=loc,
+    )
+    clock = ClockSpec(edge="posedge", signal="clk", source_loc=loc)
+    with pytest.raises(
+        UnsupportedConstruct,
+        match=r"PropEventually.*sva2rtl-formal",
+    ):
+        compose(node, clock, "p", "req |-> s_eventually ack")
+
+
+def test_monitor_cli_routes_real_live_source_to_formal_cli(tmp_path: Path) -> None:
+    _, property_source = _sources(tmp_path)
+    result = CliRunner().invoke(
+        monitor_main,
+        [
+            str(property_source),
+            "--property",
+            "p",
+            "--output",
+            str(tmp_path / "monitor.sv"),
+        ],
+    )
+
+    assert result.exit_code == 2
+    assert "PropEventually" in result.output
+    assert "formal-only" in result.output
+    assert "sva2rtl-formal" in result.output
+    assert not (tmp_path / "monitor.sv").exists()
 
 
 @pytest.mark.formal

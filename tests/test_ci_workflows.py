@@ -285,9 +285,9 @@ def test_support_claims_do_not_reuse_historical_remote_evidence() -> None:
     assert matrix.count("| Fully supported |") == 1
     assert "0 construct rows are promoted" in matrix
     assert "current-commit rerun pending" not in matrix
-    assert "c957bdf3d3ed9cf145f23057d9e2a94d555c30e3" in matrix
+    assert "e1405b65e79f924e4f0eee5c2fd0230d35eec22b" in matrix
     assert "it has not been pushed or remotely qualified yet" not in matrix
-    assert "CI run `30741073680` qualifies executable\n`c957bdf`" in matrix
+    assert "CI run `30891680942` qualifies executable\n`e1405b6`" in matrix
     # Only the evidence-state legend and the genuinely deferred dynamic CDC
     # row may retain a pending-remote marker.
     assert matrix.count("pending-remote") == 2
@@ -304,7 +304,7 @@ def test_readme_describes_the_implemented_optimizer() -> None:
 def test_readme_distribution_license_and_cdc_claims_match_repository_truth() -> None:
     readme = README.read_text(encoding="utf-8")
 
-    assert "An open-source compiler" in readme
+    assert "An open-source, formal-first SVA compiler" in readme
     assert "Apache License, Version 2.0" in readme
     assert "FORMAL_VERIFICATION.md" in readme
     assert "zero `Fully supported` rows" in readme

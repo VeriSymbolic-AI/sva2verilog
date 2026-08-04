@@ -1,9 +1,11 @@
-# sva2rtl — SVA to Synthesizable RTL Monitor Compiler
+# sva2rtl — Open SVA Formal Verification and RTL Monitor Compiler
 
-An open-source compiler that lowers a supported, bounded subset of SystemVerilog
-Assertions (SVA) into synthesizable hardware monitor modules. Generated monitors
-can be simulated with Icarus Verilog and Verilator or synthesized to FPGA. The
-project is licensed under [Apache License 2.0](LICENSE).
+An open-source, formal-first SVA compiler. Its primary `sva2rtl-formal` workflow
+verifies supported SystemVerilog Assertions against a separate user DUT without
+requiring Yosys to parse the original advanced SVA. Its secondary `sva2rtl`
+workflow lowers a supported bounded subset into synthesizable hardware monitor
+modules for simulation or FPGA use. The project is licensed under
+[Apache License 2.0](LICENSE).
 
 sva2rtl is not a full IEEE 1800 assertion implementation and does not claim
 that every accepted construct is industrially complete. The authoritative
@@ -131,6 +133,7 @@ cells and SymbiYosys `mode live`:
 
 | Property shape | Formal lowering | Synthesizable monitor |
 |---|---|---|
+| `always p` / `s_always p` | Direct unbounded safety invariant | Rejected |
 | `s_eventually p` | Unbounded eventual obligation | Rejected |
 | `a |-> s_eventually b` / `a |=> s_eventually b` | Arbitrary witness attempt plus eventual discharge | Rejected |
 | `a s_until b` / `a s_until_with b` | Safety obligation plus eventual `b` | Rejected |
@@ -155,8 +158,9 @@ Unbounded eventual obligations (`s_eventually a`, `s_until`, and
 `s_until_with`) have no finite completion deadline under the monitor contract,
 so the synthesis CLI rejects them. The formal CLI accepts the documented
 single-clock Boolean shapes and routes them to an unbounded live engine instead
-of changing their meaning. Unbounded `always` and unsupported nested forms
-remain outside the implemented frontend. Nested
+of changing their meaning. Unbounded Boolean `always` uses a direct safety
+invariant with no finite monitor PASS. Other unsupported nested forms remain
+outside the implemented frontend. Nested
 multi-path composition (`intersect` / `within` / `throughout`) is supported only
 when it is NFA-liftable and the total state budget satisfies K ≤ 32
 (compile-time enforced).

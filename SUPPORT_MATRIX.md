@@ -1,6 +1,7 @@
 # sva2rtl Support Matrix
 
-This file is the authoritative support evidence ledger for v1.7.1. `README.md`
+This file is the authoritative support evidence ledger for the v1.7.1 package
+line plus the v2.0 Open Formal Verification capability milestone. `README.md`
 and `SUPPORTED_CONSTRUCTS.md` provide explanations and examples; this matrix
 governs exact support status, subset boundaries, and verification evidence.
 
@@ -65,13 +66,24 @@ coverage, Formal smoke, lint, Python 3.14, and installed-distribution gates.
 Neither local nor remote gates close per-construct independent-reference,
 proof-depth, CDC, or industrial-corpus gaps.
 
-**Qualification overlay:** the detailed row ledger now names the exact
-executable baseline for remote simulator/lint evidence instead of using a
-floating “current commit” phrase. CI run `30741073680` qualifies executable
-`c957bdf`; its same-commit nightly and Full Formal runs are named above. This
-overlay does not fill a row's independent-reference, proof-depth, real-source,
-rejection, CDC, or industrial-corpus gaps, and therefore does not change any
-support status by itself.
+The completed v2.0 formal-first executable baseline is
+`e1405b65e79f924e4f0eee5c2fd0230d35eec22b` on 2026-08-04:
+
+- CI run [`30891680942`](https://github.com/VeriSymbolic-AI/sva2verilog/actions/runs/30891680942)
+  passed all 13 jobs, including all eight OS/Python/simulator axes.
+- Differential nightly run [`30891694691`](https://github.com/VeriSymbolic-AI/sva2verilog/actions/runs/30891694691)
+  passed all three differential and mutation jobs.
+- Full Formal run [`30891700576`](https://github.com/VeriSymbolic-AI/sva2verilog/actions/runs/30891700576)
+  passed all eight shards. The Linux open-liveness shard executed 15/15 tests
+  with no skip using Super Prove, and the open-user-DUT shard executed 75/75
+  tests with no skip.
+
+**Qualification overlay:** CI run `30891680942` qualifies executable
+`e1405b6`; its same-commit nightly and Full Formal runs are named above. This
+overlay supplies workflow-level remote evidence but does not fill a row's
+independent-reference, proof-depth, real-source, rejection, CDC, or
+industrial-corpus gaps, and therefore does not change any support status by
+itself.
 
 ## Support Status Legend
 
@@ -82,9 +94,9 @@ support status by itself.
 | Trusted boundary | Intentionally trusted component or excluded proof domain, such as the multi-clock 2-DFF synchronizer and CDC/metastability proof boundary. |
 | Unsupported / rejected | Deliberately unsupported variant that should fail with explicit, actionable diagnostics and negative-test evidence where available. |
 
-Current v1.7 evidence: **0 construct rows are promoted to `Fully supported`**.
+Current v1.7/v2.0 evidence: **0 construct rows are promoted to `Fully supported`**.
 Same-commit dual-simulator, generated-lint, nightly, and Full Formal evidence is
-present for executable `c957bdf`. The six strongest rows (`##N`, `[*N]`, sampled
+present for executable `e1405b6`. The six strongest rows (`##N`, `[*N]`, sampled
 value functions, overlapping implication, `first_match`, and `disable iff`)
 remain `Bounded evidence` until their row-specific real-source,
 independent-reference, full-contract/formal, and unsupported-variant links are
@@ -105,9 +117,9 @@ finite PASS output; “monitor implemented” never implies a DUT proof.
 | Bounded implication with overlapping starts | Symbolic witness avoids monitor T/K budget | delay-64 good/bad proofs and exhaustive small attempts | Implemented with finite thread slots | overflow fail-closed plus simulation/formal | monitor has finite concurrency; formal witness does not |
 | Bounded eventually/always, weak until | Safety/BMC/prove as row-specific evidence permits | independent references and named proof depths | Implemented | simulation, synthesis/lint | bounded liveness is not true unbounded liveness |
 | Unbounded `always p` | Formal-only direct invariant | real DUT good/bad unbounded safety proof | Rejected | N/A | no finite PASS verdict |
-| Boolean unbounded eventual / implication-to-eventual | Formal-only SBY `mode live` / Super Prove | source isolation, AIG prep, cover, missing-engine UNKNOWN; real good/bad conditional/local Linux CI | Rejected | N/A | needs qualified live solver; no arbitrary nesting |
-| Boolean strong until | Formal-only safety plus eventual discharge | obligation split, cover, conditional live solver | Rejected | N/A | fairness and live-solver boundary |
-| Restricted automatic scalar local capture | Formal-only symbolic witness with private `captured_q` | real good/bad/changing-value solver cases | Rejected | explicit composer rejection | exact one-local/fixed-delay whitelist |
+| Boolean unbounded eventual / implication-to-eventual | Formal-only SBY `mode live` / Super Prove | source isolation, AIG prep, cover, missing-engine UNKNOWN; real good/bad Linux qualification in Full Formal `30891700576` | Rejected | N/A | needs qualified live solver; no arbitrary nesting |
+| Boolean strong until | Formal-only safety plus eventual discharge | obligation split, cover, and qualified Linux live solver in Full Formal `30891700576` | Rejected | N/A | explicit fairness and live-solver boundary |
+| Restricted automatic scalar local capture | Formal-only symbolic witness with private `captured_q` | real good/bad/changing-value solver cases; user-DUT shard 75/75 in Full Formal `30891700576` | Rejected | explicit composer rejection with `sva2rtl-formal` routing | exact one-local/fixed-delay whitelist |
 | Multi-clock temporal composition | `UNSUPPORTED` in single-clock formal profile | sanitized boundary bundle, empty Yosys inputs | Experimental trusted 2-DFF path only | structural/synthesis/lint, no event-delivery proof | split per domain; prove handoff; separate CDC signoff |
 | X/Z-dependent semantics | `UNSUPPORTED` in two-state profile | real X/Z negative sources and hashed profile | Rejected | N/A | no implicit four-state-to-two-state coercion |
 | General locals, dynamic/unbounded/nested unsupported forms | `UNSUPPORTED`, or replay-bound external decomposition evidence | precise negative tests; schema-v2 subproof/relation bundles require PROVEN+REACHED, manifest/input hashes, checker and formal-context binding, PASS logs, and deterministic replay | Rejected | N/A | the relation model is a reviewed trusted boundary; fabricated status JSON, BMC aggregation, mismatched proof context, and mismatched DUT/property types reject |
@@ -293,7 +305,7 @@ now checks every transition endpoint and both `##[2:4]` early exits.
 | Property `if...else` | Conditional selection between supported property branches | Bounded evidence | present: `tests/fixtures/if_else_prop.sv` | present: `tests/test_v13_operators.py`; `tests/test_integration.py` | present: v1.3 simulation/oracle coverage | historical: CI run `28931676000`; qualified at executable baseline `de3f697` by CI run `30709818712` | present: behavioral oracle tests and source-authored branch expression | present: `tests/test_formal_sva_equiv.py#TestPropIfElseSvaEquiv`, independent BMC depth 15 | present: local Yosys smoke `tests/test_synthesis_gates.py`; present at executable baseline `de3f697`: `tests/test_generated_lint.py` passed in CI run `30709818712` | N/A: accepted finite subset | Non-circular BMC is present; row remains bounded by row-specific independent and full-contract gaps. |
 | Bounded liveness `s_eventually [m:n]`, `eventually [m:n]`, `always [m:n]`, `s_always [m:n]`, weak `until`, `until_with` | Boolean operand, finite window or safety form | Bounded evidence | missing: JSON/direct-IR fixtures `tests/fixtures/s_eventually_1_3.json`, `always_1_3.json`, `until_ab.json` only | present: `tests/test_liveness.py` | present: `tests/simulation/test_sim_liveness.py` | historical: CI run `28931676000`; qualified at executable baseline `de3f697` by CI run `30709818712` | present: simulator oracle and source-authored formal references | present: `TestSEventuallySvaEquiv`, `TestSAlwaysSvaEquiv`, and `TestUntilSvaEquiv` in `tests/test_formal_sva_equiv.py`, independent pass/fail BMC depth 20 | present: local Yosys smoke `tests/test_synthesis_gates.py`; present at executable baseline `de3f697`: `tests/test_generated_lint.py` passed in CI run `30709818712` | present: unbounded/strong rejection tests in `tests/test_liveness.py` | Bounded finite-state subset only; liveness remains BMC-only rather than k-induction proven. |
 | Formal-only unbounded liveness | Boolean `s_eventually p`; Boolean `a \|-> s_eventually b` / `a \|=> s_eventually b`; Boolean `a s_until b` / `a s_until_with b` | Conditional formal evidence; monitor rejected | present: real `.sv` sources generated in `tests/test_formal_liveness.py` | present: slang import to `PropEventually` / `PropStrongUntil`, formal-only lowering, `$live` / `$fair` harness, and enforced monitor-composer rejection | N/A: no finite-verdict simulation monitor | N/A: no finite-verdict simulation monitor | present: obligation-shape and safety-split structural checks; independent external live-oracle diversity remains missing | conditional: SymbiYosys `mode live`, `aiger suprove`; AIG preparation and fail-closed missing-engine `UNKNOWN` are locally tested; real good/bad proof tests run when `suprove` is installed | N/A: proof harness only, not synthesized monitor RTL | present: BMC rejection, missing-engine `UNKNOWN`, invalid fairness, monitor-composer rejection, and unsupported-shape paths | This partially replaces a commercial SVA frontend for the named shapes. `PROVEN` requires a real live-engine pass plus critical cover reachability; no live solver or failed cover is never PASS. |
-| Other unbounded / infinite-state forms | Unbounded `always`, nested/property-composed liveness, unbounded repetition/delay, non-Boolean live operands | Unsupported / rejected | N/A: rejected variant | present: explicit classifier/lowering boundaries in `tests/test_formal_liveness.py`, `tests/test_liveness.py`, and `tests/test_repetition.py` | N/A: rejection occurs before simulation | N/A: rejection occurs before simulation | N/A: rejection path | N/A: rejection path | N/A: rejection path | present: formal-shape and unbounded-repetition rejection tests | Do not replace these with an arbitrary bound unless the protocol itself specifies that deadline. Use checked decomposition or another frontend with the required semantics. |
+| Other unbounded / infinite-state forms | Nested/property-composed liveness outside the documented profiles, unbounded repetition/delay, non-Boolean live operands | Unsupported / rejected | N/A: rejected variant | present: explicit classifier/lowering boundaries in `tests/test_formal_liveness.py`, `tests/test_liveness.py`, and `tests/test_repetition.py` | N/A: rejection occurs before simulation | N/A: rejection occurs before simulation | N/A: rejection path | N/A: rejection path | N/A: rejection path | present: formal-shape and unbounded-repetition rejection tests | Unbounded Boolean `always` is a separate supported formal-only invariant row above. Do not replace unsupported forms with an arbitrary bound unless the protocol itself specifies that deadline. Use checked decomposition or another frontend with the required semantics. |
 | Four-state / X/Z-dependent semantics | X/Z/? literals, wildcard/case equality, or any result depending on unknown/high-impedance values | Unsupported in named two-state profile | present: real X and Z source cases generated in `tests/test_formal_boundaries.py` | present: literal rejection plus hashed `semantic_profile.json` declaring `logic_semantics=two-state` and `x_z_semantics=unsupported` | N/A: rejected | N/A: rejected | N/A: no coercion oracle | explicit `UNSUPPORTED`, empty Yosys inputs, no SBY project | N/A: rejected | present: X and Z literal cases plus invalid profile choice | A two-state Boolean/bit-vector proof is not four-state SVA evidence. Use an explicit four-state frontend or remove X/Z dependence from the reviewed property. |
 | Multi-clock path-one split/synchronize forms | Monitor: allowed `##1` clock changes and non-overlap cross-clock implication through trusted 2-DFF level synchronizer with explicit opt-in; Formal: no implicit clock collapse | Trusted monitor boundary / Formal unsupported | present: real source is generated in `tests/test_formal_boundaries.py`; monitor fixtures remain test-authored | present: `tests/test_multiclock.py`; formal classifier and sanitized unsupported evidence in `tests/test_formal_boundaries.py` | missing: no dynamic asynchronous clock-ratio or pulse-loss evidence | pending-remote: CI if dynamic tests are added later | trusted-boundary: per-domain monitor semantics only; formal workflow requires per-domain decomposition and reviewed sampled handoff | formal: explicit `UNSUPPORTED`, empty Yosys inputs, no SBY project; CDC/metastability remains excluded | trusted-boundary: local Yosys smoke and Verilator lint accept generated synchronizer structure under opt-in | present: default monitor rejection plus machine-readable formal rejection | No formal result is inferred from the experimental synchronizer. Split by domain and separately verify a handshake/toggle/FIFO handoff plus CDC signoff. |
 | Restricted automatic scalar local capture | Exactly one 1-bit automatic `logic`/`bit`, one blocking capture, positive fixed delay, Boolean guard/condition, overlapping implication; formal-only | Conditional formal evidence / Synth rejected | present: real slang source generated in `tests/test_formal_locals.py` | present: `PropLocalCapture`, exact whitelist importer, symbolic-witness lowering, private `captured_q`; monitor composer rejection | N/A: no monitor | N/A: no monitor | present: saved-value-vs-current-value solver regression and structural local-not-a-port checks | present locally: correct DUT `PROVEN` plus cover; bad ack and changing captured input `FAILED` with trace in `tests/test_formal_locals.py` | N/A: formal harness only | present: vector/multiple locals, non-overlap, ranged delay, and monitor mode reject | Symbolic witness gives each selected attempt private capture state; universal selector quantification covers all attempts. Wider/general match-item semantics remain unsupported. |
@@ -339,8 +351,8 @@ evidence, but they are not real-source evidence for `Fully supported` status.
 
 ## Evidence Status Summary
 
-- **0 rows Fully supported** in the current v1.7.1 qualification branch. F-01
-  and all same-commit remote workflow gates are closed; the strongest rows
+- **0 rows Fully supported** in the current v1.7.1/v2.0 qualification branch.
+  F-01 and all same-commit remote workflow gates are closed; the strongest rows
   remain bounded until their remaining row-specific evidence gaps are closed.
 - Real `.sv` source fixtures have been added for `[*N]`, `[*M:N]`, `[->N]`,
   `[=N]`, `$rose`, `$fell`, `$stable`, `$changed`, `$past`, `first_match`,

@@ -17,6 +17,7 @@ from __future__ import annotations
 import hashlib
 import math
 import re
+from dataclasses import fields
 
 from sva2rtl import __version__
 from sva2rtl.bool_semantics import (
@@ -34,11 +35,15 @@ from sva2rtl.ir import (
     ClockedSeq,
     ClockSpec,
     DisableIff,
+    PropAlways,
     PropBoundedAlways,
     PropBoundedEventually,
+    PropEventually,
     PropIfElse,
     PropImplication,
+    PropLocalCapture,
     PropNot,
+    PropStrongUntil,
     PropUntil,
     SeqAnd,
     SeqConcat,
@@ -553,6 +558,21 @@ def compose(
     UnsupportedConstruct
         When *node* is an unsupported IR type (e.g. ``PropImplication``).
     """
+    formal_only = _find_formal_only_node(node)
+    if formal_only is not None:
+        construct = type(formal_only).__name__
+        raise UnsupportedConstruct(
+            message=(
+                f"IR node '{construct}' is formal-only and cannot produce a "
+                "finite-completion synthesizable monitor. Use 'sva2rtl-formal' "
+                "to verify the property against a DUT, or rewrite it to an "
+                "explicit bounded safety property when a hardware monitor is "
+                "required."
+            ),
+            construct_name=construct,
+            source_loc=formal_only.source_loc,
+        )
+
     match node:
         case BoolExpr():
             return _compose_bool_expr(node, clock, label, original_text, cse_origin)
@@ -606,6 +626,34 @@ def compose(
 
 
 # ── Private helpers ────────────────────────────────────────────────────────
+
+
+_FORMAL_ONLY_TYPES = (
+    PropAlways,
+    PropEventually,
+    PropLocalCapture,
+    PropStrongUntil,
+)
+
+
+def _find_formal_only_node(node: SVANode) -> SVANode | None:
+    """Return the first formal-only IR node anywhere in *node*."""
+    if isinstance(node, _FORMAL_ONLY_TYPES):
+        return node
+
+    for field in fields(node):
+        value = getattr(node, field.name)
+        if isinstance(value, SVANode):
+            found = _find_formal_only_node(value)
+            if found is not None:
+                return found
+        elif isinstance(value, tuple):
+            for item in value:
+                if isinstance(item, SVANode):
+                    found = _find_formal_only_node(item)
+                    if found is not None:
+                        return found
+    return None
 
 
 def _compose_bool_expr(

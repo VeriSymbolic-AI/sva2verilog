@@ -95,8 +95,10 @@ Notes for v1.4 Part A:
 - The formal-only live result is `PROVEN` only after a real SymbiYosys
   `mode live` / Super Prove pass and required cover reachability. Missing
   Super Prove is `UNKNOWN`; bounded BMC is never promoted to a liveness proof.
-- Unbounded `always`, nested liveness shapes, and other unbounded forms remain
-  outside the implemented formal frontend.
+- Unbounded Boolean `always` is formal-only direct-invariant safety. It does
+  not need the live engine and deliberately has no finite monitor PASS.
+- Nested liveness shapes and other unbounded forms outside the documented
+  Boolean profiles remain outside the implemented formal frontend.
 - Weak `until` / `until_with` are safety properties (no liveness obligation) and
   are implemented in the finite-state monitor subset. Strong `s_until` /
   `s_until_with` are formal-only and split into weak-until safety plus eventual
@@ -280,13 +282,13 @@ The following operators remain unsupported or deliberately rejected:
 
 | Operator | Category | Status |
 |----------|----------|--------|
-| `nexttime` | Temporal | Not supported |
+| `nexttime` / `s_nexttime` with fixed Boolean operand | Temporal | **Supported** through exact fixed-delay normalization |
 | `eventually`/`s_eventually` (bounded `[m:n]`) | Liveness | **Supported** (v1.4 Part A) |
 | `eventually`/`s_eventually` (unbounded Boolean/root implication shapes) | Liveness | Formal-only with open live backend; monitor generation rejected |
 | `always [m:n]` / `s_always [m:n]` (bounded) | Liveness | **Supported** (v1.4 Part A) |
 | `until` / `until_with` (weak) | Safety | **Supported** (v1.4 Part A) |
 | `s_until` / `s_until_with` (strong Boolean operands) | Liveness | Formal-only safety + eventual-discharge proof; monitor generation rejected |
-| `always` (unbounded) | Temporal | Rejected — legal streaming safety form, but not implemented by v1 |
+| `always` / `s_always` (unbounded Boolean) | Temporal | Formal-only direct invariant; monitor generation rejected |
 | `[->M:N]` / `[=M:N]` where `M < N` | Repetition | Rejected — v1 supports fixed counts only |
 | Restricted scalar local capture in `a |-> (g, v=x) ##N c(v)` | Sequence/property | Formal-only symbolic witness; monitor generation rejected |
 | Other local-variable match-item forms | Sequence | Rejected |
@@ -380,7 +382,8 @@ The following constructs are recognized by the parser but produce clear error me
 | X/Z-dependent property in `--logic-semantics two-state` | SVA-E002 / `UNSUPPORTED` result | Remove four-state dependence or use an explicit four-state-capable frontend; never coerce X/Z silently |
 | Restricted scalar local capture | — | Formal-only via symbolic witness; see `FORMAL_VERIFICATION.md` |
 | Other local-variable forms | SVA-E002 / `UNSUPPORTED` result | Precompute explicit RTL state or decompose to supported per-attempt obligations |
-| `nexttime` / unbounded `always` / unsupported nested liveness | SVA-E001 | Outside the implemented unbounded frontend; decompose with a checked relation or use another supporting frontend |
+| unsupported nested liveness | SVA-E001 | Decompose with a checked relation or use another supporting frontend |
+| unbounded Boolean `always` / `s_always` | — | Use `sva2rtl-formal`; finite-completion monitor generation remains intentionally rejected |
 | unbounded `s_eventually` / strong `s_until` in the documented Boolean shapes | — | Use `sva2rtl-formal`; synthesizable monitor generation remains intentionally rejected |
 | bounded `eventually`/`s_eventually [m:n]` | — | Supported since v1.4 Part A |
 

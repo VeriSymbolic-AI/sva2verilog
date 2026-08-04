@@ -2,24 +2,25 @@
 gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Open Formal Verification
-status: executing
+status: complete
 last_updated: "2026-08-04"
 progress:
   total_phases: 6
-  completed_phases: 5
+  completed_phases: 6
   total_plans: 12
-  completed_plans: 11
-  percent: 83
+  completed_plans: 12
+  percent: 100
 ---
 
 # Project State: sva2rtl v2.0
 
 ## Current Position
 
-Phase: 24 — EXECUTING
+Phase: 24 — COMPLETE
 Plan: 2 of 2
-Phases 19 through 23 and Phase 24 Plan 01 are complete. Plan 02 remote
-qualification is executing.
+Phases 19 through 24 and all twelve v2.0 plans are complete. The milestone
+audit cross-references requirement checkboxes, plan summaries, phase
+verifications, end-to-end flows, and exact-commit remote evidence.
 
 ## Verified v2.0 Evidence
 
@@ -81,22 +82,28 @@ qualification is executing.
   source/archive privacy scans passed.
 - Ruff, strict mypy, lock check, shell syntax, and diff check passed.
 - The first exact-SHA remote attempt exposed a stale Icarus skip budget and a
-  Python matrix environment-selection defect. Both CI contracts are corrected;
-  a replacement exact-SHA qualification is required.
+  Python matrix environment-selection defect. Both CI contracts were corrected
+  and regression-tested.
+- Exact executable `e1405b65e79f924e4f0eee5c2fd0230d35eec22b`: CI run
+  `30891680942` passed 13/13 jobs, nightly run `30891694691` passed 3/3 jobs,
+  and Full Formal run `30891700576` passed 8/8 shards.
+- The Linux open-liveness shard executed 15/15 tests with no skip using Super
+  Prove; the open-user-DUT shard executed 75/75 tests with no skip.
 
 ## Evidence Boundary
 
-- Real live good/bad solver qualification remains conditional because local
-  macOS ARM has no Super Prove executable.
-
-- Remote same-commit CI/nightly/Full Formal evidence is not yet recorded for
-  the v2.0 commits.
+- Local macOS ARM still has no Super Prove executable, so local live tests skip.
+  This is not counted as local pass evidence; the exact-commit Linux Full
+  Formal shard above supplies the qualified real good/bad live evidence.
+- Zero construct rows are promoted to Fully supported. Workflow qualification
+  does not close row-specific independent-reference, proof-depth, CDC, or
+  industrial-corpus gaps.
 
 ## Next Work
 
-Commit and push the final anonymous main candidate, then require exact-head success for push
-CI, nightly differential/mutation, and all eight Full Formal shards. Linux must
-run both real live good/bad cases with no skip before EVID-05 can close.
+Use the closed v2.0 evidence as the baseline for a narrow next milestone. Any
+executable, formal semantic, or workflow change must receive fresh exact-commit
+CI, nightly, and Full Formal qualification before support claims move.
 
 ## Performance Metrics
 
@@ -113,4 +120,4 @@ run both real live good/bad cases with no skip before EVID-05 can close.
 | 23 | 23-01 | Complete |
 | 23 | 23-02 | Complete |
 | 24 | 24-01 | Complete |
-| 24 | 24-02 | Executing |
+| 24 | 24-02 | Complete |

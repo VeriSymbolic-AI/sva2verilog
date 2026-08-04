@@ -210,9 +210,12 @@ still records the rejection in a source-isolated `UNSUPPORTED` evidence bundle.
 
 Operands in this initial route must be structured Boolean expressions in one
 clock domain. Nested liveness, property conditionals/negation around liveness,
-unbounded `always`, local-variable semantics, and arbitrary sequence operands
-remain unsupported. The ordinary monitor CLI rejects these unbounded nodes so
-formal-only IR cannot accidentally become a misleading finite PASS output.
+and arbitrary sequence operands remain unsupported. Unbounded Boolean `always`
+is supported by the separate direct-invariant safety route and does not require
+Super Prove. Restricted local-variable support uses the separately documented
+symbolic-witness profile. The ordinary monitor CLI rejects all these
+formal-only nodes so they cannot accidentally become a misleading finite PASS
+output.
 
 ### Fairness is explicit, never guessed
 
@@ -638,11 +641,13 @@ The current v1.7.1 boundary is deliberately finite and fail-closed:
   accepted.
 - NFA-lifted nested multi-path composition has a compile-time state budget
   `K <= 32`; bounded implication concurrency has finite thread slots.
+- Unbounded Boolean `always` is supported only by the formal direct-invariant
+  route; it deliberately has no finite-completion monitor PASS.
 - Unbounded eventual and strong-until obligations have no finite completion
   deadline under the pass/fail monitor interface. They are formal-only for the
   exact shapes listed above; Super Prove absence yields `UNKNOWN`. Unbounded
-  `always` and other legal forms are not implemented even where a different
-  streaming monitor could be designed.
+  forms outside the documented Boolean profiles remain unsupported even where
+  a different streaming monitor could be designed.
 - Experimental multi-clock output uses a 2-DFF level synchronizer. It can miss
   narrow pulses or merge events and is not CDC or metastability sign-off.
 - slang is a trusted parsing/elaboration boundary. The maintained real-project
@@ -684,6 +689,16 @@ gh workflow run formal-full.yml --ref main
 
 Record each run ID, head SHA, conclusion, and job conclusions. Update support
 evidence only when the run head SHA equals the intended executable commit.
+
+The completed v2.0 executable baseline is
+`e1405b65e79f924e4f0eee5c2fd0230d35eec22b`: CI
+[`30891680942`](https://github.com/VeriSymbolic-AI/sva2verilog/actions/runs/30891680942)
+passed 13/13 jobs, nightly
+[`30891694691`](https://github.com/VeriSymbolic-AI/sva2verilog/actions/runs/30891694691)
+passed 3/3 jobs, and Full Formal
+[`30891700576`](https://github.com/VeriSymbolic-AI/sva2verilog/actions/runs/30891700576)
+passed 8/8 shards. This is workflow-level evidence for that exact executable,
+not automatic promotion of any support-matrix row.
 
 ## Further Reading
 
