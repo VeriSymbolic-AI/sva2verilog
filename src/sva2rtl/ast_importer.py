@@ -521,20 +521,31 @@ def _symbol_name(node: dict[str, Any]) -> str:
 
 def _named_value_type(node: dict[str, Any], source_loc: SourceLoc) -> tuple[int, bool]:
     """Read width and signedness for a scalar or fixed packed vector."""
-    type_text = str(node.get("type", "")).replace(" ", "")
+    type_text = re.sub(r"\s+", "", str(node.get("type", "")))
     if not type_text:
         return 1, False
-    signed = "signed" in type_text and "unsigned" not in type_text
-    packed = re.search(r"\[(-?\d+):(-?\d+)\]", type_text)
+
+    packed = re.fullmatch(
+        r"(bit|logic|reg)(signed|unsigned)?\[(-?\d+):(-?\d+)\]",
+        type_text,
+    )
     if packed is not None:
-        return abs(int(packed.group(1)) - int(packed.group(2))) + 1, signed
+        qualifier = packed.group(2)
+        return (
+            abs(int(packed.group(3)) - int(packed.group(4))) + 1,
+            qualifier == "signed",
+        )
+
+    scalar = re.fullmatch(r"(bit|logic|reg)(signed|unsigned)?", type_text)
+    if scalar is not None:
+        return 1, scalar.group(2) == "signed"
+
     scalar_widths = {"byte": 8, "shortint": 16, "int": 32, "integer": 32, "longint": 64}
-    base_type = type_text.replace("unsigned", "").replace("signed", "")
-    if base_type in {"bit", "logic", "reg"}:
-        return 1, signed
-    if base_type in scalar_widths:
-        default_signed = "unsigned" not in type_text
-        return scalar_widths[base_type], signed or default_signed
+    atom = re.fullmatch(r"(byte|shortint|int|integer|longint)(signed|unsigned)?", type_text)
+    if atom is not None:
+        base_type, qualifier = atom.groups()
+        return scalar_widths[base_type], qualifier != "unsigned"
+
     raise UnsupportedConstruct(
         message=f"Unsupported boolean identifier type: '{type_text}'",
         construct_name="boolean identifier type",

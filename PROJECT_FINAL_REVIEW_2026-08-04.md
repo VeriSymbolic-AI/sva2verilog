@@ -2,9 +2,9 @@
 
 ## Decision
 
-The local candidate is suitable for an anonymous Git commit. The ten reviewed
-false-assurance and evidence-safety defects are closed by fail-closed behavior,
-focused regressions, and the complete local gate set below.
+The local candidate is suitable for an anonymous Git commit. The twelve reviewed
+assurance, evidence-safety, and compatibility defects are closed by fail-closed
+behavior, focused regressions, and the complete local gate set below.
 
 This is **not** a production or release qualification. The resulting commit
 still requires exact-SHA remote CI, nightly differential/mutation, and Full
@@ -24,20 +24,22 @@ Formal success. Local macOS cannot execute the Super Prove liveness engine.
 | P24-F08 | High | An unsupported original requested in BMC mode could return an aggregate `PROVEN` result whose mode was changed to prove | Verified decomposition aggregation is accepted only in explicit `--mode prove`; BMC rejects without creating output | Bounded member evidence cannot discharge an unbounded aggregate claim |
 | P24-F09 | High | `--force` could remove a certificate or member proof located under the selected output after validating it | Certificate, relation result, subproperty, and member result paths join the protected-input set before any replacement | A dedicated output outside every proof-input tree remains mandatory |
 | P24-F10 | Medium | Aggregate replay reopened the caller's original property and DUT paths even though the bundle already contained a hashed snapshot | Aggregation now derives expected input hashes from the integrity-checked manifest and validates the copied normalized certificate against them | External source changes after bundle creation do not alter the captured proof question; changing bundle copies still rejects |
+| P24-F11 | Critical | A multi-dimensional packed signal was parsed from only its first range, so matching property/DUT declarations could bind a truncated port and return a false `PROVEN` result | Type parsing now accepts only the complete documented grammar: scalar integral types or one fixed packed dimension; trailing dimensions, arrays, aggregates, and complex observed syntax reject before any proof bundle or Yosys input is created | The CLI still records a source-isolated `UNSUPPORTED` bundle; supporting multi-dimensional packed selection requires shape-aware semantics, so use a reviewed one-dimensional alias until independently qualified |
+| P24-F12 | Medium | Applying the strict type grammar to every visible DUT member caused an unrelated array/debug signal to block a scalar property | DUT elaboration still scans the whole design for embedded assertions, but type parsing is restricted to clock, reset, fairness, and property-observed signals | An unrelated complex DUT construct can still fail later if the downstream open frontend itself cannot lower it; that is a tool error, not an interface-contract rejection |
 
 ## Local qualification evidence
 
 | Gate | Result |
 |---|---|
-| Complete default/Icarus suite | 1722 passed, 3 conditional skips, 1 dynamically classified k-induction xfail |
+| Complete default/Icarus suite | 1733 passed, 3 conditional skips, 1 dynamically classified k-induction xfail |
 | Verilator simulation and fast differential selection | 174 passed, 1 reviewed skip |
 | Generated RTL synthesis and lint | 133/133 passed |
-| Full Formal selection | 212 passed, 2 local missing-Super-Prove skips, 1 k-induction xfail |
+| Full Formal selection | 214 passed, 2 local missing-Super-Prove skips, 1 k-induction xfail |
 | Differential | Fixed-seed Icarus 16/16 and Verilator 16/16; rotating-seed slow sweep 1/1 per backend |
-| Coverage | 1666 passed; aggregate branch coverage 86.89%; all critical-module floors passed; `formal_flow.py` 83.62% |
-| Python semantic mutation | 335/335 covered mutants killed; 56 uncovered candidates excluded from the score |
+| Coverage | 1677 passed; aggregate branch coverage 86.99%; all critical-module floors passed; `formal_flow.py` 83.67% |
+| Python semantic mutation | 334/334 covered mutants killed; 56 uncovered candidates excluded from the score |
 | RTL template mutation | 12/12 reviewed mutants killed |
-| Python 3.14 | 1321 selected tests passed with no skips |
+| Python 3.14 | 1330 selected tests passed with no skips |
 | Distribution | Wheel and sdist built; external-install compile smoke passed |
 | Static/release checks | Ruff, strict mypy, lock check, shell syntax, diff check, source privacy, and archive privacy passed |
 

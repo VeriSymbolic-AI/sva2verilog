@@ -214,7 +214,13 @@ requires every property observation to match the DUT signal's width and
 signedness. Clock, reset, and fairness conditions must be scalar. DUT files
 containing concurrent assertions, assumptions, or covers are rejected so the
 original SVA cannot re-enter Yosys through `--dut`. The checked contract is
-stored and hashed as `evidence/interface_contract.json`.
+stored and hashed as `evidence/interface_contract.json`. Only clock, reset,
+fairness, and property-observed DUT signals enter that contract; unrelated DUT
+signals do not block interface validation. Contract signals accept scalar
+integral types and one fixed packed dimension. Multi-dimensional packed,
+unpacked-array, aggregate, and otherwise complex observed types reject instead
+of being partially parsed or flattened. A downstream frontend can still reject
+an unrelated DUT construct it cannot lower.
 
 ## CLI Reference
 
@@ -461,7 +467,9 @@ The safe fallback depends on the requirement:
 - Convert an unbounded requirement to `[m:n]` only when the protocol has a real,
   reviewed finite deadline.
 - Precompute auxiliary scalar RTL for complex expressions, arrays, or local
-  state, then verify that auxiliary logic as part of the trusted boundary.
+  state. For an unsupported multi-dimensional or aggregate signal, expose a
+  reviewed one-dimensional packed alias, then verify that auxiliary logic as
+  part of the trusted boundary.
 - Keep the original SVA and use a simulator with the required assertion support
   when no synthesizable monitor is needed.
 - For documented unbounded shapes, use `sva2rtl-formal` with the open live

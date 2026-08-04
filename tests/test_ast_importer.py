@@ -16,6 +16,7 @@ from sva2rtl.ast_importer import (
     expr_to_sv,
     extract_source_loc,
     import_assertion,
+    parse_slang_integral_type,
 )
 from sva2rtl.bool_semantics import render_bool_expr
 from sva2rtl.errors import UnsupportedConstruct
@@ -328,6 +329,49 @@ def test_build_bool_expr_preserves_named_value_packed_width() -> None:
     assert isinstance(expr, BoolIdent)
     assert expr.width == 4
     assert expr.signed is False
+
+
+@pytest.mark.parametrize(
+    ("type_text", "expected"),
+    [
+        ("logic", (1, False)),
+        ("logic[7:4]", (4, False)),
+        ("logic signed[7:0]", (8, True)),
+        ("int", (32, True)),
+        ("int unsigned", (32, False)),
+    ],
+)
+def test_parse_slang_integral_type_accepts_only_exact_supported_shapes(
+    type_text: str,
+    expected: tuple[int, bool],
+) -> None:
+    assert parse_slang_integral_type(type_text) == expected
+
+
+@pytest.mark.parametrize(
+    "type_text",
+    [
+        "logic[1:0][3:0]",
+        "logic[7:0]$[0:1]",
+        "structpacked{logic[7:0]payload;}",
+    ],
+)
+def test_parse_slang_integral_type_rejects_trailing_or_complex_type_syntax(
+    type_text: str,
+) -> None:
+    with pytest.raises(UnsupportedConstruct, match="boolean identifier type"):
+        parse_slang_integral_type(type_text)
+
+
+def test_build_bool_expr_rejects_multidimensional_packed_identifier() -> None:
+    with pytest.raises(UnsupportedConstruct, match="boolean identifier type"):
+        build_bool_expr(
+            {
+                "kind": "NamedValue",
+                "symbol": "1 data",
+                "type": "logic[1:0][3:0]",
+            }
+        )
 
 
 def test_build_bool_expr_conversion_unwraps_to_inner_structure() -> None:

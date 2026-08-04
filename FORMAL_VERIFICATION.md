@@ -189,7 +189,14 @@ observed signal must exist in the DUT and exactly match the property
 declaration's packed width and signedness; clock and reset must be one bit. The resulting
 `evidence/interface_contract.json` is hashed by the manifest. A property that
 declares a 1-bit signal while the DUT exposes a vector is rejected instead of
-silently proving only the low bit.
+silently proving only the low bit. Only clock, reset, fairness, and property-
+observed DUT signals enter this interface type check; unrelated internal or
+debug signals do not expand the property contract. The accepted type grammar
+for contract signals is intentionally strict: scalar integral types and one
+fixed packed dimension are supported. Multi-dimensional packed, unpacked-array,
+aggregate, or trailing type syntax rejects before a proof bundle or Yosys input
+is created rather than being partially parsed or silently flattened. The CLI
+still records the rejection in a source-isolated `UNSUPPORTED` evidence bundle.
 
 ### Supported formal-only liveness shapes
 
@@ -620,7 +627,9 @@ The current v1.7.1 boundary is deliberately finite and fail-closed:
 - The support matrix currently contains **zero `Fully supported` construct
   rows**. Implemented rows have bounded evidence or a trusted boundary.
 - Boolean expressions are a structured two-state subset. Arithmetic,
-  reductions, general part-selects, calls, and X/Z semantics remain outside it.
+  general part-selects, calls, multi-dimensional packed/unpacked arrays,
+  aggregates, and X/Z semantics remain outside it. Supported identifiers are
+  scalar integral types or have one fixed packed dimension.
 - Sampled-value operands are scalar; packed vectors, arrays, compound
   expressions, and optional clock/gating arguments are not supported.
 - Ranged goto/non-consecutive repetition (`[->M:N]`, `[=M:N]` with `M < N`),
@@ -651,7 +660,7 @@ property through the compiler:
 |---|---|---|
 | A finite system deadline exists | Replace `$`/unbounded eventuality with a reviewed `[m:n]` bound derived from the protocol | Changes the property unless the bound is a real requirement |
 | Ranged goto/non-consecutive repetition | Expand a small finite range into explicit fixed-count properties, or write a bounded reference-state monitor | More properties/RTL and more proof state |
-| Local variables, complex expressions, arrays | Compute auxiliary RTL signals first, then assert over scalar supported signals | Auxiliary logic becomes part of the trusted/modelled boundary |
+| Local variables, complex expressions, arrays, multi-dimensional packed or aggregate types | Compute auxiliary RTL signals or a reviewed one-dimensional packed alias first, then assert over supported signals | Auxiliary/flattening logic becomes part of the trusted/modelled boundary |
 | Full legal SVA needed only in simulation | Keep the original assertion and use a simulator with the required SVA semantics | No synthesizable FPGA monitor |
 | Full SVA or unbounded/liveness proof needed | Use `sva2rtl-formal` for the documented shapes; otherwise use another independently supported open or commercial frontend on the original property | Open live proof still requires Super Prove and explicit assumptions; unsupported SVA remains outside this tool |
 | Multi-clock event delivery | Use a reviewed handshake, toggle, or asynchronous FIFO CDC protocol and verify each domain separately; run CDC analysis | Higher area/latency but avoids the lossy level synchronizer |

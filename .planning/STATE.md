@@ -29,6 +29,10 @@ qualification is executing.
 - Nexttime uses an exact fixed-delay property rewrite.
 - Structured Boolean semantics retain width/signedness and support reductions
   plus relational comparisons through generated and direct-formal ports.
+- Typed observations accept only a complete scalar or one-dimensional packed
+  grammar; multi-dimensional/complex signal types reject before they can create
+  a truncated false proof model. Type checking is scoped to the actual formal
+  interface so unrelated complex DUT signals do not widen the property contract.
 
 - Bare temporal sequences reject after a real false-PROVEN regression was found.
 - Goto/nonconsecutive occurrence obligations classify as liveness and do not
@@ -60,18 +64,20 @@ qualification is executing.
 
 ## Latest Local Qualification
 
-- Complete Icarus/default suite: 1722 passed, 3 conditional skips, 1 expected
+- Complete Icarus/default suite: 1733 passed, 3 conditional skips, 1 expected
   dynamically classified k-induction xfail.
 - Verilator simulation/fast differential selection: 174 passed, 1 selected-out
   skip; explicit fixed-seed fast differential: 16 passed per backend.
 - Rotating-seed slow differential: 1 passed per backend.
-- Full Formal selection: 212 passed, 2 conditional live-solver skips, 1 expected
+- Full Formal selection: 214 passed, 2 conditional live-solver skips, 1 expected
   k-induction xfail; generated RTL synthesis/lint: 133 passed.
 - Critical mutation modules: bool semantics 25/25, behavioral oracle 135/135,
-  composer 51/51, AST importer 124/124; RTL template mutations 12/12.
-- Aggregate branch coverage: 86.89%; formal CLI/flow/lowering are independently
+  composer 51/51, AST importer 123/123; RTL template mutations 12/12. Across
+  the four Python surfaces, 334/334 covered mutants were killed and 56
+  uncovered candidates remain outside the score.
+- Aggregate branch coverage: 86.99%; formal CLI/flow/lowering are independently
   gated at 85%/80%/75% minimums.
-- Python 3.14 semantic axis: 1321 passed; wheel/sdist external-install smoke and
+- Python 3.14 semantic axis: 1330 passed; wheel/sdist external-install smoke and
   source/archive privacy scans passed.
 - Ruff, strict mypy, lock check, shell syntax, and diff check passed.
 

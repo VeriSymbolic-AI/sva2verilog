@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import shutil
 import subprocess
 from pathlib import Path
@@ -177,6 +178,81 @@ def _typed_formal_config(tmp_path: Path, *, good: bool) -> FormalRunConfig:
         depth=12,
         timeout_seconds=60,
     )
+
+
+@pytest.mark.formal
+@requires_formal_stack
+def test_multidimensional_packed_signal_rejects_before_false_proven(
+    tmp_path: Path,
+) -> None:
+    dut = tmp_path / "multidim-dut.sv"
+    prop = tmp_path / "multidim-property.sv"
+    dut.write_text(
+        "module multidim_dut(input logic clk, input logic rst_n, "
+        "output logic [1:0][3:0] data);\n"
+        "  assign data = 8'h04;\n"
+        "endmodule\n",
+        encoding="utf-8",
+    )
+    prop.write_text(
+        "module multidim_property(input logic clk, input logic rst_n, "
+        "input logic [1:0][3:0] data);\n"
+        "  p: assert property (@(posedge clk) disable iff (!rst_n) "
+        "always (data == 8'h00));\n"
+        "endmodule\n",
+        encoding="utf-8",
+    )
+    config = FormalRunConfig(
+        dut_sources=(dut,),
+        property_file=prop,
+        property_name="p",
+        top="multidim_dut",
+        output_dir=tmp_path / "multidim-evidence",
+    )
+
+    with pytest.raises(UnsupportedConstruct, match="boolean identifier type"):
+        build_formal_bundle(config)
+    assert not config.output_dir.exists()
+
+
+@pytest.mark.formal
+@requires_formal_stack
+def test_unobserved_complex_dut_signal_does_not_block_scalar_contract(
+    tmp_path: Path,
+) -> None:
+    dut = tmp_path / "scalar-with-debug-bus-dut.sv"
+    prop = tmp_path / "scalar-property.sv"
+    dut.write_text(
+        "module scalar_dut(input logic clk, input logic rst_n, "
+        "output logic ack, output logic [1:0][3:0] debug_bus);\n"
+        "  assign ack = 1'b1;\n"
+        "  assign debug_bus = 8'h00;\n"
+        "endmodule\n",
+        encoding="utf-8",
+    )
+    prop.write_text(
+        "module scalar_property(input logic clk, input logic rst_n, input logic ack);\n"
+        "  p: assert property (@(posedge clk) disable iff (!rst_n) always ack);\n"
+        "endmodule\n",
+        encoding="utf-8",
+    )
+    config = FormalRunConfig(
+        dut_sources=(dut,),
+        property_file=prop,
+        property_name="p",
+        top="scalar_dut",
+        output_dir=tmp_path / "scalar-evidence",
+    )
+
+    evidence = build_formal_bundle(config)
+
+    contract_path = evidence.bundle_dir / evidence.manifest["interface_contract"]["path"]
+    contract = json.loads(contract_path.read_text(encoding="utf-8"))
+    assert {signal["dut_signal"] for signal in contract["signals"]} == {
+        "clk",
+        "rst_n",
+        "ack",
+    }
 
 
 @pytest.mark.formal

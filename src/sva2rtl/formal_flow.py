@@ -344,8 +344,11 @@ def _dut_top_body(ast: dict[str, object], top: str) -> dict[str, object]:
     return cast(dict[str, object], matches[0]["body"])
 
 
-def _elaborate_dut_signals(config: FormalRunConfig) -> dict[str, _DutSignal]:
-    """Elaborate the DUT independently and reject assertion-bearing inputs."""
+def _elaborate_dut_signals(
+    config: FormalRunConfig,
+    required_signals: frozenset[str],
+) -> dict[str, _DutSignal]:
+    """Elaborate the DUT, reject assertions, and type only contract signals."""
     ast = invoke_slang(
         config.dut_sources[0],
         config.slang_path,
@@ -381,6 +384,8 @@ def _elaborate_dut_signals(config: FormalRunConfig) -> dict[str, _DutSignal]:
         ):
             continue
         name = member["name"]
+        if name not in required_signals:
+            continue
         type_text = member.get("type")
         if not isinstance(type_text, str):
             continue
@@ -403,9 +408,17 @@ def _validate_dut_contract(
     checker: CheckerNode,
 ) -> dict[str, Any]:
     """Fail before proof when property and DUT signal contracts differ."""
-    dut_signals = _elaborate_dut_signals(config)
     widths = observed_signal_widths(checker)
     signedness = observed_signal_signedness(checker)
+    required_signals = frozenset(
+        {
+            config.clock,
+            config.reset,
+            *config.fairness_signals,
+            *(signal for _port, signal in checker.observed_signals),
+        }
+    )
+    dut_signals = _elaborate_dut_signals(config, required_signals)
     checked: list[dict[str, Any]] = []
 
     def require(
@@ -2274,7 +2287,9 @@ def write_unsupported_evidence(
         "remediation": (
             "Split multi-clock properties by named domain and verify a reviewed "
             "sampled handoff, remove X/Z dependence or use an explicit four-state "
-            "frontend, or rewrite locals into the documented restricted capture shape."
+            "frontend, expose a reviewed one-dimensional packed alias for "
+            "unsupported array/aggregate signal types, or rewrite locals into the "
+            "documented restricted capture shape."
         ),
     }
     manifest: dict[str, Any] = {
