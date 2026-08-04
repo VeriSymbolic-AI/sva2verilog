@@ -165,6 +165,9 @@ def test_ci_and_nightly_enforce_test_execution_budgets() -> None:
         "suprove",
         "verilator",
         "requires slang, Yosys read_slang plugin, SBY, and yices-smt2",
+        "requires SBY, slang, Yosys, and yices-smt2 for the cover task",
+        "requires SBY, slang, Yosys, and a no-op executable",
+        "requires the local safety formal toolchain",
         "select with -m differential_slow",
         "k-induction did not converge for",
     ):

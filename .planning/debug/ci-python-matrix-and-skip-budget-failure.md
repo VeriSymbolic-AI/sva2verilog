@@ -27,8 +27,10 @@ selection to `uv sync`, allowing `.python-version` to choose 3.12.
 
 - Raise the ordinary Icarus pass floor from 1325 to 1500 and set the current
   explicit skip ceiling to 228.
-- Allow the exact missing-full-formal-toolchain skip reason. Full Formal retains
-  zero toolchain skips, so this does not replace solver execution.
+- Allow only the enumerated missing-full-formal-toolchain skip reasons for the
+  shared solver stack, liveness cover stack, no-op AIG preparation, and local
+  safety stack. The 228 ceiling remains exact, and Full Formal retains zero
+  toolchain skips, so this does not replace solver execution.
 - Set `UV_PYTHON` for the complete matrix job, sync with
   `--python ${{ matrix.python }}`, and lock both requirements with a workflow
   regression test. This keeps later `uv run` steps from returning to the

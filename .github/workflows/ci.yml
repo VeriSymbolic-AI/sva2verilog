@@ -94,6 +94,9 @@ jobs:
           --allow-skip-prefix "suprove"
           --allow-skip-prefix "verilator"
           --allow-skip-prefix "requires slang, Yosys read_slang plugin, SBY, and yices-smt2"
+          --allow-skip-prefix "requires SBY, slang, Yosys, and yices-smt2 for the cover task"
+          --allow-skip-prefix "requires SBY, slang, Yosys, and a no-op executable"
+          --allow-skip-prefix "requires the local safety formal toolchain"
           --allow-skip-prefix "select with -m differential_slow"
           --allow-skip-prefix "k-induction did not converge for"
 
