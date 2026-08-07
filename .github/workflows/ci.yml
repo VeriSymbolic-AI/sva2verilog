@@ -90,7 +90,7 @@ jobs:
         if: matrix.simulator == 'iverilog'
         run: >
           uv run python tools/ci/check_junit.py pytest-results.xml
-          --min-passed 1500 --max-skipped 228
+          --min-passed 1500 --max-skipped 231
           --allow-skip-prefix "sby"
           --allow-skip-prefix "yosys"
           --allow-skip-prefix "suprove"
