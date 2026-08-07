@@ -28,6 +28,7 @@ def test_distribution_exposes_monitor_and_formal_entry_points() -> None:
     assert config["project"]["scripts"] == {
         "sva2rtl": "sva2rtl.cli:main",
         "sva2rtl-formal": "sva2rtl.formal_cli:main",
+        "sva2rtl-formal-doctor": "sva2rtl.formal_doctor:main",
     }
 
 
@@ -46,6 +47,8 @@ def test_sdist_excludes_development_only_surfaces() -> None:
         "/SUPPORTED_CONSTRUCTS.md",
         "/SUPPORT_MATRIX.md",
         "/INDUSTRIAL_VALIDATION_GAPS.md",
+        "/support_evidence.json",
+        "/tools/formal",
         "/PROJECT_STATUS.md",
         "/PROJECT_ANALYSIS_2026-07-11.md",
         "/pyproject.toml",

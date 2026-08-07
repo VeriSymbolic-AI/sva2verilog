@@ -1,9 +1,26 @@
 # sva2rtl 项目进展报告
 
-> 更新日期：2026-08-04
+> 更新日期：2026-08-07
 > 仓库：public GitHub repository
 > 当前版本：v1.7.1
 > 当前能力里程碑：v2.0 Open Formal Verification
+
+## 2026-08-07 可信度加固（当前工作树）
+
+- `--compile-only` 现在明确输出 `UNKNOWN` 并以 11 退出，不能再被自动化误当作
+  成功证明；只有 `PROVEN` 且关键 cover 为 `REACHED` 才能返回 0。
+- 形式化 manifest 记录隐私安全的 slang/SBY/Yosys/yosys-smtbmc/solver/
+  Super Prove 可执行文件指纹；重放命令绑定工具角色，执行前漂移会失败。
+- `sva2rtl-formal` 已支持 filelist/include/define/parameter/library/single-unit
+  真实工程上下文，并冻结无 SVA 的自包含 DUT 快照供 Yosys 重放。
+- 新增 SHA 固定的 Linux OSS CAD Suite 重放镜像，以及安全/活性能力诊断命令。
+- 新增带精确来源与 Apache-2.0 边界的 OpenTitan 小型 RTL 切片；证明正确双触发器
+  延迟关系，并杀死一触发器延迟故障。该证据不代表 OpenTitan、CDC 或工业签核。
+- 外部 RTL 用例发现并修复了两个真实缺陷：slang v11 单元素前导 `##N` 被静默
+  丢弃，以及自定义复位名在 `disable iff` 监控器子端口中未连接。
+- `support_evidence.json` 对高优先级证据路径和剩余阻塞进行机器校验；本工作树仍
+  需新的 exact-SHA CI、nightly 和 Full Formal，当前支持矩阵保持
+0 个 Fully supported。
 
 ## 当前状态
 

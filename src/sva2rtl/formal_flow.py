@@ -41,13 +41,29 @@ from sva2rtl.formal_lowering import (
     lower_liveness_property,
     lower_local_capture,
 )
-from sva2rtl.frontend import SlangCompilationContext, invoke_slang
+from sva2rtl.formal_toolchain import (
+    probe_formal_toolchain,
+    role_command,
+    solver_executable,
+    tool_versions,
+    toolchain_matches,
+    validate_replay_contract,
+)
+from sva2rtl.frontend import (
+    SlangCompilationContext,
+    SlangPreprocessedProject,
+    invoke_slang,
+    preprocess_slang_project,
+)
 from sva2rtl.ir import CheckerNode
 from sva2rtl.normalizer import normalize
 from sva2rtl.optimizer import optimize
 
 _IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_$]*$")
 _TOOL_TOKEN_RE = re.compile(r"^[A-Za-z0-9_.+-]+$")
+_PARAMETER_OVERRIDE_RE = re.compile(
+    r"^[A-Za-z_][A-Za-z0-9_$]*=[A-Za-z0-9_$'.+-]+$"
+)
 _PASS_RE = re.compile(r"(?:DONE\s*\(PASS|STATUS:\s*PASS(?:ED)?)", re.IGNORECASE)
 _FAIL_RE = re.compile(
     r"(?:DONE\s*\(FAIL|STATUS:\s*FAIL(?:ED)?|counterexample)", re.IGNORECASE
@@ -116,6 +132,16 @@ class FormalRunConfig:
     property_file: Path
     top: str
     output_dir: Path
+    property_sources: tuple[Path, ...] = ()
+    filelists: tuple[Path, ...] = ()
+    include_dirs: tuple[Path, ...] = ()
+    defines: tuple[str, ...] = ()
+    parameter_overrides: tuple[str, ...] = ()
+    library_files: tuple[Path, ...] = ()
+    library_dirs: tuple[Path, ...] = ()
+    library_extensions: tuple[str, ...] = ()
+    library_order: tuple[str, ...] = ()
+    single_unit: bool = False
     property_name: str | None = None
     clock: str = "clk"
     reset: str = "rst_n"
@@ -170,17 +196,35 @@ class FormalRunConfig:
             raise ValueError(f"invalid engine token: {self.engine!r}")
         if _TOOL_TOKEN_RE.fullmatch(self.solver) is None:
             raise ValueError(f"invalid solver token: {self.solver!r}")
+        for override in self.parameter_overrides:
+            if _PARAMETER_OVERRIDE_RE.fullmatch(override) is None:
+                raise ValueError(
+                    "invalid formal parameter override; use an atomic NAME=VALUE "
+                    f"token without whitespace: {override!r}"
+                )
         if len(set(self.fairness_signals)) != len(self.fairness_signals):
             raise ValueError("fairness signals must be unique")
         for fairness_signal in self.fairness_signals:
             if _IDENTIFIER_RE.fullmatch(fairness_signal) is None:
                 raise ValueError(f"invalid fairness signal: {fairness_signal!r}")
-        for source in (*self.dut_sources, self.property_file):
+        for source in (
+            *self.dut_sources,
+            self.property_file,
+            *self.property_sources,
+            *self.filelists,
+            *self.library_files,
+        ):
             if not source.is_file():
                 raise ValueError(f"input source does not exist: {source}")
+        for directory in (*self.include_dirs, *self.library_dirs):
+            if not directory.is_dir():
+                raise ValueError(f"input directory does not exist: {directory}")
         for source in self.dut_sources:
-            if source.resolve() == self.property_file.resolve() or os.path.samefile(
-                source, self.property_file
+            property_inputs = (self.property_file, *self.property_sources)
+            if any(
+                source.resolve() == property_source.resolve()
+                or os.path.samefile(source, property_source)
+                for property_source in property_inputs
             ):
                 raise ValueError(
                     "DUT and property inputs must be separate files; the original "
@@ -193,6 +237,25 @@ class FormalRunConfig:
             raise ValueError(
                 "decomposition certificate does not exist: "
                 f"{self.decomposition_certificate}"
+            )
+        if self.decomposition_certificate is not None and any(
+            (
+                self.property_sources,
+                self.filelists,
+                self.include_dirs,
+                self.defines,
+                self.parameter_overrides,
+                self.library_files,
+                self.library_dirs,
+                self.library_extensions,
+                self.library_order,
+                self.single_unit,
+            )
+        ):
+            raise ValueError(
+                "verified decomposition currently accepts only flat explicit DUT "
+                "and property files; project-context decomposition is rejected "
+                "until its dependency snapshot is bound into certificate schema v3"
             )
 
 
@@ -237,6 +300,8 @@ class FormalResult:
     duration_seconds: float
     tool_versions: dict[str, str]
     log_path: str
+    tool_identities: dict[str, dict[str, object]] | None = None
+    executed_commands: tuple[tuple[str, ...], ...] = ()
     trace_paths: tuple[str, ...] = ()
     cover_status: CoverStatus = CoverStatus.NOT_RUN
     cover_returncode: int | None = None
@@ -258,6 +323,15 @@ class FormalResult:
             "returncode": self.returncode,
             "duration_seconds": round(self.duration_seconds, 6),
             "tool_versions": dict(sorted(self.tool_versions.items())),
+            "tool_identities": (
+                {
+                    role: dict(sorted(identity.items()))
+                    for role, identity in sorted(self.tool_identities.items())
+                }
+                if self.tool_identities is not None
+                else {}
+            ),
+            "executed_commands": [list(command) for command in self.executed_commands],
             "log_path": self.log_path,
             "trace_paths": list(self.trace_paths),
             "cover_status": self.cover_status.value,
@@ -312,6 +386,44 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _text_sha256(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _dependency_inventory(project: SlangPreprocessedProject) -> list[dict[str, str]]:
+    """Describe resolved inputs without exposing host paths or user directories."""
+    modules = set(project.module_dependencies)
+    includes = set(project.include_dependencies)
+    entries: list[dict[str, str]] = []
+    for dependency in project.dependencies:
+        digest = _sha256(dependency)
+        kind = "include" if dependency in includes else "module"
+        if dependency not in includes and dependency not in modules:
+            kind = "source"
+        entries.append(
+            {
+                "id": digest[:16],
+                "basename": dependency.name,
+                "kind": kind,
+                "sha256": digest,
+            }
+        )
+    return entries
+
+
+def _privacy_safe_project_text(
+    project: SlangPreprocessedProject,
+    *,
+    namespace: str,
+) -> str:
+    """Remove host paths from optional preprocessor location directives."""
+    text = project.text
+    for dependency in sorted(project.dependencies, key=lambda item: len(str(item)), reverse=True):
+        text = text.replace(str(dependency), f"evidence/{namespace}/{dependency.name}")
+    text = text.replace(str(Path.home()), "<home>")
+    return text
+
+
 def _walk_ast(value: object) -> Iterator[dict[str, Any]]:
     """Yield every dictionary node from a slang JSON value."""
     if isinstance(value, dict):
@@ -344,6 +456,38 @@ def _dut_top_body(ast: dict[str, object], top: str) -> dict[str, object]:
     return cast(dict[str, object], matches[0]["body"])
 
 
+def _dut_compilation_context(config: FormalRunConfig) -> SlangCompilationContext:
+    return SlangCompilationContext(
+        source_files=config.dut_sources[1:],
+        filelists=config.filelists,
+        include_dirs=config.include_dirs,
+        defines=config.defines,
+        top_modules=(config.top,),
+        parameter_overrides=config.parameter_overrides,
+        library_files=config.library_files,
+        library_dirs=config.library_dirs,
+        library_extensions=config.library_extensions,
+        library_order=config.library_order,
+        single_unit=config.single_unit,
+    )
+
+
+def _property_compilation_context(config: FormalRunConfig) -> SlangCompilationContext:
+    # Property sources can refer to project packages and DUT declarations, but
+    # this context is used only by slang/sva2rtl and is never handed to Yosys.
+    return SlangCompilationContext(
+        source_files=(*config.property_sources, *config.dut_sources),
+        filelists=config.filelists,
+        include_dirs=config.include_dirs,
+        defines=config.defines,
+        library_files=config.library_files,
+        library_dirs=config.library_dirs,
+        library_extensions=config.library_extensions,
+        library_order=config.library_order,
+        single_unit=config.single_unit,
+    )
+
+
 def _elaborate_dut_signals(
     config: FormalRunConfig,
     required_signals: frozenset[str],
@@ -352,10 +496,7 @@ def _elaborate_dut_signals(
     ast = invoke_slang(
         config.dut_sources[0],
         config.slang_path,
-        context=SlangCompilationContext(
-            source_files=config.dut_sources[1:],
-            top_modules=(config.top,),
-        ),
+        context=_dut_compilation_context(config),
     )
     for node in _walk_ast(ast):
         node_kind = node.get("kind")
@@ -563,12 +704,20 @@ def _require_proven_artifact(path: Path, label: str) -> dict[str, Any]:
         "sha256"
     ):
         raise ValueError(f"{label} is not bound to its property input")
-    replay_commands = payload.get("replay_commands")
-    if replay_commands != [
-        ["sby", "-f", "formal.sby"],
-        ["sby", "-f", "formal_cover.sby"],
-    ]:
-        raise ValueError(f"{label} does not declare deterministic replay commands")
+    toolchain = manifest.get("toolchain")
+    if payload.get("tool_identities") != toolchain:
+        raise ValueError(f"{label} tool identity is not bound to its replay manifest")
+    try:
+        validate_replay_contract(
+            payload.get("replay_commands"),
+            toolchain,
+            require_cover=True,
+            require_live=manifest.get("backend") == "open-live-suprove",
+        )
+    except ValueError as exc:
+        raise ValueError(f"{label} {exc}") from exc
+    if payload.get("executed_commands") != payload.get("replay_commands"):
+        raise ValueError(f"{label} did not execute its complete replay contract")
     for key, hash_key in (
         ("log_path", "log_sha256"),
         ("cover_log_path", "cover_log_sha256"),
@@ -768,10 +917,7 @@ def _result_binding(
     bundle: Path,
     manifest: dict[str, Any],
     checker: str,
-    replay_commands: tuple[tuple[str, ...], ...] = (
-        ("sby", "-f", "formal.sby"),
-        ("sby", "-f", "formal_cover.sby"),
-    ),
+    replay_commands: tuple[tuple[str, ...], ...] | None = None,
 ) -> dict[str, Any]:
     if manifest.get("checker") != checker:
         raise ValueError("formal manifest checker does not match result binding")
@@ -781,12 +927,46 @@ def _result_binding(
         if isinstance(property_entry, dict)
         else ""
     )
+    if replay_commands is None:
+        primary = role_command("sby", "-f", "formal.sby")
+        if manifest.get("backend") == "open-live-suprove":
+            primary = role_command(
+                "sby", "-f", "formal.sby", "--suprove", "@tool:suprove"
+            )
+        replay_commands = (
+            primary,
+            role_command("sby", "-f", "formal_cover.sby"),
+        )
     return {
         "manifest_sha256": _sha256(bundle / "manifest.json"),
         "property_sha256": property_sha256,
         "checker": checker,
         "replay_commands": replay_commands,
     }
+
+
+def _toolchain_for_config(config: FormalRunConfig) -> dict[str, dict[str, object]]:
+    """Fingerprint configured tools without storing machine-specific paths."""
+    return probe_formal_toolchain(
+        slang_path=config.slang_path,
+        sby_path=config.sby_path,
+        suprove_path=config.suprove_path,
+        solver_path=solver_executable(config.solver),
+    )
+
+
+def _require_unchanged_toolchain(evidence: FormalEvidence) -> dict[str, dict[str, object]]:
+    """Fail if configured executables drift after the bundle was constructed."""
+    recorded = evidence.manifest.get("toolchain")
+    if not isinstance(recorded, dict):
+        raise ValueError("formal manifest is missing its toolchain identity")
+    current = _toolchain_for_config(evidence.config)
+    roles = ["slang", "sby", "yosys", "yosys-smtbmc", "solver"]
+    if evidence.manifest.get("backend") == "open-live-suprove":
+        roles.append("suprove")
+    if not toolchain_matches(recorded, current, roles=roles):
+        raise ValueError("formal toolchain changed after bundle construction")
+    return current
 
 
 def _manifest_artifacts(value: object) -> Iterator[tuple[str, str]]:
@@ -1164,7 +1344,11 @@ def _is_bare_sequence_property(node: sva_ir.SVANode) -> bool:
 
 def _compile_checker(config: FormalRunConfig) -> FormalCompilation:
     """Compile the selected SVA property without involving the DUT frontend."""
-    ast = invoke_slang(config.property_file, config.slang_path)
+    ast = invoke_slang(
+        config.property_file,
+        config.slang_path,
+        context=_property_compilation_context(config),
+    )
     imported = import_all_assertions(ast)
     node, clock, original_text, label = _select_assertion(imported, config.property_name)
     if clock.signal != config.clock:
@@ -1293,13 +1477,18 @@ def render_formal_bind(
 
     widths = observed_signal_widths(checker)
     signedness = observed_signal_signedness(checker)
-    observed = [
+    monitor_observed = [
         (port, signal)
         for port, signal in checker.observed_signals
-        if port not in {clock, reset}
+        if port not in {clock, "rst_n"}
+    ]
+    harness_observed = [
+        (port, signal)
+        for port, signal in monitor_observed
+        if port != reset
     ]
     port_lines = [f"    input logic {clock}", f"    input logic {reset}"]
-    for port, _signal in observed:
+    for port, _signal in harness_observed:
         width = widths.get(port, 1)
         port_lines.append(_input_decl(port, width, signedness.get(port, False)))
 
@@ -1308,7 +1497,10 @@ def render_formal_bind(
         f"        .rst_n({reset})",
         "        .start(1'b1)",
     ]
-    monitor_connections.extend(f"        .{port}({port})" for port, _ in observed)
+    monitor_connections.extend(
+        f"        .{port}({reset if port == reset else port})"
+        for port, _ in monitor_observed
+    )
     monitor_connections.extend(
         (
             "        .disable_i(1'b0)",
@@ -1320,7 +1512,9 @@ def render_formal_bind(
         )
     )
     bind_connections = [f"    .{clock}({clock})", f"    .{reset}({reset})"]
-    bind_connections.extend(f"    .{port}({signal})" for port, signal in observed)
+    bind_connections.extend(
+        f"    .{port}({signal})" for port, signal in harness_observed
+    )
     edge = checker.params.get("clock_edge", "posedge")
     if edge not in {"posedge", "negedge"}:
         raise ValueError(f"unsupported clock edge: {edge!r}")
@@ -1778,6 +1972,9 @@ def _render_sby(
     selected_mode = mode or config.mode.value
     selected_engine = engine_line or f"{config.engine} {config.solver}".rstrip()
     source_args = " ".join(consumed_files)
+    parameter_args = " ".join(f"-G {value}" for value in config.parameter_overrides)
+    if parameter_args:
+        parameter_args += " "
     depth_line = "" if selected_mode == "live" else f"depth {config.depth}\n"
     multiclock = "multiclock on\n" if selected_mode == "live" else ""
     primitive_cleanup = "delete =\\$live\n" if formal_primitives else ""
@@ -1793,7 +1990,7 @@ def _render_sby(
         f"{selected_engine}\n\n"
         "[script]\n"
         "plugin -i slang\n"
-        f"read_slang --top {config.top} {source_args}\n"
+        f"read_slang --top {config.top} {parameter_args}{source_args}\n"
         f"{primitive_cleanup}"
         f"prep -top {config.top}\n\n"
         "[files]\n"
@@ -1827,6 +2024,9 @@ def _prepare_output(
         for source in (
             *config.dut_sources,
             config.property_file,
+            *config.property_sources,
+            *config.filelists,
+            *config.library_files,
             *_decomposition_input_paths(config, decomposition),
         )
     )
@@ -1887,6 +2087,7 @@ def _build_verified_decomposition_bundle(
         shutil.copyfile(source, copied)
         dut_manifest.append({"path": relative, "sha256": _sha256(copied)})
     decomposition_entry = _materialize_decomposition(bundle, decomposition)
+    toolchain = _toolchain_for_config(config)
     manifest: dict[str, Any] = {
         "schema_version": 1,
         "backend": "verified-decomposition",
@@ -1907,6 +2108,7 @@ def _build_verified_decomposition_bundle(
             "sha256": _sha256(property_copy),
         },
         "dut_sources": dut_manifest,
+        "toolchain": toolchain,
         "decomposition": decomposition_entry,
         "original_boundary": {
             "construct": original_error.construct_name,
@@ -1934,7 +2136,8 @@ def _build_verified_decomposition_bundle(
         message="verified decomposition bundle compiled but not yet aggregated",
         returncode=None,
         duration_seconds=0.0,
-        tool_versions={},
+        tool_versions=tool_versions(toolchain),
+        tool_identities=toolchain,
         log_path="",
         **binding,
     )
@@ -1966,11 +2169,34 @@ def build_formal_bundle(config: FormalRunConfig) -> FormalEvidence:
     property_class = compilation.property_class
     backend = compilation.backend
     interface_contract = _validate_dut_contract(config, checker)
+    dut_project = preprocess_slang_project(
+        config.dut_sources[0],
+        config.slang_path,
+        context=_dut_compilation_context(config),
+    )
+    property_project = preprocess_slang_project(
+        config.property_file,
+        config.slang_path,
+        context=_property_compilation_context(config),
+    )
     bundle = _prepare_output(config, decomposition=decomposition)
 
     property_copy = bundle / "evidence" / "property.sv"
     property_copy.parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(config.property_file, property_copy)
+    property_preprocessed = bundle / "evidence" / "property_preprocessed.sv"
+    _write_text(
+        property_preprocessed,
+        _privacy_safe_project_text(property_project, namespace="property-dependency"),
+    )
+    property_source_manifest: list[dict[str, str]] = []
+    for index, source in enumerate(config.property_sources):
+        relative = f"evidence/property_source_{index:03d}.sv"
+        copied = bundle / relative
+        shutil.copyfile(source, copied)
+        property_source_manifest.append(
+            {"path": relative, "sha256": _sha256(copied)}
+        )
 
     consumed: list[str] = []
     dut_manifest: list[dict[str, str]] = []
@@ -1978,8 +2204,13 @@ def build_formal_bundle(config: FormalRunConfig) -> FormalEvidence:
         relative = f"dut_{index:03d}.sv"
         copied = bundle / relative
         shutil.copyfile(source, copied)
-        consumed.append(relative)
         dut_manifest.append({"path": relative, "sha256": _sha256(copied)})
+    dut_preprocessed = bundle / "dut_preprocessed.sv"
+    _write_text(
+        dut_preprocessed,
+        _privacy_safe_project_text(dut_project, namespace="dut-dependency"),
+    )
+    consumed.append("dut_preprocessed.sv")
 
     modules = (
         {}
@@ -2124,6 +2355,7 @@ def build_formal_bundle(config: FormalRunConfig) -> FormalEvidence:
     interface_contract_path = bundle / "evidence" / "interface_contract.json"
     _write_json(interface_contract_path, interface_contract)
     live_info = discover_live_backend(config) if backend == "open-live-suprove" else None
+    toolchain = _toolchain_for_config(config)
 
     manifest: dict[str, Any] = {
         "schema_version": 1,
@@ -2143,12 +2375,42 @@ def build_formal_bundle(config: FormalRunConfig) -> FormalEvidence:
             "solver": config.solver,
             "logic_semantics": config.logic_semantics.value,
             "fairness_signals": list(config.fairness_signals),
+            "parameter_overrides": list(config.parameter_overrides),
         },
         "property": {
             "path": "evidence/property.sv",
             "sha256": _sha256(property_copy),
         },
         "dut_sources": dut_manifest,
+        "property_sources": property_source_manifest,
+        "project_context": {
+            "schema_version": 1,
+            "single_unit": config.single_unit,
+            "filelist_count": len(config.filelists),
+            "include_dir_count": len(config.include_dirs),
+            "library_file_count": len(config.library_files),
+            "library_dir_count": len(config.library_dirs),
+            "library_extensions": list(config.library_extensions),
+            "library_order": list(config.library_order),
+            "defines": [
+                {
+                    "name": value.partition("=")[0],
+                    "sha256": _text_sha256(value),
+                }
+                for value in config.defines
+            ],
+            "dut_snapshot": {
+                "path": "dut_preprocessed.sv",
+                "sha256": _sha256(dut_preprocessed),
+            },
+            "property_snapshot": {
+                "path": "evidence/property_preprocessed.sv",
+                "sha256": _sha256(property_preprocessed),
+            },
+            "dut_dependencies": _dependency_inventory(dut_project),
+            "property_dependencies": _dependency_inventory(property_project),
+        },
+        "toolchain": toolchain,
         "generated_sources": generated_manifest,
         "formal_bind": {"path": "formal_bind.sv", "sha256": _sha256(bind_path)},
         "sby": {"path": "formal.sby", "sha256": _sha256(bundle / "formal.sby")},
@@ -2235,7 +2497,8 @@ def build_formal_bundle(config: FormalRunConfig) -> FormalEvidence:
         message="formal bundle compiled but not yet executed",
         returncode=None,
         duration_seconds=0.0,
-        tool_versions={},
+        tool_versions=tool_versions(toolchain),
+        tool_identities=toolchain,
         log_path="sby.log",
         **binding,
     )
@@ -2292,6 +2555,7 @@ def write_unsupported_evidence(
             "documented restricted capture shape."
         ),
     }
+    toolchain = _toolchain_for_config(config)
     manifest: dict[str, Any] = {
         "schema_version": 1,
         "backend": "unsupported-boundary",
@@ -2311,6 +2575,7 @@ def write_unsupported_evidence(
             "sha256": _sha256(property_copy),
         },
         "dut_sources": dut_manifest,
+        "toolchain": toolchain,
         "semantic_profile": {
             "path": "evidence/semantic_profile.json",
             "sha256": _sha256(profile_path),
@@ -2328,7 +2593,8 @@ def write_unsupported_evidence(
         message=message,
         returncode=None,
         duration_seconds=0.0,
-        tool_versions={"slang": _probe_version([config.slang_path, "--version"])},
+        tool_versions=tool_versions(toolchain),
+        tool_identities=toolchain,
         log_path="",
         replay_commands=(),
         manifest_sha256=binding["manifest_sha256"],
@@ -2523,6 +2789,9 @@ def run_formal_bundle(evidence: FormalEvidence) -> FormalResult:
             returncode=0,
             duration_seconds=time.monotonic() - started,
             tool_versions={"aggregator": "sva2rtl"},
+            tool_identities=cast(
+                dict[str, dict[str, object]], evidence.manifest["toolchain"]
+            ),
             log_path="aggregation.log",
             trace_paths=_trace_paths(evidence.bundle_dir),
             cover_status=CoverStatus.REACHED,
@@ -2534,8 +2803,10 @@ def run_formal_bundle(evidence: FormalEvidence) -> FormalResult:
         )
         _write_json(evidence.bundle_dir / "result.json", result.to_dict())
         return result
+    current_toolchain = _require_unchanged_toolchain(evidence)
     is_live = evidence.manifest.get("backend") == "open-live-suprove"
     live_info = discover_live_backend(config) if is_live else None
+    primary_attempted = live_info is None or live_info.available
     if live_info is not None and not live_info.available:
         returncode, output, timed_out = None, live_info.guidance, False
         status = FormalStatus.UNKNOWN
@@ -2564,7 +2835,9 @@ def run_formal_bundle(evidence: FormalEvidence) -> FormalResult:
     cover_status = CoverStatus.NOT_RUN
     cover_returncode: int | None = None
     cover_log_path: str | None = None
+    cover_attempted = False
     if status is FormalStatus.PROVEN or is_live:
+        cover_attempted = True
         cover_returncode, cover_output, cover_timed_out = _run_sby_process(
             evidence, "formal_cover.sby"
         )
@@ -2592,12 +2865,29 @@ def run_formal_bundle(evidence: FormalEvidence) -> FormalResult:
         message=message,
         returncode=returncode,
         duration_seconds=time.monotonic() - started,
-        tool_versions={
-            "sby": _probe_version([config.sby_path, "--version"]),
-            "slang": _probe_version([config.slang_path, "--version"]),
-            "yosys": _probe_version(["yosys", "-V"]),
-        }
-        | ({"suprove": live_info.version} if live_info is not None else {}),
+        tool_versions=tool_versions(current_toolchain),
+        tool_identities=current_toolchain,
+        executed_commands=tuple(
+            [
+                *(
+                    [
+                        role_command(
+                            "sby",
+                            "-f",
+                            "formal.sby",
+                            *(("--suprove", "@tool:suprove") if is_live else ()),
+                        )
+                    ]
+                    if primary_attempted
+                    else []
+                ),
+                *(
+                    [role_command("sby", "-f", "formal_cover.sby")]
+                    if cover_attempted
+                    else []
+                ),
+            ]
+        ),
         log_path="sby.log",
         trace_paths=_trace_paths(evidence.bundle_dir),
         cover_status=cover_status,

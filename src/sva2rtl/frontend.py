@@ -47,6 +47,16 @@ class SlangCompilationContext:
     single_unit: bool = False
 
 
+@dataclass(frozen=True, slots=True)
+class SlangPreprocessedProject:
+    """Self-contained project snapshot and its slang-resolved dependencies."""
+
+    text: str
+    dependencies: tuple[Path, ...]
+    module_dependencies: tuple[Path, ...]
+    include_dependencies: tuple[Path, ...]
+
+
 def _checked_text(value: str, label: str) -> str:
     if not value or any(char in value for char in ("\x00", "\n", "\r")):
         raise SvaCompileError(message=f"invalid {label}: {value!r}")
@@ -98,13 +108,12 @@ def _unique_paths(paths: list[Path]) -> list[Path]:
     return result
 
 
-def _build_slang_command(
+def _build_slang_input_command(
     sv_file: Path,
     slang_path: str,
-    ast_json_path: str,
     context: SlangCompilationContext,
-) -> list[str]:
-    """Build a validated argv list while reserving internal AST options."""
+) -> tuple[list[str], list[Path]]:
+    """Build validated project arguments shared by AST and preprocessing calls."""
     command = [_checked_text(slang_path, "slang path")]
 
     for path in _unique_paths(
@@ -151,11 +160,118 @@ def _build_slang_command(
         ]
     )
     command.extend(str(path) for path in sources)
+    return command, sources
+
+
+def _build_slang_command(
+    sv_file: Path,
+    slang_path: str,
+    ast_json_path: str,
+    context: SlangCompilationContext,
+) -> list[str]:
+    """Build a validated argv list while reserving internal AST options."""
+    command, _sources = _build_slang_input_command(sv_file, slang_path, context)
 
     # Keep compiler-owned output controls last so structured project context
     # cannot accidentally replace the AST evidence file.
     command.extend(("--ast-json", ast_json_path, "--ast-json-source-info"))
     return command
+
+
+def _run_slang(command: list[str], slang_path: str, *, timeout: int = 60) -> str:
+    """Run a validated slang argv and return stdout with uniform diagnostics."""
+    try:
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except FileNotFoundError:
+        raise SlangNotFound(
+            message=(
+                f"slang not found at '{slang_path}'.\n"
+                "Install: https://github.com/MikePopoloski/slang/releases\n"
+                "Or pass: --slang-path /path/to/slang"
+            ),
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise SvaCompileError(message=f"slang timed out after {timeout} seconds") from exc
+    if result.returncode != 0:
+        raise SvaCompileError(
+            message=f"slang failed (exit {result.returncode}):\n{result.stderr}",
+        )
+    return result.stdout
+
+
+def _read_dependency_file(path: Path) -> tuple[Path, ...]:
+    """Read slang's newline dependency format and reject missing entries."""
+    dependencies: list[Path] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        dependency = Path(line.strip()).resolve()
+        if not dependency.is_file():
+            raise SvaCompileError(
+                message=f"slang dependency does not exist: {dependency.name}"
+            )
+        dependencies.append(dependency)
+    return tuple(_unique_paths(dependencies))
+
+
+def preprocess_slang_project(
+    sv_file: Path,
+    slang_path: str = "slang",
+    *,
+    context: SlangCompilationContext | None = None,
+) -> SlangPreprocessedProject:
+    """Resolve a real project and emit a self-contained, replay-safe SV snapshot.
+
+    Library modules discovered lazily by slang are added explicitly to the
+    preprocessing pass. This is necessary because ``slang -E`` does not emit
+    modules found through ``-y`` unless they are also named source inputs.
+    """
+    selected_context = context or SlangCompilationContext()
+    command, sources = _build_slang_input_command(
+        sv_file, slang_path, selected_context
+    )
+    with tempfile.TemporaryDirectory(prefix="sva2rtl-slang-deps-") as temp:
+        temp_dir = Path(temp)
+        all_path = temp_dir / "all.txt"
+        module_path = temp_dir / "modules.txt"
+        include_path = temp_dir / "includes.txt"
+        _run_slang(
+            [
+                *command,
+                "--all-deps",
+                str(all_path),
+                "--module-deps",
+                str(module_path),
+                "--include-deps",
+                str(include_path),
+            ],
+            slang_path,
+        )
+        dependencies = _read_dependency_file(all_path)
+        module_dependencies = _read_dependency_file(module_path)
+        include_dependencies = _read_dependency_file(include_path)
+
+    explicit_sources = _unique_paths([*sources, *module_dependencies])
+    option_count = len(command) - len(sources)
+    preprocess_command = [
+        *command[:option_count],
+        *(str(path) for path in explicit_sources),
+        "-E",
+    ]
+    text = _run_slang(preprocess_command, slang_path)
+    if not text.strip():
+        raise SvaCompileError(message="slang preprocessing produced an empty project")
+    return SlangPreprocessedProject(
+        text=text,
+        dependencies=dependencies,
+        module_dependencies=module_dependencies,
+        include_dependencies=include_dependencies,
+    )
 
 
 def invoke_slang(

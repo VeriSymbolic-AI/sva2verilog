@@ -17,7 +17,12 @@ from pathlib import Path
 APACHE_2_LICENSE_SHA256 = "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
 
 
-def _run(command: list[str], *, cwd: Path) -> subprocess.CompletedProcess[str]:
+def _run(
+    command: list[str],
+    *,
+    cwd: Path,
+    expected_returncodes: frozenset[int] = frozenset({0}),
+) -> subprocess.CompletedProcess[str]:
     result = subprocess.run(
         command,
         cwd=cwd,
@@ -25,7 +30,7 @@ def _run(command: list[str], *, cwd: Path) -> subprocess.CompletedProcess[str]:
         text=True,
         check=False,
     )
-    if result.returncode != 0:
+    if result.returncode not in expected_returncodes:
         rendered = " ".join(command)
         raise RuntimeError(
             f"command failed ({result.returncode}): {rendered}\n"
@@ -80,11 +85,18 @@ def inspect_artifacts(wheel: Path, sdist: Path) -> None:
             raise RuntimeError("sdist LICENSE could not be read")
         if hashlib.sha256(extracted_license.read()).hexdigest() != APACHE_2_LICENSE_SHA256:
             raise RuntimeError("sdist LICENSE does not match the official Apache-2.0 text")
-    forbidden_roots = {"tests", "tools", ".github", ".planning", ".gsd"}
+    forbidden_roots = {"tests", ".github", ".planning", ".gsd"}
     leaked = sorted(
         str(path)
         for path in sdist_names
-        if len(path.parts) > 1 and path.parts[1] in forbidden_roots
+        if len(path.parts) > 1
+        and (
+            path.parts[1] in forbidden_roots
+            or (
+                path.parts[1] == "tools"
+                and (len(path.parts) < 3 or path.parts[2] != "formal")
+            )
+        )
     )
     if leaked:
         raise RuntimeError(f"sdist includes development-only paths: {leaked[:10]}")
@@ -170,7 +182,11 @@ def smoke_installed_wheel(wheel: Path) -> None:
                 "--compile-only",
             ],
             cwd=work,
+            expected_returncodes=frozenset({11}),
         )
+        result_payload = json.loads((evidence / "result.json").read_text(encoding="utf-8"))
+        if result_payload["status"] != "UNKNOWN":
+            raise RuntimeError("installed formal compile-only command hid UNKNOWN status")
         manifest = json.loads((evidence / "manifest.json").read_text(encoding="utf-8"))
         if manifest["config"]["logic_semantics"] != "two-state":
             raise RuntimeError("installed formal CLI omitted the semantic profile")

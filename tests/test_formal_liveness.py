@@ -152,6 +152,9 @@ def test_live_bundle_uses_yosys_primitives_and_excludes_original_sva(
     bind = (evidence.bundle_dir / "formal_bind.sv").read_text(encoding="utf-8")
     sby = (evidence.bundle_dir / "formal.sby").read_text(encoding="utf-8")
     cover_sby = (evidence.bundle_dir / "formal_cover.sby").read_text(encoding="utf-8")
+    result = json.loads(
+        (evidence.bundle_dir / "result.json").read_text(encoding="utf-8")
+    )
     assert r"\$live" in bind
     assert "witness_select" in bind and "pending_q" in bind
     assert "mode live" in sby and "aiger suprove" in sby
@@ -159,6 +162,16 @@ def test_live_bundle_uses_yosys_primitives_and_excludes_original_sva(
     assert r"delete =\$live" in sby
     assert r"delete =\$fair" not in sby
     assert "mode cover" in cover_sby and "smtbmc yices" in cover_sby
+    assert result["replay_commands"] == [
+        [
+            "@tool:sby",
+            "-f",
+            "formal.sby",
+            "--suprove",
+            "@tool:suprove",
+        ],
+        ["@tool:sby", "-f", "formal_cover.sby"],
+    ]
 
 
 @pytest.mark.formal

@@ -202,6 +202,28 @@ sva2rtl-formal \
   --output evidence/progress
 ```
 
+For a real project, pass the same structured compilation context used by the
+design build. The formal workflow resolves filelists, includes, macros, top
+parameters, and libraries with slang, then freezes a self-contained DUT
+snapshot. Only that assertion-free snapshot enters Yosys:
+
+```bash
+sva2rtl-formal \
+  --dut rtl/top.sv \
+  --property-file properties/progress.sv \
+  --property req_eventually_ack \
+  --top soc_top \
+  -F project/files.f -I rtl/include -D FEATURE_READY=1 \
+  -G DATA_WIDTH=64 -y rtl/lib -Y .sv --single-unit \
+  --output evidence/progress
+```
+
+`--compile-only` intentionally returns exit code 11 and writes `UNKNOWN`; it is
+never a successful proof. Check the local runtime with
+`sva2rtl-formal-doctor --json-output`. If macOS lacks Super Prove, use the
+[SHA-pinned Linux replay image](tools/formal/README.md) for the unchanged
+evidence bundle.
+
 Safety and bounded obligations use the open Yosys/SymbiYosys path. Selected
 true-liveness obligations use `mode live` and require Super Prove; pass
 `--suprove-path /path/to/suprove` if it is not on `PATH`. User-supplied
@@ -225,6 +247,12 @@ integral types and one fixed packed dimension. Multi-dimensional packed,
 unpacked-array, aggregate, and otherwise complex observed types reject instead
 of being partially parsed or flattened. A downstream frontend can still reject
 an unrelated DUT construct it cannot lower.
+
+The manifest records privacy-safe executable fingerprints and role-bound replay
+commands (`@tool:sby`), so a result cannot silently switch to another `sby` on
+`PATH`. It also hashes the preprocessed DUT/property snapshots and resolved
+dependency inventory. Project-context decomposition certificates remain
+fail-closed until a schema-v3 certificate binds that dependency snapshot.
 
 ## CLI Reference
 

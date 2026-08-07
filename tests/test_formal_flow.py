@@ -202,6 +202,29 @@ def test_formal_bind_uses_explicit_ports_assert_and_cover() -> None:
     assert ".*" not in text
 
 
+def test_formal_bind_connects_custom_reset_observation_to_monitor() -> None:
+    checker = CheckerNode(
+        template_name="disable_iff",
+        module_name="custom_reset_checker",
+        children=(_checker(),),
+        params={
+            "clock_edge": "posedge",
+            "condition": "!rst_ni",
+        },
+        observed_signals=(("rst_ni", "rst_ni"),),
+        source_loc=_loc(),
+    )
+    text = render_formal_bind(
+        checker,
+        top="dut",
+        clock="clk_i",
+        reset="rst_ni",
+    )
+    assert text.count("input logic rst_ni") == 1
+    assert ".rst_n(rst_ni)" in text
+    assert ".rst_ni(rst_ni)" in text
+
+
 def test_bundle_excludes_property_from_sby_and_uses_relative_manifest_paths(
     tmp_path: Path,
 ) -> None:
@@ -223,10 +246,16 @@ def test_bundle_excludes_property_from_sby_and_uses_relative_manifest_paths(
 
     assert "evidence/property.sv" not in sby_text
     assert "property.sv" not in sby_text
-    assert "dut_000.sv" in sby_text
+    assert "dut_preprocessed.sv" in sby_text
     assert "formal_bind.sv" in sby_text
     assert (evidence.bundle_dir / "evidence" / "property.sv").exists()
     assert manifest["property"]["path"] == "evidence/property.sv"
+    assert manifest["project_context"]["dut_snapshot"]["path"] == (
+        "dut_preprocessed.sv"
+    )
+    assert manifest["project_context"]["property_snapshot"]["path"] == (
+        "evidence/property_preprocessed.sv"
+    )
     assert manifest["property_class"] == "finite-verdict"
     assert len(manifest["property"]["sha256"]) == 64
     serialized = json.dumps(manifest, sort_keys=True)
@@ -418,7 +447,20 @@ def test_result_and_manifest_bind_replay_to_checked_inputs(tmp_path: Path) -> No
     assert result["property_sha256"] == evidence.manifest["property"]["sha256"]
     assert result["checker"] == evidence.checker_module
     assert result["replay_commands"] == [
-        ["sby", "-f", "formal.sby"],
-        ["sby", "-f", "formal_cover.sby"],
+        ["@tool:sby", "-f", "formal.sby"],
+        ["@tool:sby", "-f", "formal_cover.sby"],
     ]
+    assert result["tool_identities"] == evidence.manifest["toolchain"]
+    assert result["tool_versions"]["sby"]
     assert contract["status"] == "MATCHED"
+
+
+@pytest.mark.skipif(shutil.which("slang") is None, reason="slang is not installed")
+def test_run_rejects_tool_identity_drift_after_bundle_creation(tmp_path: Path) -> None:
+    evidence = build_formal_bundle(_config(tmp_path))
+    changed = json.loads(json.dumps(evidence.manifest["toolchain"]))
+    changed["sby"]["sha256"] = "f" * 64
+
+    with patch("sva2rtl.formal_flow._toolchain_for_config", return_value=changed):
+        with pytest.raises(ValueError, match="toolchain changed"):
+            run_formal_bundle(evidence)

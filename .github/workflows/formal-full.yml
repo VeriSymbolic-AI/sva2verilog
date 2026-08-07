@@ -45,8 +45,8 @@ jobs:
             # induction-convergence boundary. Counterexamples remain hard failures.
             max-skipped: 1
           - suite: open-user-dut
-            files: tests/test_formal_user_dut.py tests/test_formal_safety_rewrites.py tests/test_formal_advanced_safety.py tests/test_formal_symbolic_witness.py tests/test_formal_evidence_gates.py tests/test_formal_boundaries.py tests/test_formal_locals.py tests/test_formal_status_corpus.py
-            min-passed: 66
+            files: tests/test_formal_user_dut.py tests/test_formal_safety_rewrites.py tests/test_formal_advanced_safety.py tests/test_formal_symbolic_witness.py tests/test_formal_evidence_gates.py tests/test_formal_boundaries.py tests/test_formal_locals.py tests/test_formal_status_corpus.py tests/test_formal_project_context.py tests/test_external_rtl_corpus.py
+            min-passed: 71
             max-skipped: 0
           - suite: open-liveness
             files: tests/test_formal_liveness.py

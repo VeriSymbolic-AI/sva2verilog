@@ -291,6 +291,33 @@ def test_decomposition_rejects_tampered_pass_log(tmp_path: Path) -> None:
 
 @pytest.mark.formal
 @requires_formal_stack
+def test_decomposition_rejects_unexecuted_replay_contract(tmp_path: Path) -> None:
+    dut, prop = _sources(tmp_path)
+    certificate = _write_certificate(tmp_path, dut, prop)
+    certificate_payload = json.loads(certificate.read_text(encoding="utf-8"))
+    proof = tmp_path / certificate_payload["subproperties"][0][
+        "proof_artifact_path"
+    ]
+    proof_payload = json.loads(proof.read_text(encoding="utf-8"))
+    proof_payload["executed_commands"] = []
+    proof.write_text(
+        json.dumps(proof_payload, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    certificate_payload["subproperties"][0]["proof_artifact_sha256"] = _sha256(
+        proof
+    )
+    certificate.write_text(
+        json.dumps(certificate_payload, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="complete replay contract"):
+        build_formal_bundle(_config(tmp_path, certificate=certificate))
+
+
+@pytest.mark.formal
+@requires_formal_stack
 def test_decomposition_rejects_a_proof_with_different_context(tmp_path: Path) -> None:
     dut, prop = _sources(tmp_path)
     certificate = _write_certificate(tmp_path, dut, prop)

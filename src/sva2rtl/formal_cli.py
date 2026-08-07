@@ -48,6 +48,55 @@ _EXIT_CODES = {
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
     help="Separate SVA property source parsed only by slang/sva2rtl",
 )
+@click.option(
+    "--property-source",
+    "property_sources",
+    multiple=True,
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    help="Additional property/package source kept outside Yosys (repeatable)",
+)
+@click.option(
+    "-F",
+    "--filelist",
+    "filelists",
+    multiple=True,
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    help="Structured slang project filelist (repeatable)",
+)
+@click.option(
+    "-I",
+    "--include",
+    "include_dirs",
+    multiple=True,
+    type=click.Path(exists=True, file_okay=False, path_type=Path),
+    help="SystemVerilog include directory (repeatable)",
+)
+@click.option("-D", "--define", "defines", multiple=True, metavar="NAME[=VALUE]")
+@click.option(
+    "-G",
+    "--parameter",
+    "parameter_overrides",
+    multiple=True,
+    metavar="NAME=VALUE",
+    help="Atomic top parameter override bound into replay (repeatable)",
+)
+@click.option(
+    "-v",
+    "--library-file",
+    "library_files",
+    multiple=True,
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+)
+@click.option(
+    "-y",
+    "--library-dir",
+    "library_dirs",
+    multiple=True,
+    type=click.Path(exists=True, file_okay=False, path_type=Path),
+)
+@click.option("-Y", "--library-extension", "library_extensions", multiple=True)
+@click.option("-L", "--library-order", "library_order", multiple=True)
+@click.option("--single-unit", is_flag=True, help="Compile project as one unit")
 @click.option("--property", "property_name", help="Assertion label, 1-based index, or @line")
 @click.option("--top", required=True, help="DUT top module receiving the generated bind")
 @click.option("--clock", default="clk", show_default=True, help="Property clock signal")
@@ -118,12 +167,22 @@ _EXIT_CODES = {
 @click.option(
     "--compile-only",
     is_flag=True,
-    help="Generate the replayable bundle without invoking SymbiYosys",
+    help="Generate an UNKNOWN replayable bundle without invoking SymbiYosys (exit 11)",
 )
 @click.version_option(package_name="sva2rtl", prog_name="sva2rtl-formal")
 def main(
     dut_sources: tuple[Path, ...],
     property_file: Path,
+    property_sources: tuple[Path, ...],
+    filelists: tuple[Path, ...],
+    include_dirs: tuple[Path, ...],
+    defines: tuple[str, ...],
+    parameter_overrides: tuple[str, ...],
+    library_files: tuple[Path, ...],
+    library_dirs: tuple[Path, ...],
+    library_extensions: tuple[str, ...],
+    library_order: tuple[str, ...],
+    single_unit: bool,
     property_name: str | None,
     top: str,
     clock: str,
@@ -147,7 +206,7 @@ def main(
     """Verify a separate SVA property against a real DUT with open tools.
 
     The original property source is retained as evidence but is never passed to
-    Yosys.  Exit codes: 0 PROVEN/compiled, 10 FAILED, 11 UNKNOWN,
+    Yosys.  Exit codes: 0 PROVEN, 10 FAILED, 11 UNKNOWN (including compile-only),
     12 UNSUPPORTED, 13 TIMEOUT, 1 ERROR, 2 usage/property selection, 3 slang missing.
     """
     config: FormalRunConfig | None = None
@@ -155,6 +214,16 @@ def main(
         config = FormalRunConfig(
             dut_sources=dut_sources,
             property_file=property_file,
+            property_sources=property_sources,
+            filelists=filelists,
+            include_dirs=include_dirs,
+            defines=defines,
+            parameter_overrides=parameter_overrides,
+            library_files=library_files,
+            library_dirs=library_dirs,
+            library_extensions=library_extensions,
+            library_order=library_order,
+            single_unit=single_unit,
             property_name=property_name,
             top=top,
             clock=clock,
@@ -178,7 +247,7 @@ def main(
         result_path = evidence.bundle_dir / "result.json"
         if compile_only:
             click.echo(f"UNKNOWN: formal bundle compiled but not executed: {result_path}")
-            return
+            raise click.exceptions.Exit(_EXIT_CODES[FormalStatus.UNKNOWN])
 
         result = run_formal_bundle(evidence)
         click.echo(f"{result.status.value}: {result.message}")

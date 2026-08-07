@@ -29,6 +29,7 @@ from sva2rtl.ast_importer import (
 from sva2rtl.errors import SvaCompileError, UnsupportedConstruct
 from sva2rtl.ir import (
     BoolConst,
+    BoolExpr,
     PropNot,
     SeqAnd,
     SeqIntersect,
@@ -434,3 +435,44 @@ def test_sequence_concat_rejects_either_negative_delay_endpoint() -> None:
 
     with pytest.raises(SvaCompileError, match="negative delay"):
         _build_seq_concat(node, _LOC)
+
+
+def test_sequence_concat_preserves_v11_single_element_leading_delay() -> None:
+    node = {
+        "elements": [
+            {
+                "sequence": {"kind": "NamedValue", "symbol": "1 ack"},
+                "min": "2",
+                "max": "2",
+            }
+        ]
+    }
+
+    result = _build_seq_concat(node, _LOC)
+
+    assert len(result.elements) == 2
+    assert isinstance(result.elements[0], BoolExpr)
+    assert result.elements[0].text == "1'b1"
+    assert result.delays == ((2, 2),)
+
+
+def test_sequence_concat_preserves_v11_leading_and_interelement_delays() -> None:
+    node = {
+        "elements": [
+            {
+                "sequence": {"kind": "NamedValue", "symbol": "1 a"},
+                "min": "1",
+                "max": "1",
+            },
+            {
+                "sequence": {"kind": "NamedValue", "symbol": "2 b"},
+                "min": "2",
+                "max": "3",
+            },
+        ]
+    }
+
+    result = _build_seq_concat(node, _LOC)
+
+    assert len(result.elements) == 3
+    assert result.delays == ((1, 1), (2, 3))

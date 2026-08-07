@@ -105,6 +105,19 @@ z3 --version
 suprove --version
 ```
 
+Or use the machine-readable capability check:
+
+```bash
+sva2rtl-formal-doctor --json-output
+sva2rtl-formal-doctor --require-live
+```
+
+The second command exits 11 unless both safety tools and Super Prove are
+available. On hosts without Super Prove, the repository provides a
+[SHA-pinned Linux replay image](tools/formal/README.md) based on OSS CAD Suite
+2026-07-21. The image supplies tools; it does not change assumptions, semantics,
+or an `UNKNOWN` result.
+
 Then install the locked Python dependencies:
 
 ```bash
@@ -176,11 +189,28 @@ sva2rtl-formal \
   --output evidence/req-eventually-ack
 ```
 
-The evidence bundle contains copied and hashed DUT/property inputs,
+The formal CLI accepts the same structured project context needed by a real
+design without exposing raw shell arguments:
+
+```bash
+sva2rtl-formal \
+  --dut rtl/top.sv \
+  --property-file properties/progress.sv \
+  --property req_eventually_ack \
+  --top soc_top \
+  -F project/files.f -I rtl/include -D FEATURE_READY=1 \
+  -G DATA_WIDTH=64 -v rtl/models.sv -y rtl/lib -Y .sv -L work \
+  --single-unit \
+  --output evidence/req-eventually-ack
+```
+
+The evidence bundle contains copied and hashed original inputs, self-contained
+preprocessed DUT/property snapshots, a privacy-safe dependency inventory,
 `formal_bind.sv`, `formal.sby`, a separate cover task, the property slice,
-tool discovery, logs, traces, and `result.json`. The original property is an
-evidence input only and is intentionally absent from `yosys_inputs`; Yosys sees
-the DUT plus generated formal primitives.
+tool identities, logs, traces, and `result.json`. The original property and its
+snapshot are evidence inputs only and are intentionally absent from
+`yosys_inputs`; Yosys sees the assertion-free DUT snapshot plus generated formal
+primitives. Top parameter overrides are serialized into the replay project.
 
 This separation is enforced rather than assumed. Before bundle creation, slang
 elaborates the selected DUT top independently. Concurrent and immediate
@@ -319,6 +349,20 @@ The result schema binds each normal proof to `manifest_sha256`,
 rehashed immediately before solver execution; modifying a generated bind,
 source, project, profile, or manifest invalidates the run.
 
+Replay commands name the recorded tool role (`@tool:sby`) rather than a literal
+PATH lookup. The manifest fingerprints the configured slang, SBY, Yosys,
+`yosys-smtbmc`, solver, and Super Prove executables, and execution aborts if a
+required identity changes after bundle creation. Live replay also binds the
+`--suprove @tool:suprove` argument instead of recording only the outer SBY
+command. `--compile-only` writes a replayable `UNKNOWN` bundle and exits 11;
+only an unbounded proof plus `REACHED` critical cover can exit 0.
+
+Schema-v2 decomposition remains supported for flat explicit DUT/property input
+files. Supplying filelists, include/library directories, macros, parameters, or
+single-unit context together with a decomposition certificate is deliberately
+rejected until schema v3 can bind the resolved dependency snapshots. This is a
+known safe limitation, not an implicit equivalence claim.
+
 `--force` can replace only a directory previously created by this formal
 workflow and carrying its private evidence marker. It refuses filesystem/home/
 working roots, DUT/property/decomposition-input ancestors, regular files, and
@@ -332,8 +376,9 @@ finite counterexample to a progress encoding, but a bounded no-counterexample
 result cannot prove that something eventually happens at an unknown future
 time. Safe choices are:
 
-1. Run the unchanged evidence bundle on a Linux x64 OSS CAD Suite worker that
-   includes `suprove`.
+1. Run the unchanged evidence bundle on a Linux OSS CAD Suite worker that
+   includes `suprove`; the repository's pinned replay image supports x64 and
+   arm64 archives with published SHA-256 checks.
 2. Use a real, reviewed finite deadline only if the protocol specification
    actually has one; then verify the bounded property as safety.
 3. Decompose the property into smaller obligations only with a checked

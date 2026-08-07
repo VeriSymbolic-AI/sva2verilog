@@ -30,6 +30,8 @@ jobs:
           tests/test_sequential.py
       - name: Reject personal identifiers and committed secrets
         run: uv run python tools/ci/check_release_privacy.py
+      - name: Validate support evidence routes and promotion gates
+        run: uv run python tools/ci/check_support_evidence.py
 
   test:
     strategy:
@@ -190,6 +192,7 @@ jobs:
           tests/test_formal_user_dut.py::test_bad_dut_returns_counterexample_and_trace
           tests/test_formal_locals.py::test_real_solver_distinguishes_good_and_bad_local_capture
           tests/test_formal_liveness.py::test_real_live_engine_distinguishes_good_and_bad_liveness
+          tests/test_external_rtl_corpus.py::test_opentitan_sync_slice_proves_and_latency_mutant_fails
           -v --timeout=120 --junitxml=pytest-results.xml
         env:
           SLANG_PATH: /usr/local/bin/slang
@@ -198,7 +201,7 @@ jobs:
       - name: Enforce formal smoke execution budget
         run: >
           uv run python tools/ci/check_junit.py pytest-results.xml
-          --min-passed 9 --max-skipped 0
+          --min-passed 10 --max-skipped 0
 
   coverage:
     name: coverage regression gate

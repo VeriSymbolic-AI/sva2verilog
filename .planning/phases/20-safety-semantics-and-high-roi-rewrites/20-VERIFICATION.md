@@ -49,3 +49,14 @@ occurrence forms are intentionally routed to liveness rather than weakened.
 - True liveness, including goto/nonconsecutive eventual completion, remains for
   Phase 22.
 - Completion/antecedent cover gating and formal scale decoupling remain Phase 21.
+
+## 2026-08-07 Reverification Note
+
+Phase 20 was rechecked after the trust-hardening work found a slang-v11
+single-element `SequenceConcat` boundary: a leading `##N` in an implication
+consequent had been silently discarded. The importer now materializes the
+implicit true start event and preserves both leading and following delays.
+Unit regressions, the full AST importer mutation sweep (123/123 covered valid
+mutants killed), the external OpenTitan good/mutant formal pair, the 1751-test
+default suite, and the 222-test Full Formal selection passed. The Phase 20
+verdict remains passed for its stated safety/bounded scope.

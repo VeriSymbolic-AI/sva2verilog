@@ -1,9 +1,34 @@
 # Industrial Validation Gap Plan
 
-> Date: 2026-08-02
-> Scope: v1.7.1 post-release qualification and current `main`
+> Date: 2026-08-07
+> Scope: v1.7.1 package, v2.0 formal-first baseline, and current trust-hardening worktree
 > Reader: future maintainer, external reviewer, or industrial user evaluating trust
 > Post-read action: decide and execute the next validation work needed before calling the project industrial-grade
+
+## 2026-08-07 Current v2.0 Update
+
+The exact executable/documentation baseline
+`d7ffe10f9294424482dd7a869a2867d3aee61e6e` passed CI `30910167848`
+(13/13 jobs), differential nightly `30910169662` (3/3 jobs), and Full Formal
+`30910169857` (8/8 shards). This qualifies the workflow at that SHA, but still
+does not promote a construct row by itself.
+
+The current worktree adds fail-closed compile-only exit status, executable
+fingerprints and role-bound replay commands, self-contained structured-project
+formal snapshots, a pinned Linux liveness replay image, and a small real
+external RTL slice from OpenTitan with a killed latency mutant. That external
+slice is explicitly not OpenTitan, CDC, metastability, or industrial sign-off
+evidence. It also exposed and fixed two semantic defects: slang-v11 leading
+delays such as `a |-> ##2 b` were discarded by the importer, and a custom reset
+name used by `disable iff` was left unconnected in the generated monitor bind.
+
+These worktree changes require fresh exact-SHA CI, nightly, and Full Formal
+qualification before the support matrix can consume them as remote evidence.
+The focused machine-readable routing ledger is `support_evidence.json`; its CI
+validator refuses `fully_supported` while the current worktree qualification
+state is incomplete. The rest of this document retains dated evidence snapshots
+for audit history; where an older paragraph says “current” or “candidate”, read
+it as historical unless superseded above.
 
 ## Executive Summary
 

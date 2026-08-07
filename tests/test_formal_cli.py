@@ -60,6 +60,16 @@ def test_help_lists_formal_inputs() -> None:
     for option in (
         "--dut",
         "--property-file",
+        "--property-source",
+        "--filelist",
+        "--include",
+        "--define",
+        "--parameter",
+        "--library-file",
+        "--library-dir",
+        "--library-extension",
+        "--library-order",
+        "--single-unit",
         "--property",
         "--top",
         "--clock",
@@ -87,11 +97,24 @@ def test_compile_only_builds_without_running(
     with patch("sva2rtl.formal_cli.build_formal_bundle", return_value=evidence) as build:
         with patch("sva2rtl.formal_cli.run_formal_bundle") as run:
             result = CliRunner().invoke(main, [*_args(tmp_path, sources), "--compile-only"])
-    assert result.exit_code == 0
+    assert result.exit_code == 11
     assert "compiled" in result.output.lower()
     assert "result.json" in result.output
     build.assert_called_once()
     run.assert_not_called()
+
+
+def test_only_proven_or_help_can_exit_zero(
+    tmp_path: Path, sources: tuple[Path, Path]
+) -> None:
+    evidence = MagicMock()
+    evidence.bundle_dir = tmp_path / "evidence"
+    with patch("sva2rtl.formal_cli.build_formal_bundle", return_value=evidence):
+        compile_only = CliRunner().invoke(
+            main, [*_args(tmp_path, sources), "--compile-only"]
+        )
+    assert compile_only.exit_code != 0
+    assert "UNKNOWN" in compile_only.output
 
 
 @pytest.mark.parametrize(
@@ -149,7 +172,7 @@ def test_options_map_to_typed_config(tmp_path: Path, sources: tuple[Path, Path])
     ]
     with patch("sva2rtl.formal_cli.build_formal_bundle", return_value=evidence) as build:
         result = CliRunner().invoke(main, args)
-    assert result.exit_code == 0
+    assert result.exit_code == 11
     config = build.call_args.args[0]
     assert config.mode is FormalMode.BMC
     assert config.attempt_mode is AttemptMode.SYMBOLIC_WITNESS

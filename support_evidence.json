@@ -1,0 +1,84 @@
+{
+  "schema_version": 1,
+  "authority": "SUPPORT_MATRIX.md",
+  "claim_boundary": "This focused ledger is machine-checkable evidence routing, not a certification or an exhaustive IEEE 1800 support claim.",
+  "qualified_baseline": {
+    "executable_sha": "d7ffe10f9294424482dd7a869a2867d3aee61e6e",
+    "ci_run": "30910167848",
+    "differential_run": "30910169662",
+    "full_formal_run": "30910169857"
+  },
+  "current_worktree_qualification": "pending-exact-sha-remote-gates",
+  "capabilities": {
+    "fixed_delay_and_leading_consequent": {
+      "status": "bounded_evidence",
+      "evidence": {
+        "real_source": [
+          "tests/sv_fixtures/delay_fixed_1.sv",
+          "tests/external_corpus/opentitan/two_cycle_property.sv"
+        ],
+        "frontend_regression": [
+          "tests/test_ast_importer_mutation_boundaries.py",
+          "tests/test_external_rtl_corpus.py"
+        ],
+        "dual_simulation": [
+          "tests/simulation/test_sim_delay.py"
+        ],
+        "independent_reference": [
+          "tests/test_formal_sva_equiv.py"
+        ],
+        "real_dut_formal_and_mutant": [
+          "tests/test_external_rtl_corpus.py"
+        ],
+        "synthesis_and_lint": [
+          "tests/test_synthesis_gates.py",
+          "tests/test_generated_lint.py"
+        ]
+      },
+      "blockers": [
+        "fresh exact-SHA CI, differential-nightly, and Full Formal qualification",
+        "independent property-level comparison against another SVA frontend for the leading-delay shape"
+      ]
+    },
+    "structured_real_project_formal": {
+      "status": "bounded_evidence",
+      "evidence": {
+        "filelist_include_define_parameter_library": [
+          "tests/test_formal_project_context.py"
+        ],
+        "source_isolation_and_privacy": [
+          "tests/test_formal_project_context.py",
+          "src/sva2rtl/frontend.py"
+        ],
+        "replay_contract": [
+          "src/sva2rtl/formal_toolchain.py",
+          "tests/test_formal_portability.py"
+        ]
+      },
+      "blockers": [
+        "project-context decomposition certificate schema v3 is intentionally rejected",
+        "large, multi-file industrial project corpus remains absent"
+      ]
+    },
+    "open_unbounded_liveness": {
+      "status": "conditional_formal_evidence",
+      "evidence": {
+        "live_backend": [
+          "tests/test_formal_liveness.py"
+        ],
+        "portable_linux_runtime": [
+          "tools/formal/Dockerfile",
+          "tools/formal/README.md"
+        ],
+        "capability_diagnosis": [
+          "src/sva2rtl/formal_doctor.py",
+          "tests/test_formal_portability.py"
+        ]
+      },
+      "blockers": [
+        "supported liveness shapes remain intentionally narrow",
+        "independent live-oracle diversity and commercial cross-check remain absent"
+      ]
+    }
+  }
+}

@@ -1861,24 +1861,49 @@ def _build_seq_concat(
         seq_node = elem.get("sequence", {})
         elements.append(_dispatch_expr_to_ir(seq_node, _visited))
 
-    # Detect convention: if elem[1] has non-zero min/max, it's new-style
-    # (delay on the target element). Otherwise, delay is on the source element.
-    if len(elements_raw) >= 2:
-        e0_min = int(elements_raw[0].get("min", "0"))
-        e0_max = int(elements_raw[0].get("max", "0"))
-        e1_min = int(elements_raw[1].get("min", "0"))
-        e1_max = int(elements_raw[1].get("max", "0"))
-
-        # New convention: elem[0].min=0 (sentinel), delay on elem[1+]
-        if e0_min == 0 and e0_max == 0 and (e1_min > 0 or e1_max > 0):
-            for i, elem in enumerate(elements_raw):
-                if i > 0:
-                    delays.append((int(elem.get("min", "0")), int(elem.get("max", "0"))))
+    raw_delays = [
+        (int(elem.get("min", "0")), int(elem.get("max", "0")))
+        for elem in elements_raw
+    ]
+    if len(elements_raw) == 1 and raw_delays[0] != (0, 0):
+        # slang v11 represents a leading delay (``##N expr``) as a one-element
+        # concat whose first element owns the delay. The IR intentionally keeps
+        # N elements / N-1 edges, so materialize the implicit true start event.
+        elements.insert(
+            0,
+            BoolExpr(
+                text="1'b1",
+                expr=BoolConst(value=1, width=1, signed=False, source_loc=source_loc),
+                source_loc=source_loc,
+            ),
+        )
+        delays.append(raw_delays[0])
+    elif len(elements_raw) >= 2:
+        # Old slang writes each delay on its source element and leaves the last
+        # element at zero. New slang writes delays on target elements, including
+        # a non-zero first element for a leading delay.
+        old_style = raw_delays[-1] == (0, 0) and any(
+            delay != (0, 0) for delay in raw_delays[:-1]
+        )
+        if old_style:
+            delays.extend(raw_delays[:-1])
         else:
-            # Old convention: delay on elem[i] (for i < n-1)
-            for i, elem in enumerate(elements_raw):
-                if i < len(elements_raw) - 1:
-                    delays.append((int(elem.get("min", "0")), int(elem.get("max", "0"))))
+            if raw_delays[0] != (0, 0):
+                elements.insert(
+                    0,
+                    BoolExpr(
+                        text="1'b1",
+                        expr=BoolConst(
+                            value=1,
+                            width=1,
+                            signed=False,
+                            source_loc=source_loc,
+                        ),
+                        source_loc=source_loc,
+                    ),
+                )
+                delays.append(raw_delays[0])
+            delays.extend(raw_delays[1:])
 
     # Validate delays
     for d_min, d_max in delays:
