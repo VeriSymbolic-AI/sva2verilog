@@ -13,22 +13,26 @@ The exact executable/documentation baseline
 `30910169857` (8/8 shards). This qualifies the workflow at that SHA, but still
 does not promote a construct row by itself.
 
-The current worktree adds fail-closed compile-only exit status, executable
-fingerprints and role-bound replay commands, self-contained structured-project
-formal snapshots, a pinned Linux liveness replay image, and a small real
-external RTL slice from OpenTitan with a killed latency mutant. That external
+The trust-hardening executable
+`5ad7e2f04c65348a709728447c64ff46acea1986` passed CI `31167742453`
+(13/13 jobs), differential nightly `31167748554` (3/3 jobs), and Full Formal
+`31167747619` (8/8 shards). It adds fail-closed compile-only exit status,
+executable fingerprints and role-bound replay commands, self-contained
+structured-project formal snapshots, a pinned Linux liveness replay image, and
+a small real external RTL slice from OpenTitan with a killed latency mutant. That external
 slice is explicitly not OpenTitan, CDC, metastability, or industrial sign-off
 evidence. It also exposed and fixed two semantic defects: slang-v11 leading
 delays such as `a |-> ##2 b` were discarded by the importer, and a custom reset
 name used by `disable iff` was left unconnected in the generated monitor bind.
 
-These worktree changes require fresh exact-SHA CI, nightly, and Full Formal
-qualification before the support matrix can consume them as remote evidence.
-The focused machine-readable routing ledger is `support_evidence.json`; its CI
-validator refuses `fully_supported` while the current worktree qualification
-state is incomplete. The rest of this document retains dated evidence snapshots
-for audit history; where an older paragraph says “current” or “candidate”, read
-it as historical unless superseded above.
+These changes now have fresh exact-SHA remote qualification, so the support
+matrix may consume that workflow evidence. The focused machine-readable routing
+ledger is `support_evidence.json`; its CI validator still refuses
+`fully_supported` unless exact-SHA qualification is recorded. Exact-SHA workflow
+success does not close the remaining independent-frontend, industrial-corpus,
+CDC, or row-specific full-contract gaps. The rest of this document retains
+dated evidence snapshots for audit history; where an older paragraph says
+“current” or “candidate”, read it as historical unless superseded above.
 
 ## Executive Summary
 

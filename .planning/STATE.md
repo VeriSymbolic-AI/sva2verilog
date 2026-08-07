@@ -87,6 +87,11 @@ verifications, end-to-end flows, and exact-commit remote evidence.
 - Exact baseline `d7ffe10f9294424482dd7a869a2867d3aee61e6e`: CI run
   `30910167848` passed 13/13 jobs, nightly run `30910169662` passed 3/3 jobs,
   and Full Formal run `30910169857` passed 8/8 shards.
+- Trust-hardening executable `5ad7e2f04c65348a709728447c64ff46acea1986`:
+  CI run `31167742453` passed 13/13 jobs, nightly run `31167748554` passed
+  3/3 jobs, and Full Formal run `31167747619` passed 8/8 shards. The first
+  remote attempt exposed a stale Icarus skip ceiling; the exact three new
+  formal-stack skips were admitted without weakening the reason whitelist.
 - The Linux open-liveness shard executed 17/17 tests with no skip using Super
   Prove; the open-user-DUT shard executed 75/75 tests with no skip.
 
@@ -98,9 +103,9 @@ verifications, end-to-end flows, and exact-commit remote evidence.
 - Zero construct rows are promoted to Fully supported. Workflow qualification
   does not close row-specific independent-reference, proof-depth, CDC, or
   industrial-corpus gaps.
-- The 2026-08-07 trust-hardening worktree is locally verified but requires fresh
-  exact-SHA remote qualification after commit. Its OpenTitan slice is bounded
-  external-source evidence, not OpenTitan or CDC sign-off.
+- The 2026-08-07 trust-hardening executable is exact-SHA remotely qualified.
+  Its OpenTitan slice remains bounded external-source evidence, not OpenTitan,
+  CDC, metastability, or industrial sign-off.
 
 ## Next Work
 

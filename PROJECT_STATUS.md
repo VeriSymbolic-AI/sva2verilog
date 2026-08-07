@@ -5,7 +5,7 @@
 > 当前版本：v1.7.1
 > 当前能力里程碑：v2.0 Open Formal Verification
 
-## 2026-08-07 可信度加固（当前工作树）
+## 2026-08-07 可信度加固（已完成精确提交远端验证）
 
 - `--compile-only` 现在明确输出 `UNKNOWN` 并以 11 退出，不能再被自动化误当作
   成功证明；只有 `PROVEN` 且关键 cover 为 `REACHED` 才能返回 0。
@@ -18,9 +18,11 @@
   延迟关系，并杀死一触发器延迟故障。该证据不代表 OpenTitan、CDC 或工业签核。
 - 外部 RTL 用例发现并修复了两个真实缺陷：slang v11 单元素前导 `##N` 被静默
   丢弃，以及自定义复位名在 `disable iff` 监控器子端口中未连接。
-- `support_evidence.json` 对高优先级证据路径和剩余阻塞进行机器校验；本工作树仍
-  需新的 exact-SHA CI、nightly 和 Full Formal，当前支持矩阵保持
-0 个 Fully supported。
+- `support_evidence.json` 对高优先级证据路径和剩余阻塞进行机器校验。精确
+  可执行提交 `5ad7e2f04c65348a709728447c64ff46acea1986` 的 CI
+  `31167742453` 为 13/13、nightly `31167748554` 为 3/3、Full Formal
+  `31167747619` 为 8/8；当前支持矩阵仍保持 0 个 Fully supported，因为
+  逐算子的独立前端、完整契约、工业 corpus 与 CDC 缺口没有被工作流绿灯消除。
 
 ## 当前状态
 

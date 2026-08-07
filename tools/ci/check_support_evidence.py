@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +16,12 @@ ALLOWED_STATUS = {
     "unsupported",
     "fully_supported",
 }
+QUALIFICATION_STATES = {
+    "pending-exact-sha-remote-gates",
+    "qualified-exact-sha",
+}
+SHA_PATTERN = re.compile(r"[0-9a-f]{40}\Z")
+RUN_ID_PATTERN = re.compile(r"[1-9][0-9]*\Z")
 
 
 def _require_mapping(value: object, label: str) -> dict[str, Any]:
@@ -23,11 +30,22 @@ def _require_mapping(value: object, label: str) -> dict[str, Any]:
     return value
 
 
-def main() -> int:
-    payload = _require_mapping(json.loads(LEDGER.read_text(encoding="utf-8")), "support evidence")
+def validate_payload(payload: dict[str, Any], *, root: Path = ROOT) -> int:
     if payload.get("schema_version") != 1:
         raise RuntimeError("unsupported support evidence schema")
     qualification = payload.get("current_worktree_qualification")
+    if qualification not in QUALIFICATION_STATES:
+        raise RuntimeError(f"invalid exact-SHA qualification state: {qualification!r}")
+
+    baseline = _require_mapping(payload.get("qualified_baseline"), "qualified_baseline")
+    executable_sha = baseline.get("executable_sha")
+    if not isinstance(executable_sha, str) or SHA_PATTERN.fullmatch(executable_sha) is None:
+        raise RuntimeError("qualified_baseline.executable_sha must be 40 lowercase hex digits")
+    for field in ("ci_run", "differential_run", "full_formal_run"):
+        run_id = baseline.get(field)
+        if not isinstance(run_id, str) or RUN_ID_PATTERN.fullmatch(run_id) is None:
+            raise RuntimeError(f"qualified_baseline.{field} must be a positive decimal run ID")
+
     capabilities = _require_mapping(payload.get("capabilities"), "capabilities")
     if not capabilities:
         raise RuntimeError("support evidence requires at least one capability")
@@ -50,9 +68,9 @@ def main() -> int:
             for relative in paths:
                 if not isinstance(relative, str) or relative.startswith("/"):
                     raise RuntimeError(f"unsafe evidence path: {relative!r}")
-                path = (ROOT / relative).resolve()
+                path = (root / relative).resolve()
                 try:
-                    path.relative_to(ROOT.resolve())
+                    path.relative_to(root.resolve())
                 except ValueError as exc:
                     raise RuntimeError(f"evidence path escapes repository: {relative}") from exc
                 if not path.is_file():
@@ -60,8 +78,14 @@ def main() -> int:
         blockers = entry.get("blockers")
         if status != "fully_supported" and (not isinstance(blockers, list) or not blockers):
             raise RuntimeError(f"{capability} must name promotion blockers")
+    return len(capabilities)
 
-    print(f"support evidence valid: {len(capabilities)} capabilities")
+
+def main() -> int:
+    payload = _require_mapping(json.loads(LEDGER.read_text(encoding="utf-8")), "support evidence")
+    capability_count = validate_payload(payload)
+
+    print(f"support evidence valid: {capability_count} capabilities")
     return 0
 
 

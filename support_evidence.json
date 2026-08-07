@@ -3,12 +3,13 @@
   "authority": "SUPPORT_MATRIX.md",
   "claim_boundary": "This focused ledger is machine-checkable evidence routing, not a certification or an exhaustive IEEE 1800 support claim.",
   "qualified_baseline": {
-    "executable_sha": "d7ffe10f9294424482dd7a869a2867d3aee61e6e",
-    "ci_run": "30910167848",
-    "differential_run": "30910169662",
-    "full_formal_run": "30910169857"
+    "executable_sha": "5ad7e2f04c65348a709728447c64ff46acea1986",
+    "ci_run": "31167742453",
+    "differential_run": "31167748554",
+    "full_formal_run": "31167747619"
   },
-  "current_worktree_qualification": "pending-exact-sha-remote-gates",
+  "qualification_scope": "Exact executable and workflow SHA; an evidence-only overlay may postdate the qualified executable without changing it.",
+  "current_worktree_qualification": "qualified-exact-sha",
   "capabilities": {
     "fixed_delay_and_leading_consequent": {
       "status": "bounded_evidence",
@@ -36,7 +37,6 @@
         ]
       },
       "blockers": [
-        "fresh exact-SHA CI, differential-nightly, and Full Formal qualification",
         "independent property-level comparison against another SVA frontend for the leading-delay shape"
       ]
     },
