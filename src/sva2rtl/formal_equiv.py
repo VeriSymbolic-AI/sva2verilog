@@ -79,6 +79,19 @@ class FormalOutputContract:
     outputs: tuple[FormalOutputName, ...] = ("fail",)
     excluded: tuple[FormalOutputName, ...] = ()
 
+    def __post_init__(self) -> None:
+        valid = set(_MONITOR_OUTPUT_VARS)
+        invalid_outputs = sorted(set(self.outputs) - valid)
+        invalid_excluded = sorted(set(self.excluded) - valid)
+        if invalid_outputs or invalid_excluded:
+            msg = (
+                "invalid formal output contract: "
+                f"outputs={invalid_outputs}, excluded={invalid_excluded}"
+            )
+            raise ValueError(msg)
+        if not self.outputs:
+            raise ValueError("formal output contract must compare at least one output")
+
     @classmethod
     def single(cls, output: Literal["pass", "fail"]) -> FormalOutputContract:
         """Return the legacy one-output miter contract."""
@@ -114,9 +127,52 @@ class FormalHarnessConfig:
         default_factory=FormalOutputContract
     )
     covers: tuple[FormalCoverName, ...] = ()
-    assumptions: tuple[str, ...] = ()
+    assumption_notes: tuple[str, ...] = ()
     overlap: FormalOverlapPolicy = "unconstrained"
+    minimum_start_gap: int | None = None
+    assume_start_low_during_reset: bool = True
+    assume_disable_low_during_reset: bool = True
     reference_disable_port: bool = False
+
+    def __post_init__(self) -> None:
+        """Reject ambiguous contracts before a solver can report a false PASS."""
+        valid_start = {"continuous", "single_shot", "arbitrary_start"}
+        valid_disable = {"held_low", "arbitrary_disable"}
+        valid_reset = {"first_cycle", "reset_recovery"}
+        valid_overlap = {"unconstrained", "bounded", "excluded"}
+        valid_covers = {"pass", "fail", "disable", "overflow", "overlap"}
+
+        if self.start_mode not in valid_start:
+            raise ValueError(f"invalid start_mode: {self.start_mode!r}")
+        if self.disable_mode not in valid_disable:
+            raise ValueError(f"invalid disable_mode: {self.disable_mode!r}")
+        if self.reset_mode not in valid_reset:
+            raise ValueError(f"invalid reset_mode: {self.reset_mode!r}")
+        if self.overlap not in valid_overlap:
+            raise ValueError(f"invalid overlap policy: {self.overlap!r}")
+        invalid_covers = sorted(set(self.covers) - valid_covers)
+        if invalid_covers:
+            raise ValueError(f"invalid formal cover probes: {invalid_covers}")
+        if any("\n" in note or "\r" in note for note in self.assumption_notes):
+            raise ValueError("formal assumption notes must be single-line text")
+
+        if self.overlap != "unconstrained" and self.start_mode != "arbitrary_start":
+            raise ValueError(
+                "bounded/excluded overlap policies require start_mode='arbitrary_start'"
+            )
+        if self.overlap == "bounded":
+            if (
+                isinstance(self.minimum_start_gap, bool)
+                or not isinstance(self.minimum_start_gap, int)
+                or self.minimum_start_gap < 1
+            ):
+                raise ValueError(
+                    "overlap='bounded' requires minimum_start_gap >= 1"
+                )
+        elif self.minimum_start_gap is not None:
+            raise ValueError(
+                "minimum_start_gap is valid only when overlap='bounded'"
+            )
 
     @classmethod
     def equivalence_default(cls) -> FormalHarnessConfig:
@@ -208,7 +264,7 @@ def _render_timing_controls(
         start_note = (
             "    // Formal assumption: start_mode=arbitrary_start leaves start "
             "as a free input.\n"
-            f"    // Formal overlap policy: {config.overlap}.\n"
+            f"    // Executed overlap policy: {config.overlap}.\n"
         )
 
     if config.disable_mode == "arbitrary_disable":
@@ -224,15 +280,21 @@ def _render_timing_controls(
             "low for compatibility.\n"
         )
 
-    custom_assumptions = "".join(
-        f"    // Formal assumption: {assumption}\n"
-        for assumption in config.assumptions
+    assumption_notes = "".join(
+        f"    // Non-semantic contract note: {note}\n"
+        for note in config.assumption_notes
     )
 
     assumption_lines: list[str] = []
-    if config.start_mode == "arbitrary_start":
+    if (
+        config.start_mode == "arbitrary_start"
+        and config.assume_start_low_during_reset
+    ):
         assumption_lines.append("            assume (!formal_start);")
-    if config.disable_mode == "arbitrary_disable":
+    if (
+        config.disable_mode == "arbitrary_disable"
+        and config.assume_disable_low_during_reset
+    ):
         assumption_lines.append("            assume (!formal_disable);")
 
     reset_assume = ""
@@ -248,12 +310,51 @@ def _render_timing_controls(
             assumptions="\n".join(assumption_lines),
         )
 
+    start_gap_constraint = ""
+    if config.overlap == "bounded":
+        assert config.minimum_start_gap is not None
+        start_gap_constraint = f"""\
+    // Executable rate bound: after a start, forbid another start for the
+    // configured number of complete sampling cycles.
+    localparam integer FORMAL_MIN_START_GAP = {config.minimum_start_gap};
+    integer formal_start_gap_q = 0;
+    always @(posedge {clock}) begin
+        if (!rst_n) begin
+            formal_start_gap_q <= 0;
+        end else begin
+            assume (!formal_start || formal_start_gap_q == 0);
+            if (formal_start)
+                formal_start_gap_q <= FORMAL_MIN_START_GAP;
+            else if (formal_start_gap_q > 0)
+                formal_start_gap_q <= formal_start_gap_q - 1;
+        end
+    end
+"""
+
     return f"""\
     integer _t = 0;
     always @(posedge {clock}) _t <= _t + 1;
     wire _in_reset = {reset_expr};
     assign rst_n = ~_in_reset;
-{reset_note}{start_note}{disable_note}{custom_assumptions}{reset_assume}"""
+{reset_note}{start_note}{disable_note}{assumption_notes}{reset_assume}{start_gap_constraint}"""
+
+
+def _render_post_monitor_constraints(
+    config: FormalHarnessConfig,
+    *,
+    clock: str,
+) -> str:
+    """Render assumptions that depend on monitor state after instantiation."""
+    if config.overlap != "excluded":
+        return ""
+    return f"""\
+    // Executable overlap exclusion: a new attempt cannot start while the
+    // generated monitor reports an earlier attempt active.
+    always @(posedge {clock}) begin
+        if (rst_n)
+            assume (!formal_start || !m_active);
+    end
+"""
 
 
 def _start_expr(config: FormalHarnessConfig) -> str:
@@ -295,14 +396,21 @@ def _contract_outputs(
     has_overflow_flag: bool,
 ) -> tuple[tuple[FormalOutputName, ...], tuple[FormalOutputName, ...]]:
     included: list[FormalOutputName] = []
+    explicitly_excluded = set(config.output_contract.excluded)
     excluded: list[FormalOutputName] = list(config.output_contract.excluded)
     for output in config.output_contract.outputs:
+        if output in explicitly_excluded:
+            continue
         if output == "overflow_flag" and not has_overflow_flag:
             if output not in excluded:
                 excluded.append(output)
             continue
         if output not in included:
             included.append(output)
+    if not included:
+        raise ValueError(
+            "formal output contract has no comparable outputs after exclusions"
+        )
     return tuple(included), tuple(excluded)
 
 
@@ -550,6 +658,15 @@ def build_harness(
         has_overflow_flag=has_overflow_flag,
     )
     excluded_comment = _render_excluded_contract_comment(excluded)
+    post_monitor_constraints = _render_post_monitor_constraints(
+        harness_config,
+        clock=clock,
+    )
+
+    if "fail" not in harness_config.output_contract.outputs:
+        raise ValueError("expression equivalence harness requires output 'fail'")
+    if "fail" in harness_config.output_contract.excluded:
+        raise ValueError("expression equivalence harness cannot exclude output 'fail'")
 
     return f"""\
 // Auto-generated SVA-to-Verilog equivalence harness (formal_equiv).
@@ -573,6 +690,7 @@ module harness (
         .attempt_fired(m_afired), {ovf_conn}.disabled_o(m_disabled)
     );
 {excluded_comment}
+{post_monitor_constraints}
 
     // Reference violation indicator — encodes the original SVA semantics,
     // authored independently of the monitor implementation.
@@ -685,6 +803,10 @@ def build_miter_harness(
         has_overflow_flag=has_overflow_flag,
     )
     excluded_comment = _render_excluded_contract_comment(excluded)
+    post_monitor_constraints = _render_post_monitor_constraints(
+        harness_config,
+        clock=clock,
+    )
 
     return f"""\
 {reference_module}
@@ -709,6 +831,7 @@ module harness (
         .attempt_fired(m_afired), {ovf_conn}.disabled_o(m_disabled)
     );
 {excluded_comment}
+{post_monitor_constraints}
 
 {ref_signal_decls}
     {reference_top} ref_dut (

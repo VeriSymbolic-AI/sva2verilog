@@ -1,8 +1,8 @@
-"""Text-level tests for formal harness mode contracts.
+"""Executable-contract tests for formal harness modes.
 
-These tests intentionally avoid SymbiYosys. They prove the generated harness
-text exposes the start, disable, reset, output-contract, and cover controls that
-formal BMC/prove tests opt into.
+These fast tests intentionally avoid SymbiYosys. They verify that start,
+disable, reset, overlap, output, and cover choices change executable harness
+statements rather than documentation comments alone.
 """
 
 from __future__ import annotations
@@ -90,8 +90,9 @@ def test_arbitrary_start_disable_and_reset_recovery_are_visible() -> None:
         start_mode="arbitrary_start",
         disable_mode="arbitrary_disable",
         reset_mode="reset_recovery",
-        assumptions=("no start while reset is asserted",),
+        assumption_notes=("reset assumptions are generated structurally",),
         overlap="bounded",
+        minimum_start_gap=2,
     )
     harness = build_harness("dut_mon", _OBSERVED, "!(a && b)", config=config)
 
@@ -104,9 +105,70 @@ def test_arbitrary_start_disable_and_reset_recovery_are_visible() -> None:
     assert "start_mode=arbitrary_start" in harness
     assert "disable_mode=arbitrary_disable" in harness
     assert "reset_mode=reset_recovery" in harness
-    assert "Formal overlap policy: bounded" in harness
+    assert "Executed overlap policy: bounded" in harness
     assert "assume (!formal_start);" in harness
     assert "assume (!formal_disable);" in harness
+    assert "localparam integer FORMAL_MIN_START_GAP = 2;" in harness
+    assert "assume (!formal_start || formal_start_gap_q == 0);" in harness
+    assert "Non-semantic contract note:" in harness
+
+
+def test_overlap_policy_changes_executable_harness() -> None:
+    unconstrained = build_harness(
+        "dut_mon",
+        _OBSERVED,
+        "!(a && b)",
+        config=FormalHarnessConfig(start_mode="arbitrary_start"),
+    )
+    bounded = build_harness(
+        "dut_mon",
+        _OBSERVED,
+        "!(a && b)",
+        config=FormalHarnessConfig(
+            start_mode="arbitrary_start",
+            overlap="bounded",
+            minimum_start_gap=1,
+        ),
+    )
+    excluded = build_harness(
+        "dut_mon",
+        _OBSERVED,
+        "!(a && b)",
+        config=FormalHarnessConfig(
+            start_mode="arbitrary_start",
+            overlap="excluded",
+        ),
+    )
+
+    assert "formal_start_gap_q" not in unconstrained
+    assert "formal_start_gap_q" in bounded
+    assert "assume (!formal_start || !m_active);" in excluded
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        ({"overlap": "bounded"}, "arbitrary_start"),
+        (
+            {"start_mode": "arbitrary_start", "overlap": "bounded"},
+            "minimum_start_gap",
+        ),
+        (
+            {"start_mode": "arbitrary_start", "minimum_start_gap": 1},
+            "only when overlap",
+        ),
+        (
+            {"assumption_notes": ("unsafe\nassume (1'b0);",)},
+            "single-line",
+        ),
+    ],
+)
+def test_ambiguous_harness_contracts_fail_closed(
+    kwargs: dict[str, object],
+    message: str,
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        FormalHarnessConfig(**kwargs)  # type: ignore[arg-type]
 
 
 def test_miter_can_pass_disable_to_reference_when_requested() -> None:
@@ -169,6 +231,45 @@ def test_overflow_contract_is_explicitly_excluded_when_absent() -> None:
 
     assert "Excluded contract signals: overflow_flag" in harness
     assert "equiv_overflow_flag" not in harness
+
+
+def test_explicit_output_exclusion_removes_assertion() -> None:
+    config = FormalHarnessConfig(
+        output_contract=FormalOutputContract(
+            outputs=("pass", "fail"),
+            excluded=("pass",),
+        ),
+    )
+    harness = build_miter_harness(
+        "dut_mon",
+        _OBSERVED,
+        _REF_MODULE,
+        "ref_mon",
+        has_overflow_flag=False,
+        config=config,
+    )
+
+    assert "Excluded contract signals: pass" in harness
+    assert "equiv_pass" not in harness
+    assert "equiv_fail: assert" in harness
+
+
+def test_all_outputs_excluded_fails_closed() -> None:
+    config = FormalHarnessConfig(
+        output_contract=FormalOutputContract(
+            outputs=("fail",),
+            excluded=("fail",),
+        ),
+    )
+    with pytest.raises(ValueError, match="no comparable outputs"):
+        build_miter_harness(
+            "dut_mon",
+            _OBSERVED,
+            _REF_MODULE,
+            "ref_mon",
+            has_overflow_flag=False,
+            config=config,
+        )
 
 
 def test_cover_probe_requests_emit_reachability_checks() -> None:
