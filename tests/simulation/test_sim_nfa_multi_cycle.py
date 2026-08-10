@@ -266,17 +266,10 @@ class TestNfaWithinSim:
         )
         assert not any(rtl_pass)
 
-    def test_inner_absent_at_start_no_pass(
+    def test_inner_may_start_after_outer_start(
         self, tmp_path: Path, simulator: str,
     ) -> None:
-        """a=0 at start → inner NFA never leaves state 0 → no pass.
-
-        Product-of-NFAs semantics: inner and outer both start their
-        threads on the same `start` cycle. Inner = bool(a) needs a=1
-        at t=0 to advance to its accept state; a=0 at start kills the
-        inner thread regardless of later a=1 pulses (each start
-        attempts one match — there is no re-attempt within a window).
-        """
+        """The inner sequence can begin on any cycle inside the outer window."""
         stim = _pad([
             {"start": True,  "a": False, "c": True},
             {"start": False, "a": True,  "c": True},
@@ -285,7 +278,7 @@ class TestNfaWithinSim:
         rtl_pass, _ = _dual_oracle_check(
             self._checker(), stim, tmp_path, simulator,
         )
-        assert not any(rtl_pass)
+        assert sum(rtl_pass) == 1
 
     def test_inner_never_true_no_pass(
         self, tmp_path: Path, simulator: str,

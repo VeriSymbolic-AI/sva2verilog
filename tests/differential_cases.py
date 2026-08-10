@@ -29,7 +29,7 @@ from tests.differential_reference import (
     simulate_source_reference,
 )
 from tests.simulation.tb_generator import (
-    TEMPLATES_WITH_OVERFLOW,
+    checker_has_overflow_flag,
     extra_inputs_from_checker,
     generate_testbench,
     run_simulation,
@@ -660,7 +660,7 @@ def run_oracle_trace(
 def checker_has_top_overflow(checker: CheckerNode) -> bool:
     """Return whether the top checker exposes `overflow_flag`."""
 
-    return checker.template_name in TEMPLATES_WITH_OVERFLOW
+    return checker_has_overflow_flag(checker)
 
 
 def run_simulator_trace(
@@ -764,9 +764,7 @@ def find_trace_mismatch(
             observed = getattr(actual_obs, signal)
             if signal == "overflow" and (expected is None or observed is None):
                 continue
-            if signal in {"attempt_fired", "disabled_o"} and (
-                expected is None or observed is None
-            ):
+            if signal in {"attempt_fired", "disabled_o"} and (expected is None or observed is None):
                 # Backward-compatible replay for schema-v1 artifacts that
                 # predate full-contract capture. New live traces always carry
                 # both fields and are compared below.

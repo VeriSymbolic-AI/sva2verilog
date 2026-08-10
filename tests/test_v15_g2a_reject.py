@@ -78,8 +78,8 @@ def _rep_c_3() -> SeqRepetition:
 def test_nested_intersect_within_compiles() -> None:
     """(a intersect b) within c — nested composition via NFA (v1.5.1 P3).
 
-    Inner intersect is a 4-state product (2×2). Outer c is 2-state.
-    Total: 4 × 2 = 8 states.
+    Inner intersect is a 4-state product (2×2).  The two-state outer is
+    represented across waiting/running/done phases: 2 × (4 + 2) = 12 states.
     """
     node = SeqWithin(
         inner=SeqIntersect(left=_b("a"), right=_b("b"), source_loc=_LOC),
@@ -88,7 +88,7 @@ def test_nested_intersect_within_compiles() -> None:
     )
     checker = compose(node, _CLK, None, "(a intersect b) within c")
     assert checker.template_name == "nfa_generic"
-    assert checker.params["nfa_states"] == "8"
+    assert checker.params["nfa_states"] == "12"
 
 
 def test_nested_intersect_chain_compiles() -> None:

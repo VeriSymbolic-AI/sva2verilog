@@ -85,6 +85,15 @@ def test_e2e_rep_range(tmp_path: Path) -> None:
     _assert_monitor_interface(sv, "rep_range.sv")
 
 
+@requires_slang
+def test_e2e_implication_ranged_delay_lower_bound(tmp_path: Path) -> None:
+    """The reported ``req |-> ##[1:3] ack`` source shape reaches NFA RTL."""
+    sv = _run_e2e("imp_overlap_delay_range.sv", tmp_path)
+    _assert_monitor_interface(sv, "imp_overlap_delay_range.sv")
+    assert "module sva_range_lower_bound" in sv
+    assert "output  logic overflow_flag" in sv
+
+
 # ── Goto / nonconsecutive repetition fixtures ──────────────────────────────
 
 

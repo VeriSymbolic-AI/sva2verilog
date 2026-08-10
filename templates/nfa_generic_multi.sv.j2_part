@@ -18,7 +18,7 @@
     wire [{{ T }} - 1:0] alloc;
     assign alloc[0] = start & slot_free[0];
 {% for s in range(1, T) %}
-    assign alloc[{{ s }}] = start & slot_free[{{ s }}] & ~(|alloc[{{ s }} - 1:0]);
+    assign alloc[{{ s }}] = start & slot_free[{{ s }}] & ~(|slot_free[{{ s }} - 1:0]);
 {% endfor %}
     {{ signal_type(verilog_mode) }} overflow_flag_q;
     wire overflow_event;

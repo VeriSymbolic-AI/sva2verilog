@@ -73,8 +73,9 @@ def _arbitrary_start_config(
     """Config for explicit Phase 10 arbitrary-start BMC claims."""
     return FormalHarnessConfig(
         start_mode="arbitrary_start",
-        assumptions=("start is low while reset is asserted",),
+        assumption_notes=("start is low while reset is asserted",),
         overlap=overlap,  # type: ignore[arg-type]
+        minimum_start_gap=1 if overlap == "bounded" else None,
     )
 
 
@@ -82,7 +83,7 @@ def _reset_recovery_config() -> FormalHarnessConfig:
     """Config for explicit Phase 10 reset-recovery BMC claims."""
     return FormalHarnessConfig(
         reset_mode="reset_recovery",
-        assumptions=("assertions are disabled while reset recovery is active",),
+        assumption_notes=("assertions are disabled while reset recovery is active",),
     )
 
 
@@ -245,7 +246,7 @@ class TestBoolExprSvaEquiv:
             start_mode="arbitrary_start",
             disable_mode="arbitrary_disable",
             output_contract=FormalOutputContract.full_monitor(include_overflow=False),
-            assumptions=("start and disable are low while reset is asserted",),
+            assumption_notes=("start and disable are low while reset is asserted",),
             covers=("pass", "fail", "disable"),
             reference_disable_port=True,
         )
@@ -341,7 +342,7 @@ class TestRoseSvaEquiv:
         config = FormalHarnessConfig(
             start_mode="arbitrary_start",
             output_contract=FormalOutputContract.full_monitor(include_overflow=False),
-            assumptions=("start is low while reset is asserted",),
+            assumption_notes=("start is low while reset is asserted",),
             covers=("pass", "fail"),
         )
         passed, output = run_sva_miter_check(
@@ -505,8 +506,9 @@ class TestDelaySvaEquiv:
             config=FormalHarnessConfig(
                 start_mode="arbitrary_start",
                 output_contract=FormalOutputContract.single("pass"),
-                assumptions=("start is low while reset is asserted",),
+                assumption_notes=("start is low while reset is asserted",),
                 overlap="bounded",
+                minimum_start_gap=1,
             ),
         )
         assert passed, f"delay ##1 arbitrary_start BMC depth 20 FAILED:\n{output[-2500:]}"
@@ -643,16 +645,16 @@ class TestImplicationSvaEquiv:
         assert passed, f"a |-> b full-contract BMC depth 15 FAILED:\n{output[-2500:]}"
 
     def test_overlap_is_reachable_with_arbitrary_start(self) -> None:
-        """Overlap cover uses a start model that can actually reach it."""
+        """Overlap cover uses an explicitly unconstrained, reachable start model."""
         checker = _build("implication_overlap")
         config = FormalHarnessConfig(
             start_mode="arbitrary_start",
             output_contract=FormalOutputContract.full_monitor(include_overflow=True),
-            assumptions=("start is low while reset is asserted",),
+            assumption_notes=("start is low while reset is asserted",),
             # overflow_flag is part of the equality contract above, but is
             # unreachable by construction for this one-cycle consequent.
             covers=("overlap",),
-            overlap="bounded",
+            overlap="unconstrained",
         )
         passed, output = run_sva_miter_check(
             checker,
@@ -1323,8 +1325,9 @@ class TestRepConsecutiveSvaEquiv:
             config=FormalHarnessConfig(
                 start_mode="arbitrary_start",
                 output_contract=FormalOutputContract.single("pass"),
-                assumptions=("start is low while reset is asserted",),
+                assumption_notes=("start is low while reset is asserted",),
                 overlap="bounded",
+                minimum_start_gap=1,
             ),
         )
         assert passed, f"[*3] arbitrary_start BMC depth 20 FAILED:\n{output[-2500:]}"
@@ -1335,9 +1338,10 @@ class TestRepConsecutiveSvaEquiv:
         config = FormalHarnessConfig(
             start_mode="arbitrary_start",
             output_contract=FormalOutputContract.full_monitor(include_overflow=False),
-            assumptions=("start is low while reset is asserted",),
+            assumption_notes=("start is low while reset is asserted",),
             covers=("pass", "fail", "overlap"),
             overlap="bounded",
+            minimum_start_gap=1,
         )
         passed, output = run_sva_miter_check(
             checker,

@@ -55,40 +55,61 @@ def _rep_c3() -> SeqRepetition:
 def test_within_seq_concat_inner_compiles() -> None:
     """(a ##2 b) within c — was G2a-rejected, now compiles.
 
-    K = |inner NFA| * |outer NFA| = 4 * 2 = 8.
+    K = outer * (inner + waiting + done) = 2 * (4 + 2) = 12.
     """
     node = SeqWithin(inner=_sc_a2b(), outer=_b("c"), source_loc=_LOC)
     checker = compose(node, _CLK, None, "(a ##2 b) within c")
     assert checker.template_name == "nfa_generic"
-    assert checker.params["nfa_states"] == "8"
+    assert checker.params["nfa_states"] == "12"
 
 
 def test_within_repetition_outer_compiles() -> None:
-    """a within (c[*3]) — was G2a-rejected, now compiles. K = 2*4 = 8."""
+    """a within (c[*3]) compiles with waiting/running/done phases. K=16."""
     node = SeqWithin(inner=_b("a"), outer=_rep_c3(), source_loc=_LOC)
     checker = compose(node, _CLK, None, "a within (c[*3])")
     assert checker.template_name == "nfa_generic"
-    assert checker.params["nfa_states"] == "8"
+    assert checker.params["nfa_states"] == "16"
 
 
 def test_within_bool_inner_rep_outer_matches() -> None:
     """a within (c[*3]) — inner a=1 while outer c[*3] is running.
 
-    Outer c[*3] is alive across states 0..3; inner a completes on any
-    cycle a=1 while outer is alive. Registered pass = 1 cycle later.
+    Inner ``a`` may match anywhere inside the three-cycle outer match.  The
+    composite endpoint is the endpoint of the outer sequence, not the earlier
+    inner endpoint.
 
     Stim:
-      t=0: start=1 a=1 c=1  → inner accepts + outer alive → pass at t=1
+      t=0: start=1 a=1 c=1  → remember inner completion
+      t=2: outer c[*3] ends   → pass is registered for t=3
     """
     node = SeqWithin(inner=_b("a"), outer=_rep_c3(), source_loc=_LOC)
     checker = compose(node, _CLK, None, "a within (c[*3])")
     stim = [
         {"start": True,  "a": True,  "c": True},   # t=0
         {"start": False, "a": False, "c": True},   # t=1 (expect pass)
-        {"start": False, "a": False, "c": False},  # t=2
+        {"start": False, "a": False, "c": True},   # t=2
+        {"start": False, "a": False, "c": False},  # t=3
     ]
     result = simulate_checker_hierarchy(checker, stim)
-    assert _passes(result) == [False, True, False]
+    assert _passes(result) == [False, False, False, True]
+
+
+def test_within_inner_may_start_after_outer_start() -> None:
+    """A later one-cycle inner match is contained by the same outer match."""
+    node = SeqWithin(inner=_b("a"), outer=_rep_c3(), source_loc=_LOC)
+    checker = compose(node, _CLK, None, "a within (c[*3])")
+    stim = [
+        {"start": True, "a": False, "c": True},
+        {"start": False, "a": True, "c": True},
+        {"start": False, "a": False, "c": True},
+        {"start": False, "a": False, "c": False},
+    ]
+    assert _passes(simulate_checker_hierarchy(checker, stim)) == [
+        False,
+        False,
+        False,
+        True,
+    ]
 
 
 def test_within_inner_completes_but_outer_dead() -> None:

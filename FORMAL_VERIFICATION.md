@@ -475,6 +475,28 @@ The repository represents these choices with `FormalHarnessConfig` and
 `FormalOutputContract`. Stronger tests vary start, disable, and reset instead
 of tying them to convenient constants.
 
+`FormalHarnessConfig` distinguishes executable constraints from human notes:
+
+| Field | Solver effect |
+|---|---|
+| `assume_start_low_during_reset` | Emits `assume (!formal_start)` during reset for arbitrary-start harnesses |
+| `assume_disable_low_during_reset` | Emits `assume (!formal_disable)` during reset for arbitrary-disable harnesses |
+| `overlap="unconstrained"` | Adds no overlap restriction; the free start input may create overlapping attempts |
+| `overlap="bounded", minimum_start_gap=N` | Emits a countdown constraint that forbids a new start for `N` complete sampling cycles after each start |
+| `overlap="excluded"` | Emits `assume (!formal_start || !m_active)` after reset |
+| `assumption_notes=(...)` | Documentation only; deliberately has no solver effect |
+
+Ambiguous combinations fail before the solver runs. In particular, `bounded`
+requires `start_mode="arbitrary_start"` and an integer
+`minimum_start_gap >= 1`; `excluded` also requires arbitrary start. Free-form
+SystemVerilog assumptions are not accepted because unchecked text injection
+would make the proof contract difficult to audit and reproduce. Add a reviewed,
+typed field when a new environmental constraint is genuinely required.
+
+`FormalOutputContract.excluded` removes those signals from the generated miter.
+If exclusions or a missing optional port leave no comparable output, harness
+generation fails instead of allowing a vacuous PASS.
+
 ### Require Reachability
 
 An assertion can pass vacuously if reset never releases, start never fires, or

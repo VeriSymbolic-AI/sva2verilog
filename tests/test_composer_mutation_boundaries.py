@@ -64,8 +64,25 @@ def test_ranged_delay_nfa_transitions_stay_in_bounds_and_keep_earliest_exit() ->
 
     assert accept == frozenset({5})
     assert all(0 <= source < states and 0 <= target < states for source, _, target in transitions)
+    assert (2, "(b)", 5) in transitions
     assert (3, "(b)", 5) in transitions
     assert (4, "(b)", 5) in transitions
+
+
+def test_zero_lower_bound_nfa_fuses_same_cycle_without_extra_edge() -> None:
+    node = SeqConcat(
+        elements=(_bool("a"), _bool("b")),
+        delays=((0, 2),),
+        source_loc=_LOC,
+    )
+
+    states, transitions, accept, _signals = _lift_to_nfa(node)
+
+    assert states == 4
+    assert accept == frozenset({3})
+    assert (0, "((a)) & ((b))", 3) in transitions
+    assert (1, "(b)", 3) in transitions
+    assert (2, "(b)", 3) in transitions
 
 
 def test_nfa_renderers_emit_zero_for_states_without_incoming_arcs() -> None:
