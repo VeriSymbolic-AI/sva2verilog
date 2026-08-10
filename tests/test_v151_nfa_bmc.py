@@ -33,8 +33,10 @@ from sva2rtl.ir import (
     BoolExpr,
     CheckerNode,
     ClockSpec,
+    SeqAnd,
     SeqConcat,
     SeqIntersect,
+    SeqOr,
     SeqRepetition,
     SeqThroughout,
     SeqWithin,
@@ -222,32 +224,33 @@ endmodule
 def _ref_within_bool_rep(name: str) -> str:
     """`a within (c[*3])` — inner a bool, outer c[*3].
 
-    Product-of-NFAs sync: inner-thread and outer-thread both start at s.
-    Inner = a completes at s if a(s)=1. Outer c[*3] is "alive" (has a
-    live thread) whenever any state in [0..3] is populated; state i is
-    alive iff c held for the past i cycles starting from s. State 0
-    alive at s (always, from start seed). Cross-product accept =
-    inner_accept × outer_alive.
-
-    So the match happens at cycle s iff a(s) & c(s) (both threads live
-    together at s, inner reaches accept, outer state 0 → 1 requires
-    c(s), alive-mask includes state 0 which is always alive at s).
-
-    Actually inner accept-state × outer alive-state: after 1 transition
-    from (0,0), inner is in state 1 (accept) iff a(s), outer is in
-    state 1 (alive) iff c(s). Product state (1,1) is in accept iff
-    inner state 1 ∈ acc_inner AND outer state 1 ∈ alive_outer. Both
-    hold → pass at s+1.
+    The three-cycle outer match is ``c(s)&c(s+1)&c(s+2)``.  The inner
+    one-cycle sequence may start at any of those cycles, and the composite
+    endpoint is the outer endpoint.  This reference is authored directly as a
+    two-stage outer pipeline plus an independent sticky ``a`` observation.
     """
     return f"""
 module {name} (
     input  logic clk, rst_n, start, a, c,
     output logic pass
 );
+    logic outer_1_q, outer_2_q;
+    logic seen_1_q, seen_2_q;
     logic pass_q;
     always_ff @(posedge clk) begin
-        if (!rst_n) pass_q <= 1'b0;
-        else        pass_q <= start & a & c;
+        if (!rst_n) begin
+            outer_1_q <= 1'b0;
+            outer_2_q <= 1'b0;
+            seen_1_q  <= 1'b0;
+            seen_2_q  <= 1'b0;
+            pass_q    <= 1'b0;
+        end else begin
+            outer_1_q <= start & c;
+            outer_2_q <= outer_1_q & c;
+            seen_1_q  <= start & c & a;
+            seen_2_q  <= outer_1_q & c & (seen_1_q | a);
+            pass_q    <= outer_2_q & c & (seen_2_q | a);
+        end
     end
     assign pass = pass_q;
 endmodule
@@ -429,6 +432,54 @@ endmodule
 """
 
 
+def _ref_and_bool_seq(name: str) -> str:
+    """Independent shift reference for ``a and (x ##2 y)``."""
+    return f"""
+module {name} (
+    input logic clk, rst_n, start, a, x, y,
+    output logic pass
+);
+    logic start_ax_q, carry_q, pass_q;
+    always_ff @(posedge clk) begin
+        if (!rst_n) begin
+            start_ax_q <= 1'b0;
+            carry_q    <= 1'b0;
+            pass_q     <= 1'b0;
+        end else begin
+            start_ax_q <= start & a & x;
+            carry_q    <= start_ax_q;
+            pass_q     <= carry_q & y;
+        end
+    end
+    assign pass = pass_q;
+endmodule
+"""
+
+
+def _ref_or_bool_seq(name: str) -> str:
+    """Independent earliest-match reference for ``b or (x ##2 y)``."""
+    return f"""
+module {name} (
+    input logic clk, rst_n, start, b, x, y,
+    output logic pass
+);
+    logic start_x_q, carry_q, pass_q;
+    always_ff @(posedge clk) begin
+        if (!rst_n) begin
+            start_x_q <= 1'b0;
+            carry_q   <= 1'b0;
+            pass_q    <= 1'b0;
+        end else begin
+            start_x_q <= start & x & ~b;
+            carry_q   <= start_x_q;
+            pass_q    <= (start & b) | (carry_q & y);
+        end
+    end
+    assign pass = pass_q;
+endmodule
+"""
+
+
 # ─────────────────────────────────────────────────────────────────────────
 # Compose helpers
 # ─────────────────────────────────────────────────────────────────────────
@@ -453,6 +504,55 @@ def _compose_throughout(
 ) -> CheckerNode:
     node = SeqThroughout(condition=cond, body=body, source_loc=_LOC)
     return compose(node, _CLK, None, text)
+
+
+def _compose_and(left: SVANode, right: SVANode, text: str) -> CheckerNode:
+    return compose(SeqAnd(left=left, right=right, source_loc=_LOC), _CLK, None, text)
+
+
+def _compose_or(left: SVANode, right: SVANode, text: str) -> CheckerNode:
+    return compose(SeqOr(left=left, right=right, source_loc=_LOC), _CLK, None, text)
+
+
+# ═════════════════════════════════════════════════════════════════════════
+# and/or multi-cycle miters — independent later/earliest endpoint references
+# ═════════════════════════════════════════════════════════════════════════
+
+
+class TestNfaAndOrMiter:
+    def test_and_later_endpoint_miter(self) -> None:
+        right = SeqConcat(
+            elements=(_b("x"), _b("y")),
+            delays=((2, 2),),
+            source_loc=_LOC,
+        )
+        checker = _compose_and(_b("a"), right, "a and (x ##2 y)")
+        ref_name = "ref_and_bool_seq"
+        passed, output = run_sva_miter_check(
+            checker,
+            _ref_and_bool_seq(ref_name),
+            ref_name,
+            compare="pass",
+            depth=15,
+        )
+        assert passed, f"multi-cycle and miter FAILED:\n{output[-2500:]}"
+
+    def test_or_start_cycle_miter(self) -> None:
+        right = SeqConcat(
+            elements=(_b("x"), _b("y")),
+            delays=((2, 2),),
+            source_loc=_LOC,
+        )
+        checker = _compose_or(_b("b"), right, "b or (x ##2 y)")
+        ref_name = "ref_or_bool_seq"
+        passed, output = run_sva_miter_check(
+            checker,
+            _ref_or_bool_seq(ref_name),
+            ref_name,
+            compare="pass",
+            depth=15,
+        )
+        assert passed, f"multi-cycle or miter FAILED:\n{output[-2500:]}"
 
 
 # ═════════════════════════════════════════════════════════════════════════

@@ -406,7 +406,15 @@ def main(
             out_path_str = _resolve_output_mode(
                 output, multi_prop=bool(checker_node.children)
             )
-            if checker_node.children:
+            # A trailing slash is an explicit directory request even when an
+            # optimized checker is a single leaf module.  Previously the
+            # decision was based only on ``children``: an optimization that
+            # flattened a hierarchy could silently turn ``--output out/``
+            # into a file named ``out``.
+            directory_output = bool(checker_node.children) or bool(
+                output and output.endswith("/")
+            )
+            if directory_output:
                 modules = emit_all(
                     checker_node,
                     verilog_mode=verilog,

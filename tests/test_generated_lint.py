@@ -92,7 +92,7 @@ def test_verilator_lint_command_names_top_module(tmp_path: Path) -> None:
     assert "-Wno-UNUSEDSIGNAL" in cmd
     assert "-Wno-UNUSEDPARAM" in cmd
     assert "-Wno-DECLFILENAME" in cmd
-    assert "-Wno-UNOPTFLAT" in cmd
+    assert "-Wno-UNOPTFLAT" not in cmd
     assert "--top-module" in cmd
     assert emitted.top_module in cmd
     for path in sv_files:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -110,9 +111,7 @@ def run_yosys_script(
 def test_generated_rtl_case_catalog_has_required_families() -> None:
     """The representative catalog covers the Phase 11 major template families."""
     families = frozenset(
-        family
-        for case in all_generated_monitor_cases()
-        for family in case.families
+        family for case in all_generated_monitor_cases() for family in case.families
     )
     missing = _REQUIRED_FAMILIES - families
     assert not missing, f"missing generated RTL family coverage: {sorted(missing)}"
@@ -129,8 +128,7 @@ def test_generated_rtl_case_catalog_emits_modules(case: object) -> None:
     emitted = emit_generated_case(case)
     assert emitted.modules, f"{emitted.case.case_id}: no modules emitted"
     assert emitted.top_module in emitted.modules, (
-        f"{emitted.case.case_id}: top {emitted.top_module} missing from "
-        f"{sorted(emitted.modules)}"
+        f"{emitted.case.case_id}: top {emitted.top_module} missing from {sorted(emitted.modules)}"
     )
     for module_name, sv_text in emitted.modules.items():
         assert module_name.startswith("sva_") or module_name == "lfsr_8bit"
@@ -207,3 +205,35 @@ def test_yosys_synthesis_smoke(case: object, tmp_path: Path) -> None:
         f"stderr:\n{result.stderr}\n"
         f"script:\n{script}"
     )
+
+
+@pytest.mark.synthesis
+def test_bounded_delay_implication_area_does_not_regress_to_threaded_nfa(
+    tmp_path: Path,
+) -> None:
+    """The issue-2 shape stays below the generic K-by-T one-hot implementation."""
+    case = next(
+        item
+        for item in yosys_generated_monitor_cases()
+        if item.case_id == "implication_delay_window"
+    )
+    emitted, sv_files = write_generated_modules(tmp_path, case)
+    stats_path = tmp_path / "delay_window_area.json"
+    script = build_yosys_smoke_script(emitted, sv_files) + "\n".join(
+        (
+            "techmap",
+            "opt",
+            f"tee -o {_yosys_quote(stats_path)} stat -json",
+            "",
+        )
+    )
+    result = run_yosys_script(script, work_dir=tmp_path)
+    assert result.returncode == 0 and not result.timed_out, (
+        f"Yosys area gate failed:\n{result.stdout}\n{result.stderr}"
+    )
+    stats = json.loads(stats_path.read_text(encoding="utf-8"))
+    cells = int(stats["modules"][f"\\{emitted.top_module}"]["num_cells"])
+    # Current Yosys 0.66 result is 25 cells.  The deliberately loose ceiling
+    # tolerates mapping-version noise while still rejecting the 100+ cell
+    # generic threaded-NFA regression reported in issue #2.
+    assert cells <= 40, f"bounded-delay monitor area regression: {cells} cells > 40"

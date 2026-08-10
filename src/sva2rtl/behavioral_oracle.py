@@ -690,6 +690,8 @@ class _HierarchicalSim:
             return self._tick_first_match(node, signals)
         if tname == "implication_nfa":
             return self._tick_implication_nfa(node, signals)
+        if tname == "implication_delay_window":
+            return self._tick_implication_delay_window(node, signals)
         if tname == "prop_or":
             return self._tick_prop_or(node, signals)
         if tname == "prop_and":
@@ -742,12 +744,20 @@ class _HierarchicalSim:
         start = bool(signals.get("start", False))
         truth = _eval_bool_semantic_param(node, signals)
         if truth is None:
-            # Fall back to observed-signal semantics (AND of all watched signals).
-            sigs = [port for port, _ in node.observed_signals]
-            if sigs:
-                truth = all(bool(signals.get(s, False)) for s in sigs)
-            else:
-                truth = bool(signals.get("sig", True))
+            # Direct-IR tests may not carry the structured bool_semantic JSON
+            # used by the source importer.  Evaluate the emitted two-state
+            # scalar expression rather than treating every bool leaf as an
+            # unconditional delay token (the old fallback produced false PASS
+            # results for manually-built ``BoolExpr(text="a")`` nodes).
+            try:
+                truth = _eval_nfa_guard(node.params.get("bool_expr", ""), signals)
+            except ValueError:
+                sigs = [port for port, _ in node.observed_signals]
+                truth = (
+                    all(bool(signals.get(s, False)) for s in sigs)
+                    if sigs
+                    else bool(signals.get("sig", True))
+                )
         state["active"] = start
         state["pass"] = start and truth
         state["fail"] = start and not truth
@@ -837,6 +847,7 @@ class _HierarchicalSim:
             "_until_state",
             "_nfa_state",
             "_impl_ant_q",
+            "_delay_window_state",
         ):
             state_map = getattr(self, state_attr, None)
             if state_map is not None:
@@ -1480,6 +1491,64 @@ class _HierarchicalSim:
             "overflow": con_out["overflow"],
         }
 
+    def _tick_implication_delay_window(
+        self,
+        node: CheckerNode,
+        signals: dict[str, bool],
+    ) -> dict[str, bool]:
+        """Structural model for the compact bounded-delay implication backend.
+
+        Independent semantic tests do not use this method; it exists so the
+        existing hierarchy differential harness does not silently return an
+        all-zero trace when the composer selects the specialization.
+        """
+        delay_min = int(node.params["delay_min"])
+        delay_max = int(node.params["delay_max"])
+        overlapping = str(node.params.get("overlapping", "true")).lower() in {
+            "true",
+            "1",
+            "yes",
+        }
+        state_map = getattr(self, "_delay_window_state", None)
+        if state_map is None:
+            state_map = {}
+            self._delay_window_state = state_map
+        st = state_map.setdefault(
+            node.module_name,
+            {
+                "pending": tuple(False for _ in range(delay_max)),
+                "ant_q": False,
+                "o_pass": False,
+                "o_fail": False,
+            },
+        )
+        pending = tuple(bool(bit) for bit in st["pending"])
+        out = {
+            "pass": bool(st["o_pass"]),
+            "fail": bool(st["o_fail"]),
+            "active": any(pending),
+            "overflow": False,
+        }
+
+        ant_match = bool(signals.get("start", False)) and _eval_nfa_guard(
+            str(node.params["ant_guard"]), signals
+        )
+        trigger = ant_match if overlapping else bool(st["ant_q"])
+        st["ant_q"] = ant_match
+        consequent_match = _eval_nfa_guard(str(node.params["consequent_guard"]), signals)
+        retire = tuple(
+            pending[index] and delay_min <= index + 1 <= delay_max and consequent_match
+            for index in range(delay_max)
+        )
+        next_pending = [trigger]
+        next_pending.extend(
+            pending[index - 1] and not retire[index - 1] for index in range(1, delay_max)
+        )
+        st["pending"] = tuple(next_pending)
+        st["o_pass"] = any(retire)
+        st["o_fail"] = pending[-1] and not consequent_match
+        return out
+
 
 def _extract_oracle_params(node: CheckerNode) -> dict[str, Any]:
     tname = node.template_name
@@ -1586,9 +1655,10 @@ def _parse_nfa_accept(spec: str) -> frozenset[int]:
 def _eval_nfa_guard(expr: str, sig: dict[str, bool]) -> bool:
     """Evaluate a boolean guard against a signal snapshot.
 
-    Grammar: ``signal | '1' | '0' | '~' expr | expr '&' expr | expr '|' expr
-    | '(' expr ')'``. Precedence ``~`` > ``&`` > ``|``. Recursive-descent
-    parser — deliberately independent of any RTL evaluator (RISK-01 D2).
+    Grammar covers the scalar two-state subset emitted by the NFA composer:
+    identifiers, integer / one-bit sized constants, ``!`` / ``~``,
+    ``&&`` / ``&``, ``||`` / ``|``, ``==`` / ``!=``, and parentheses.
+    Recursive-descent parsing is deliberately independent of RTL simulation.
 
     Direct copy of the parser validated in
     ``tools/audit/probe_nfa_prototype.py`` on 4 hand-derived vectors.
@@ -1604,10 +1674,19 @@ def _eval_nfa_guard(expr: str, sig: dict[str, bool]) -> bool:
         return v
 
     def parse_and() -> bool:
-        v = parse_not()
+        v = parse_equality()
         while pos[0] < len(tokens) and tokens[pos[0]] == "&":
             pos[0] += 1
-            v = v & parse_not()
+            v = v & parse_equality()
+        return v
+
+    def parse_equality() -> bool:
+        v = parse_not()
+        while pos[0] < len(tokens) and tokens[pos[0]] in ("==", "!="):
+            op = tokens[pos[0]]
+            pos[0] += 1
+            rhs = parse_not()
+            v = (v == rhs) if op == "==" else (v != rhs)
         return v
 
     def parse_not() -> bool:
@@ -1617,6 +1696,8 @@ def _eval_nfa_guard(expr: str, sig: dict[str, bool]) -> bool:
         return parse_atom()
 
     def parse_atom() -> bool:
+        if pos[0] >= len(tokens):
+            raise ValueError(f"missing operand in guard {expr!r}")
         t = tokens[pos[0]]
         pos[0] += 1
         if t == "(":
@@ -1625,13 +1706,23 @@ def _eval_nfa_guard(expr: str, sig: dict[str, bool]) -> bool:
                 raise ValueError(f"unbalanced parens in guard {expr!r}")
             pos[0] += 1
             return v
-        if t == "1":
-            return True
-        if t == "0":
-            return False
+        if t.isdigit():
+            return int(t, 10) != 0
+        if "'" in t:
+            try:
+                _width, literal = t.split("'", 1)
+                base = literal[0].lower()
+                digits = literal[1:].replace("_", "")
+                radix = {"b": 2, "d": 10, "h": 16, "o": 8}[base]
+                return int(digits, radix) != 0
+            except (KeyError, ValueError, IndexError) as exc:
+                raise ValueError(f"bad sized literal {t!r} in guard {expr!r}") from exc
         return bool(sig.get(t, False))
 
-    return parse_or()
+    value = parse_or()
+    if pos[0] != len(tokens):
+        raise ValueError(f"trailing tokens in guard {expr!r}: {tokens[pos[0] :]!r}")
+    return value
 
 
 def _nfa_tokenize(expr: str) -> list[str]:
@@ -1642,12 +1733,24 @@ def _nfa_tokenize(expr: str) -> list[str]:
         c = expr[i]
         if c.isspace():
             i += 1
+        elif expr.startswith("&&", i):
+            out.append("&")
+            i += 2
+        elif expr.startswith("||", i):
+            out.append("|")
+            i += 2
+        elif expr.startswith("==", i) or expr.startswith("!=", i):
+            out.append(expr[i : i + 2])
+            i += 2
+        elif c == "!":
+            out.append("~")
+            i += 1
         elif c in "()~&|":
             out.append(c)
             i += 1
         elif c.isalnum() or c == "_":
             j = i
-            while j < len(expr) and (expr[j].isalnum() or expr[j] == "_"):
+            while j < len(expr) and (expr[j].isalnum() or expr[j] in "_'"):
                 j += 1
             out.append(expr[i:j])
             i = j

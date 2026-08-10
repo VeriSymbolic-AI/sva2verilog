@@ -43,7 +43,7 @@ def _b(t: str) -> BoolExpr:
 
 class TestNestedCompile:
     def test_intersect_within_bool(self) -> None:
-        """(a intersect b) within c — K=4×2=8."""
+        """(a intersect b) within c — K=2*(4+2)=12."""
         node = SeqWithin(
             inner=SeqIntersect(
                 left=_b("a"), right=_b("b"), source_loc=_LOC,
@@ -52,7 +52,7 @@ class TestNestedCompile:
         )
         c = compose(node, _CLK, None, "(a intersect b) within c")
         assert c.template_name == "nfa_generic"
-        assert c.params["nfa_states"] == "8"
+        assert c.params["nfa_states"] == "12"
 
     def test_intersect_chain(self) -> None:
         """(a intersect b) intersect c — K=4×2=8."""
@@ -80,7 +80,7 @@ class TestNestedCompile:
         assert c.params["nfa_states"] == "4"
 
     def test_deep_nested(self) -> None:
-        """(a intersect b) within (c[*3]) — deep nesting, K=4×4=16."""
+        """(a intersect b) within (c[*3]) — waiting/running/done K=24."""
         node = SeqWithin(
             inner=SeqIntersect(
                 left=_b("a"), right=_b("b"), source_loc=_LOC,
@@ -92,8 +92,8 @@ class TestNestedCompile:
         )
         c = compose(node, _CLK, None, "(a intersect b) within (c[*3])")
         assert c.template_name == "nfa_generic"
-        # 4 (intersect) × 4 (c[*3]) = 16
-        assert c.params["nfa_states"] == "16"
+        # 4 outer states * (4 inner states + waiting/done phases) = 24
+        assert c.params["nfa_states"] == "24"
 
 
 # ═════════════════════════════════════════════════════════════════════════

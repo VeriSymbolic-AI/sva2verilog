@@ -176,6 +176,42 @@ def test_cli_success_output_file(runner: CliRunner, bool_assert_path: Path) -> N
     assert call_args[0][1] == Path(out_path)
 
 
+def test_cli_trailing_slash_keeps_directory_mode_for_leaf_checker(
+    runner: CliRunner, bool_assert_path: Path, tmp_path: Path
+) -> None:
+    """``--output out/`` stays a directory after hierarchy-flattening optimizations."""
+    mock_node = MagicMock()
+    mock_clock = MagicMock()
+    mock_checker = MagicMock()
+    mock_checker.children = ()
+    output_dir = tmp_path / "out"
+
+    with patch("sva2rtl.cli.invoke_slang", return_value=_MOCK_AST):
+        with patch(
+            "sva2rtl.cli.import_all_assertions",
+            return_value=[(mock_node, mock_clock, "(a && b)", "my_check")],
+        ):
+            with patch("sva2rtl.cli.normalize", return_value=mock_node):
+                with patch("sva2rtl.cli.compose", return_value=mock_checker):
+                    with patch("sva2rtl.cli.optimize", return_value=mock_checker):
+                        with patch(
+                            "sva2rtl.cli.emit_all", return_value={"sva_my_check": _MOCK_SV_TEXT}
+                        ):
+                            with patch("sva2rtl.cli.write_output_dir") as mock_write_dir:
+                                result = runner.invoke(
+                                    main,
+                                    [
+                                        str(bool_assert_path),
+                                        "--output",
+                                        str(output_dir) + "/",
+                                    ],
+                                )
+
+    assert result.exit_code == 0
+    mock_write_dir.assert_called_once()
+    assert mock_write_dir.call_args[0][1] == output_dir
+
+
 # ── Test 8: unexpected exception -> exit code 1, 'internal error:' prefix ─
 
 

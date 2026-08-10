@@ -8,9 +8,21 @@ from pathlib import Path
 import pytest
 
 from sva2rtl.ast_importer import import_assertion
+from sva2rtl.checker_contract import checker_has_overflow_flag
 from sva2rtl.composer import compose
 from sva2rtl.emitter import emit_all
-from sva2rtl.ir import BoolExpr, CheckerNode, DisableIff, SourceLoc
+from sva2rtl.ir import (
+    BoolExpr,
+    CheckerNode,
+    ClockSpec,
+    DisableIff,
+    PropImplication,
+    SeqConcat,
+    SeqRepetition,
+    SeqWithin,
+    SourceLoc,
+    SVANode,
+)
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
@@ -71,9 +83,7 @@ def test_import_disable_iff_returns_disable_iff_node() -> None:
     """import_assertion on disable_iff.json returns a DisableIff IR node."""
     ast = json.loads((FIXTURES_DIR / "disable_iff.json").read_text(encoding="utf-8"))
     ir_node, clock, text, label = import_assertion(ast)
-    assert isinstance(ir_node, DisableIff), (
-        f"Expected DisableIff, got {type(ir_node).__name__}"
-    )
+    assert isinstance(ir_node, DisableIff), f"Expected DisableIff, got {type(ir_node).__name__}"
 
 
 def test_import_disable_iff_condition_text() -> None:
@@ -89,6 +99,7 @@ def test_import_disable_iff_condition_text() -> None:
 def test_import_disable_iff_body_is_prop_implication() -> None:
     """DisableIff.body is a PropImplication (a |-> b from the fixture)."""
     from sva2rtl.ir import PropImplication
+
     ast = json.loads((FIXTURES_DIR / "disable_iff.json").read_text(encoding="utf-8"))
     ir_node, clock, text, label = import_assertion(ast)
     assert isinstance(ir_node, DisableIff)
@@ -176,6 +187,98 @@ def test_emit_disable_iff_propagates_body_overflow_flag() -> None:
     top_sv = modules[checker.module_name]
     assert "output  logic overflow_flag" in top_sv
     assert ".overflow_flag (overflow_flag)" in top_sv
+
+
+@pytest.mark.parametrize(
+    ("body", "expected_template"),
+    [
+        (
+            PropImplication(
+                antecedent=BoolExpr(text="req", source_loc=_make_loc()),
+                consequent=SeqConcat(
+                    elements=(
+                        BoolExpr(text="b", source_loc=_make_loc()),
+                        BoolExpr(text="c", source_loc=_make_loc()),
+                    ),
+                    delays=((2, 2),),
+                    source_loc=_make_loc(),
+                ),
+                overlapping=True,
+                source_loc=_make_loc(),
+            ),
+            "implication_nfa",
+        ),
+        (
+            PropImplication(
+                antecedent=BoolExpr(text="req", source_loc=_make_loc()),
+                consequent=SeqConcat(
+                    elements=(
+                        BoolExpr(text="1'b1", source_loc=_make_loc()),
+                        BoolExpr(text="ack", source_loc=_make_loc()),
+                    ),
+                    delays=((1, 3),),
+                    source_loc=_make_loc(),
+                ),
+                overlapping=True,
+                source_loc=_make_loc(),
+            ),
+            "implication_delay_window",
+        ),
+        (
+            SeqWithin(
+                inner=BoolExpr(text="a", source_loc=_make_loc()),
+                outer=SeqRepetition(
+                    expr=BoolExpr(text="c", source_loc=_make_loc()),
+                    rep_min=3,
+                    rep_max=3,
+                    source_loc=_make_loc(),
+                ),
+                source_loc=_make_loc(),
+            ),
+            "nfa_generic",
+        ),
+    ],
+)
+def test_disable_iff_propagates_every_bounded_backend_overflow_port(
+    body: SVANode, expected_template: str
+) -> None:
+    """Optional-port propagation is capability-based, not a stale template subset."""
+    loc = _make_loc()
+    checker = compose(
+        DisableIff(
+            condition=BoolExpr(text="kill", source_loc=loc),
+            body=body,
+            source_loc=loc,
+        ),
+        ClockSpec(edge="posedge", signal="clk", source_loc=loc),
+        "disable_bounded",
+        "disable iff (kill) bounded_body",
+    )
+    assert checker.children[0].template_name == expected_template
+    assert checker_has_overflow_flag(checker)
+    assert checker.params["body_overflow_port"] == "true"
+    top_sv = emit_all(checker)[checker.module_name]
+    assert "output  logic overflow_flag" in top_sv
+    assert ".overflow_flag (overflow_flag)" in top_sv
+
+
+def test_disable_iff_does_not_invent_overflow_for_unbounded_leaf() -> None:
+    """The string value ``false`` must not be truthy in the Jinja condition."""
+    loc = _make_loc()
+    checker = compose(
+        DisableIff(
+            condition=BoolExpr(text="kill", source_loc=loc),
+            body=BoolExpr(text="a", source_loc=loc),
+            source_loc=loc,
+        ),
+        ClockSpec(edge="posedge", signal="clk", source_loc=loc),
+        "disable_bool",
+        "disable iff (kill) a",
+    )
+    assert not checker_has_overflow_flag(checker)
+    assert checker.params["body_overflow_port"] == "false"
+    top_sv = emit_all(checker)[checker.module_name]
+    assert "overflow_flag" not in top_sv
 
 
 def test_emit_disable_iff_all_modules_contain_endmodule() -> None:

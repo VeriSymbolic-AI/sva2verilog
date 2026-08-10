@@ -50,12 +50,18 @@ from typing import Any
 
 from jinja2 import Environment, FileSystemLoader
 
+from sva2rtl.checker_contract import (
+    TEMPLATES_WITH_OVERFLOW,
+    checker_has_overflow_flag,
+)
 from sva2rtl.ir import CheckerNode
 
-# ── Templates with overflow_flag output port ──────────────────────────────────
-
-TEMPLATES_WITH_OVERFLOW = frozenset(
-    {"overlap_bitvec", "nonoverlap", "nfa_generic", "implication_nfa"}
+__all__ = (
+    "TEMPLATES_WITH_OVERFLOW",
+    "checker_has_overflow_flag",
+    "extra_inputs_from_checker",
+    "generate_testbench",
+    "run_simulation",
 )
 
 

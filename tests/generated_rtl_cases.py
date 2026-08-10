@@ -20,6 +20,7 @@ from sva2rtl.ir import (
     CheckerNode,
     ClockedSeq,
     ClockSpec,
+    PropImplication,
     SeqConcat,
     SeqIntersect,
     SeqRepetition,
@@ -99,6 +100,20 @@ def _build_nfa_intersect() -> CheckerNode:
         source_loc=_LOC,
     )
     return _build(node, "synth_nfa_intersect", "(a ##2 b) intersect (c[*3])")
+
+
+def _build_implication_delay_window() -> CheckerNode:
+    node = PropImplication(
+        antecedent=_b("req"),
+        consequent=SeqConcat(
+            elements=(_b("1'b1"), _b("ack")),
+            delays=((1, 3),),
+            source_loc=_LOC,
+        ),
+        overlapping=True,
+        source_loc=_LOC,
+    )
+    return _build(node, "synth_delay_window", "req |-> ##[1:3] ack")
 
 
 def _build_nfa_within() -> CheckerNode:
@@ -184,6 +199,13 @@ def _all_cases() -> tuple[GeneratedMonitorCase, ...]:
             lambda: _build_json_fixture("implication_nonoverlap.json"),
             ("implication", "nonoverlap"),
             ("|=> non-overlapping implication",),
+        ),
+        GeneratedMonitorCase(
+            "implication_delay_window",
+            "compact bounded-delay implication",
+            _build_implication_delay_window,
+            ("implication", "bounded_delay", "implication_delay_window"),
+            ("##[M:N] bounded delay", "|-> overlapping implication"),
         ),
         GeneratedMonitorCase(
             "rep_fixed",

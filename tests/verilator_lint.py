@@ -25,7 +25,6 @@ def build_verilator_lint_command(
         "-Wno-UNUSEDSIGNAL",
         "-Wno-UNUSEDPARAM",
         "-Wno-DECLFILENAME",
-        "-Wno-UNOPTFLAT",
         "--top-module",
         top_module,
         *[str(path) for path in sv_files],

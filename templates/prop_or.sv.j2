@@ -21,7 +21,6 @@ module {{ module_name }} (
     {{ wire_type(verilog_mode) }} left_active, left_pass, left_fail;
     {{ wire_type(verilog_mode) }} right_active, right_pass, right_fail;
     {{ signal_type(verilog_mode) }} active_q, pass_q, fail_q;
-    {{ signal_type(verilog_mode) }} left_failed_q, right_failed_q;
 
 {{ children[0].module_name }} u_left (
     .{{ clock_signal }}({{ clock_signal }}),
@@ -55,13 +54,11 @@ module {{ module_name }} (
 
     wire _body_active = left_active | right_active;
     wire _body_pass   = left_pass   | right_pass;
-    // A sequence OR fails only after BOTH alternatives have failed.  One
-    // branch may finish before the other, so retain its terminal failure until
-    // the sibling also fails.  The old ``left_fail | right_fail`` expression
-    // could emit pass and fail for the same attempt when exactly one simple
-    // branch matched.
-    wire _body_fail   = (left_fail  & (right_fail | right_failed_q))
-                      | (right_fail & (left_fail  | left_failed_q));
+    // This wrapper is now used only when both alternatives are single-cycle
+    // leaves. Multi-cycle OR is lowered to one NFA, where per-attempt branch
+    // lifetime is explicit. Keeping cross-cycle failure latches here would mix
+    // consecutive independent starts and is unnecessary for aligned leaves.
+    wire _body_fail   = left_fail & right_fail;
 
     // ── HARDEN-01: attempt_fired_q never cleared by disable_i ──────────
     {{ signal_type(verilog_mode) }} attempt_fired_q;
@@ -73,22 +70,10 @@ module {{ module_name }} (
             active_q <= 1'b0;
             pass_q   <= 1'b0;
             fail_q   <= 1'b0;
-            left_failed_q <= 1'b0;
-            right_failed_q <= 1'b0;
         end else begin
             active_q  <= _body_active;
             pass_q    <= _body_pass;
             fail_q    <= _body_fail;
-            if (start && !left_active && !right_active) begin
-                left_failed_q  <= 1'b0;
-                right_failed_q <= 1'b0;
-            end else if (_body_pass || _body_fail) begin
-                left_failed_q  <= 1'b0;
-                right_failed_q <= 1'b0;
-            end else begin
-                left_failed_q  <= left_failed_q  | left_fail;
-                right_failed_q <= right_failed_q | right_fail;
-            end
         end
     end
 

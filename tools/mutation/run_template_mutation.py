@@ -62,39 +62,12 @@ MUTATIONS: tuple[TemplateMutation, ...] = (
     TemplateMutation(
         name="sequence-or-failure-truth-table",
         template="templates/prop_or.sv.j2",
-        original=(
-            "wire _body_fail   = (left_fail  & (right_fail | right_failed_q))\n"
-            "                      | (right_fail & (left_fail  | left_failed_q));"
-        ),
+        original="wire _body_fail   = left_fail & right_fail;",
         replacement="wire _body_fail   = left_fail | right_fail;",
         pytest_args=(
             "tests/simulation/test_sim_v13_operators.py",
             "-k",
             "SeqOr",
-            "--simulator=iverilog",
-        ),
-    ),
-    TemplateMutation(
-        name="sequence-or-left-failure-retention",
-        template="templates/prop_or.sv.j2",
-        original="left_failed_q  <= left_failed_q  | left_fail;",
-        replacement="left_failed_q  <= left_fail;",
-        pytest_args=(
-            "tests/simulation/test_sim_v13_operators.py",
-            "-k",
-            "delayed_failure_completes",
-            "--simulator=iverilog",
-        ),
-    ),
-    TemplateMutation(
-        name="sequence-or-right-failure-retention",
-        template="templates/prop_or.sv.j2",
-        original="right_failed_q <= right_failed_q | right_fail;",
-        replacement="right_failed_q <= right_fail;",
-        pytest_args=(
-            "tests/simulation/test_sim_v13_operators.py",
-            "-k",
-            "delayed_failure_completes",
             "--simulator=iverilog",
         ),
     ),
@@ -135,6 +108,46 @@ MUTATIONS: tuple[TemplateMutation, ...] = (
             "tests/simulation/test_sim_implication.py",
             "-k",
             "attempt_fired and nonoverlap",
+            "--simulator=iverilog",
+        ),
+    ),
+    TemplateMutation(
+        name="delay-window-lower-bound-mask",
+        template="templates/implication_delay_window.sv.j2",
+        original=(
+            "assign retire_mask = pending_q & ELIGIBLE_MASK & {MAX_DELAY{consequent_match}};"
+        ),
+        replacement="assign retire_mask = pending_q & {MAX_DELAY{consequent_match}};",
+        pytest_args=(
+            "tests/simulation/test_sim_nfa_semantic_regressions.py",
+            "-k",
+            "nontrivial_lower_bound",
+            "--simulator=iverilog",
+        ),
+    ),
+    TemplateMutation(
+        name="delay-window-must-retire-satisfied-attempt",
+        template="templates/implication_delay_window.sv.j2",
+        original=(
+            "assign pending_d[{{ i }}] = pending_q[{{ i - 1 }}] & ~retire_mask[{{ i - 1 }}];"
+        ),
+        replacement="assign pending_d[{{ i }}] = pending_q[{{ i - 1 }}];",
+        pytest_args=(
+            "tests/simulation/test_sim_nfa_semantic_regressions.py",
+            "-k",
+            "ranged_delay_enforces",
+            "--simulator=iverilog",
+        ),
+    ),
+    TemplateMutation(
+        name="delay-window-max-cycle-ack-suppresses-fail",
+        template="templates/implication_delay_window.sv.j2",
+        original="assign fail_d = pending_q[MAX_DELAY-1] & ~consequent_match;",
+        replacement="assign fail_d = pending_q[MAX_DELAY-1];",
+        pytest_args=(
+            "tests/simulation/test_sim_nfa_semantic_regressions.py",
+            "-k",
+            "ranged_delay_enforces",
             "--simulator=iverilog",
         ),
     ),

@@ -453,3 +453,27 @@ def test_sampled_leaf_uses_observed_port_name_instead_of_fallback() -> None:
 def test_nfa_guard_rejects_missing_closing_parenthesis() -> None:
     with pytest.raises(ValueError, match="unbalanced parens"):
         _eval_nfa_guard("(a", {"a": True})
+
+
+@pytest.mark.parametrize(
+    ("guard", "signals", "expected"),
+    [
+        ("!a", {"a": False}, True),
+        ("a && b", {"a": True, "b": False}, False),
+        ("a || b", {"a": False, "b": True}, True),
+        ("a == b", {"a": True, "b": True}, True),
+        ("a != 1'b1", {"a": False}, True),
+        ("(a && !b) | c", {"a": True, "b": False, "c": False}, True),
+    ],
+)
+def test_nfa_guard_evaluates_emitted_scalar_systemverilog_subset(
+    guard: str,
+    signals: dict[str, bool],
+    expected: bool,
+) -> None:
+    assert _eval_nfa_guard(guard, signals) is expected
+
+
+def test_nfa_guard_rejects_trailing_tokens_instead_of_silently_ignoring_them() -> None:
+    with pytest.raises(ValueError, match="trailing tokens"):
+        _eval_nfa_guard("a b", {"a": True, "b": True})

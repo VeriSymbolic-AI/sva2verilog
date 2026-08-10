@@ -28,8 +28,10 @@ from sva2rtl.bool_semantics import (
     render_bool_expr,
     serialize_bool_expr,
 )
+from sva2rtl.checker_contract import checker_has_overflow_flag
 from sva2rtl.errors import SvaCompileError, UnsupportedConstruct
 from sva2rtl.ir import (
+    BoolConst,
     BoolExpr,
     CheckerNode,
     ClockedSeq,
@@ -443,9 +445,9 @@ def _bool_expr_aliases(node: BoolExpr) -> dict[str, str]:
     return aliases
 
 
-def _bool_expr_signal_names(node: BoolExpr) -> tuple[str, ...]:
-    """Return sorted unique signal names for NFA params."""
-    return tuple(sorted({signal for _port, signal in _bool_expr_observed(node)}))
+def _bool_expr_signal_names(node: BoolExpr) -> tuple[tuple[str, str], ...]:
+    """Return generated-port to DUT-signal mappings for NFA composition."""
+    return tuple(sorted(set(_bool_expr_observed(node))))
 
 
 # ── Structural hashing (Phase 4) ─────────────────────────────────────────
@@ -1158,6 +1160,16 @@ def _compose_implication_sc(
     """
     bv_width = _compute_bv_width(node.consequent)
     if bv_width > 1:
+        delay_window = _leading_delay_window(node.consequent)
+        if delay_window is not None and isinstance(node.antecedent, BoolExpr):
+            return _compose_implication_delay_window(
+                node,
+                clock,
+                label,
+                original_text,
+                delay_window,
+                cse_origin,
+            )
         if _is_nfa_liftable(node.consequent):
             # The NFA implication path evaluates the antecedent
             # combinationally (ant_guard = start & (ant_expr)) and uses it
@@ -1235,6 +1247,110 @@ def _compose_implication_sc(
     )
 
 
+def _leading_delay_window(
+    consequent: SVANode,
+) -> tuple[int, int, BoolExpr] | None:
+    """Recognize ``1'b1 ##[M:N] expr`` for the compact age-vector backend."""
+    if not isinstance(consequent, SeqConcat) or len(consequent.elements) != 2:
+        return None
+    first, final = consequent.elements
+    if not isinstance(first, BoolExpr) or not isinstance(final, BoolExpr):
+        return None
+    if len(consequent.delays) == 1:
+        delay_min, delay_max = consequent.delays[0]
+    elif len(consequent.delays) == 2 and consequent.delays[0] == (0, 0):
+        delay_min, delay_max = consequent.delays[1]
+    else:
+        return None
+    first_is_true = (
+        isinstance(first.expr, BoolConst) and bool(first.expr.value)
+    ) or first.text.strip().lower() in {"1", "1'b1", "true"}
+    if not first_is_true or delay_min < 1:
+        return None
+    _require_scalar_bool_for_nfa(final)
+    return delay_min, delay_max, final
+
+
+def _compose_implication_delay_window(
+    node: PropImplication,
+    clock: ClockSpec,
+    label: str | None,
+    original_text: str,
+    delay_window: tuple[int, int, BoolExpr],
+    cse_origin: str | None = None,
+) -> CheckerNode:
+    """Emit a compact age-vector monitor for a leading bounded delay.
+
+    Unlike the generic one-hot NFA with T replicated thread slots, one bit per
+    obligation age represents every possible overlapping start exactly.  The
+    specialization therefore has no allocator-exhaustion state and exposes a
+    constant-low ``overflow_flag``.
+    """
+    if not isinstance(node.antecedent, BoolExpr):  # defensive router contract
+        raise UnsupportedConstruct(
+            message="bounded-delay implication specialization requires a boolean antecedent",
+            construct_name="bounded-delay implication with sequence antecedent",
+            source_loc=node.source_loc,
+        )
+    delay_min, delay_max, consequent = delay_window
+    if delay_min > delay_max:
+        raise UnsupportedConstruct(
+            message=(
+                f"invalid bounded delay ##[{delay_min}:{delay_max}]: "
+                "the lower bound must not exceed the upper bound"
+            ),
+            construct_name="invalid bounded-delay implication window",
+            source_loc=node.source_loc,
+        )
+    if delay_max > 32:
+        raise UnsupportedConstruct(
+            message=(
+                f"bounded-delay implication window requires {delay_max} age bits "
+                "(max=32). Split the property into smaller windows or use a "
+                "separate counter-based engineering monitor with an explicit "
+                "equivalence proof."
+            ),
+            construct_name="bounded-delay implication window over resource budget",
+            source_loc=node.source_loc,
+        )
+    module_name = module_name_from_label(label, original_text)
+    ant_sigs = _bool_expr_signal_names(node.antecedent)
+    con_sigs = _bool_expr_signal_names(consequent)
+    signals = tuple(sorted(set(ant_sigs) | set(con_sigs)))
+    widths = dict(_bool_expr_widths(node.antecedent))
+    widths.update(_bool_expr_widths(consequent))
+    signedness = dict(_bool_expr_signedness(node.antecedent))
+    signedness.update(_bool_expr_signedness(consequent))
+    eligible_bits = "".join(
+        "1" if delay_min <= age <= delay_max else "0" for age in range(delay_max, 0, -1)
+    )
+    params: dict[str, str] = {
+        "module_name": module_name,
+        "clock_signal": clock.signal,
+        "clock_edge": clock.edge,
+        "source_loc": str(node.source_loc),
+        "sva2rtl_version": __version__,
+        "original_text": original_text,
+        "overlapping": node.overlapping,  # type: ignore[dict-item]
+        "ant_guard": _bool_expr_text(node.antecedent),
+        "consequent_guard": _bool_expr_text(consequent),
+        "delay_min": str(delay_min),
+        "delay_max": str(delay_max),
+        "eligible_bits": eligible_bits,
+    }
+    return CheckerNode(
+        template_name="implication_delay_window",
+        module_name=module_name,
+        params=params,
+        observed_signals=signals,
+        observed_signal_widths=tuple(widths.items()),
+        observed_signal_signedness=tuple(signedness.items()),
+        source_loc=node.source_loc,
+        children=(),
+        cse_origin=cse_origin,
+    )
+
+
 def _compose_implication_nfa(
     node: PropImplication,
     clock: ClockSpec,
@@ -1276,9 +1392,23 @@ def _compose_implication_nfa(
     ant_signedness = _bool_expr_signedness(node.antecedent)
 
     # Consequent → sub-NFA (property-kind: dead-end = fail after attempt).
-    cons_states, cons_trans, cons_accept, cons_sigs = _lift_to_nfa(
+    # Recursive composed operands (and/intersect/within/throughout) are
+    # NFA-liftable through _try_lift_operand but are not primitive cases in
+    # _lift_to_nfa.  Calling the primitive helper here used to raise a raw
+    # ValueError for shapes the router had explicitly declared supported.
+    consequent_nfa = _try_lift_operand(
         node.consequent,
+        clock,
+        label,
+        original_text,
     )
+    if consequent_nfa is None:  # pragma: no cover - guarded by the router
+        raise UnsupportedConstruct(
+            message="implication consequent could not be lowered to an NFA",
+            construct_name="implication NFA lowering inconsistency",
+            source_loc=node.source_loc,
+        )
+    cons_states, cons_trans, cons_accept, cons_sigs = consequent_nfa
 
     # Thread budget: worst-case concurrent = K (ant fires every cycle).
     nfa_t = min(cons_states, 4)
@@ -1319,7 +1449,7 @@ def _compose_implication_nfa(
         template_name="implication_nfa",
         module_name=module_name,
         params=params,
-        observed_signals=tuple((s, s) for s in all_sigs),
+        observed_signals=all_sigs,
         observed_signal_widths=ant_widths,
         observed_signal_signedness=ant_signedness,
         source_loc=node.source_loc,
@@ -1469,6 +1599,7 @@ def _compose_disable_iff(
         "source_loc": str(node.source_loc),
         "sva2rtl_version": __version__,
         "original_text": original_text,
+        "body_overflow_port": str(checker_has_overflow_flag(body_checker)).lower(),
     }
     if isinstance(node.condition, BoolExpr) and node.condition.expr is not None:
         params["cond_semantic"] = serialize_bool_expr(
@@ -1634,7 +1765,45 @@ def _compose_seq_or(
     original_text: str,
     cse_origin: str | None = None,
 ) -> CheckerNode:
-    """Compose sequence OR: two sub-sequences, OR their pass outputs."""
+    """Compose sequence OR.
+
+    The legacy two-child wrapper remains useful for single-cycle operands.
+    Multi-cycle liftable operands use one NFA instead: the wrapper has only one
+    remembered failure bit per branch and therefore cannot keep independent
+    temporal attempts aligned when either branch spans multiple cycles.
+    """
+    if _compute_bv_width(node) > 1:
+        if not _is_nfa_liftable(node):
+            raise UnsupportedConstruct(
+                message=(
+                    "sequence 'or' with a multi-cycle operand requires both "
+                    "branches to be NFA-liftable; split the alternatives into "
+                    "separate properties or simplify the unsupported branch"
+                ),
+                construct_name="sequence or with non-NFA-liftable multi-cycle operand",
+                source_loc=node.source_loc,
+            )
+        lifted = _try_lift_operand(node, clock, label, original_text)
+        if lifted is None:  # pragma: no cover - guarded by _is_nfa_liftable
+            raise AssertionError("NFA-liftable SeqOr failed to lift")
+        states, trans, accept, signals = lifted
+        return _emit_nfa_checker(
+            "sequence or",
+            states,
+            trans,
+            accept,
+            signals,
+            # This emitted node is a public checker (nested NFA composition
+            # uses _try_lift_operand directly).  Preserve the legacy seq-or
+            # contract: report one failure when every alternative dies.
+            "property",
+            clock,
+            label,
+            original_text,
+            node.source_loc,
+            cse_origin,
+        )
+
     module_name = module_name_from_label(label, original_text)
     base = module_name[4:] if module_name.startswith("sva_") else module_name
     left = compose(node.left, clock, f"{base}_left", original_text)
@@ -1666,7 +1835,43 @@ def _compose_seq_and(
     original_text: str,
     cse_origin: str | None = None,
 ) -> CheckerNode:
-    """Compose sequence AND: two sub-sequences, AND their pass outputs."""
+    """Compose sequence AND.
+
+    A multi-cycle sequence ``and`` completes when the later branch completes.
+    Use the NFA product for that case so early completion is retained per
+    attempt and later endpoints remain available to enclosing operators.
+    """
+    if _compute_bv_width(node) > 1:
+        if not _is_nfa_liftable(node):
+            raise UnsupportedConstruct(
+                message=(
+                    "sequence 'and' with a multi-cycle operand requires both "
+                    "branches to be NFA-liftable; split the conjunction into "
+                    "separate properties or simplify the unsupported branch"
+                ),
+                construct_name="sequence and with non-NFA-liftable multi-cycle operand",
+                source_loc=node.source_loc,
+            )
+        lifted = _try_lift_operand(node, clock, label, original_text)
+        if lifted is None:  # pragma: no cover - guarded by _is_nfa_liftable
+            raise AssertionError("NFA-liftable SeqAnd failed to lift")
+        states, trans, accept, signals = lifted
+        return _emit_nfa_checker(
+            "sequence and",
+            states,
+            trans,
+            accept,
+            signals,
+            # Public seq-and checkers report a failed attempt when the product
+            # dead-ends. Nested use is lifted without emitting this wrapper.
+            "property",
+            clock,
+            label,
+            original_text,
+            node.source_loc,
+            cse_origin,
+        )
+
     module_name = module_name_from_label(label, original_text)
     base = module_name[4:] if module_name.startswith("sva_") else module_name
     left = compose(node.left, clock, f"{base}_left", original_text)
@@ -1839,7 +2044,7 @@ def _is_nfa_liftable(operand: SVANode) -> bool:
     - ``BoolExpr``, fixed-delay ``SeqConcat``, fixed-count ``SeqRepetition``
     - Nested ``SeqIntersect`` / ``SeqWithin`` / ``SeqThroughout`` with
       liftable operands (v1.5.1 P3 recursive composition).
-    - ``SeqOr`` with liftable left/right operands (v1.7 LANG-02).
+    - ``SeqOr`` / ``SeqAnd`` with liftable left/right operands.
     """
     if isinstance(operand, BoolExpr):
         return True
@@ -1855,6 +2060,8 @@ def _is_nfa_liftable(operand: SVANode) -> bool:
         return isinstance(operand.condition, BoolExpr) and _is_nfa_liftable(operand.body)
     if isinstance(operand, SeqOr):
         return _is_nfa_liftable(operand.left) and _is_nfa_liftable(operand.right)
+    if isinstance(operand, SeqAnd):
+        return _is_nfa_liftable(operand.left) and _is_nfa_liftable(operand.right)
     if isinstance(operand, SeqGotoRep):
         return isinstance(operand.expr, BoolExpr) and operand.rep_min >= 1
     if isinstance(operand, SeqNonconsecRep):
@@ -1862,15 +2069,78 @@ def _is_nfa_liftable(operand: SVANode) -> bool:
     return False
 
 
+def _nfa_union(
+    left: tuple[
+        int,
+        tuple[tuple[int, str, int], ...],
+        frozenset[int],
+        tuple[tuple[str, str], ...],
+    ],
+    right: tuple[
+        int,
+        tuple[tuple[int, str, int], ...],
+        frozenset[int],
+        tuple[tuple[str, str], ...],
+    ],
+    source_loc: SourceLoc,
+) -> tuple[
+    int,
+    tuple[tuple[int, str, int], ...],
+    frozenset[int],
+    tuple[tuple[str, str], ...],
+]:
+    """Build a same-cycle NFA union while keeping branch starts separate."""
+    l_states, l_trans, l_accept, l_sigs = left
+    r_states, r_trans, r_accept, r_sigs = right
+    total_states = 1 + l_states + r_states
+    if total_states > 32:
+        raise UnsupportedConstruct(
+            message=(
+                f"SeqOr NFA state budget exceeded: {total_states} states "
+                f"(left={l_states}, right={r_states}, max=32). "
+                f"Simplify the sequence expression or split into separate properties."
+            ),
+            construct_name="SeqOr with excessive NFA states",
+            source_loc=source_loc,
+        )
+
+    union_trans: list[tuple[int, str, int]] = []
+    left_offset = 1
+    right_offset = 1 + l_states
+
+    for src, guard, dst in l_trans:
+        if src == 0:
+            union_trans.append((0, guard, dst + left_offset))
+    for src, guard, dst in r_trans:
+        if src == 0:
+            union_trans.append((0, guard, dst + right_offset))
+
+    for src, guard, dst in l_trans:
+        union_trans.append((src + left_offset, guard, dst + left_offset))
+    for src, guard, dst in r_trans:
+        union_trans.append((src + right_offset, guard, dst + right_offset))
+
+    union_accept = frozenset(
+        {s + left_offset for s in l_accept} | {s + right_offset for s in r_accept}
+    )
+    all_sigs = tuple(sorted(set(l_sigs) | set(r_sigs)))
+    return total_states, tuple(union_trans), union_accept, all_sigs
+
+
 def _lift_to_nfa(
     operand: SVANode,
-) -> tuple[int, tuple[tuple[int, str, int], ...], frozenset[int], tuple[str, ...]]:
+) -> tuple[
+    int,
+    tuple[tuple[int, str, int], ...],
+    frozenset[int],
+    tuple[tuple[str, str], ...],
+]:
     """Convert a liftable operand into a small NFA (states, transitions,
     accept, observed_signals_ports).
 
-    All returned NFAs use the invariant "state 0 is the initial state,
-    accept = {states - 1}" so ``_nfa_product`` can compose them
-    uniformly.
+    All returned NFAs use state 0 as the initial state.  Some constructs have
+    multiple accept states so enclosing products can preserve every legal end
+    point instead of silently collapsing a range to its earliest match.
     """
     if isinstance(operand, BoolExpr):
         _require_scalar_bool_for_nfa(operand)
@@ -1899,8 +2169,22 @@ def _lift_to_nfa(
                 source_loc=operand.source_loc,
             )
 
+        # Reject oversized products before materializing every wait-state edge.
+        # Without this preflight a malicious ##[1:1000000] input could consume
+        # substantial memory only to hit the K<=32 check after construction.
+        estimated_states = 2 + sum(max(d_max, 1) for _, d_max in raw_delays[1:])
+        if estimated_states > 32:
+            raise UnsupportedConstruct(
+                message=(
+                    f"SeqConcat NFA state budget exceeded: {estimated_states} states "
+                    f"(max=32). Simplify ranged delays or split the property."
+                ),
+                construct_name="SeqConcat with excessive NFA states",
+                source_loc=operand.source_loc,
+            )
+
         trans: list[tuple[int, str, int]] = []
-        signal_set: set[str] = set()
+        signal_set: set[tuple[str, str]] = set()
         current = 0
         for i, element in enumerate(operand.elements):
             if not isinstance(element, BoolExpr):
@@ -1915,26 +2199,40 @@ def _lift_to_nfa(
                 )
             _require_scalar_bool_for_nfa(element)
             guard = f"({_bool_expr_text(element)})"
-            for s, _ in _bool_expr_observed(element):
-                signal_set.add(s)
+            signal_set.update(_bool_expr_signal_names(element))
             if i == 0:
                 trans.append((current, guard, current + 1))
                 current += 1
                 continue
             d_min, d_max = raw_delays[i]
-            # For ranged delay [M:N]: d_max-1 wait states.
-            # From state k where k >= d_min-1, add an alternate exit to
-            # the element check (non-deterministic delay completion).
-            wait_states = max(d_max - 1, 0)
-            for w in range(wait_states):
-                trans.append((current, "1", current + 1))
-                current += 1
-                # After d_min-1 wait states, allow exit to element check
-                if w >= d_min - 1:
-                    trans.append((current, guard, current + wait_states - w))
-            # Final mandatory transition to element check
-            trans.append((current, guard, current + 1))
-            current += 1
+            previous_accept = current
+            # Allocate one shared target for every legal delay choice.  A
+            # transition from previous_accept is evaluated one cycle after the
+            # previous element, so its elapsed delay is 1.  The old lowering
+            # added the guarded exit *after* incrementing current, shifting the
+            # lower bound by one cycle and duplicating the final exit.
+            target = previous_accept + max(d_max, 1)
+
+            # ##0 is true same-cycle fusion.  Re-express it by combining the
+            # new guard with every transition that reached the previous accept
+            # state; an extra NFA edge would necessarily add a clock cycle.
+            if d_min == 0:
+                incoming = [
+                    (src, prior_guard) for src, prior_guard, dst in trans if dst == previous_accept
+                ]
+                for src, prior_guard in incoming:
+                    trans.append((src, f"({prior_guard}) & ({guard})", target))
+
+            # Positive choices 1..d_max.  Waiting and matching are separate
+            # nondeterministic arcs from the same source state, preserving all
+            # legal endpoints in a ranged delay.
+            for elapsed in range(1, d_max + 1):
+                source = previous_accept + elapsed - 1
+                if elapsed < d_max:
+                    trans.append((source, "1", source + 1))
+                if elapsed >= max(d_min, 1):
+                    trans.append((source, guard, target))
+            current = target
         total_states = current + 1
         if total_states > 32:
             raise UnsupportedConstruct(
@@ -1982,40 +2280,17 @@ def _lift_to_nfa(
         return n + 1, tuple(rep_trans), accept_set, signals
 
     if isinstance(operand, SeqOr):
-        # Union construction: build left and right NFAs, merge with shared start.
-        l_states, l_trans, l_accept, l_sigs = _lift_to_nfa(operand.left)
-        r_states, r_trans, r_accept, r_sigs = _lift_to_nfa(operand.right)
-
-        union_trans: list[tuple[int, str, int]] = []
-        # Start state 0 → both sub-NFA starts with always-true guard.
-        union_trans.append((0, "1", 1))
-        union_trans.append((0, "1", 1 + l_states))
-
-        # Copy left transitions (offset by 1).
-        for src, guard, dst in l_trans:
-            union_trans.append((src + 1, guard, dst + 1))
-
-        # Copy right transitions (offset by 1 + l_states).
-        for src, guard, dst in r_trans:
-            union_trans.append((src + 1 + l_states, guard, dst + 1 + l_states))
-
-        # Accept = left-accept offset + right-accept offset.
-        union_accept = frozenset({s + 1 for s in l_accept} | {s + 1 + l_states for s in r_accept})
-        total_states = 1 + l_states + r_states
-        all_sigs = tuple(sorted(set(l_sigs) | set(r_sigs)))
-
-        # Budget enforcement: K ≤ 32 for product construction downstream.
-        if total_states > 32:
-            raise UnsupportedConstruct(
-                message=(
-                    f"SeqOr NFA state budget exceeded: {total_states} states "
-                    f"(left={l_states}, right={r_states}, max=32). "
-                    f"Simplify the sequence expression or split into separate properties."
-                ),
-                construct_name="SeqOr with excessive NFA states",
-                source_loc=operand.source_loc,
-            )
-        return total_states, tuple(union_trans), union_accept, all_sigs
+        # Union construction with a real same-cycle fork.  The synthetic
+        # ``0 --1--> branch_start`` edges used previously consumed a clock and
+        # missed branch guards that were true only on the start cycle.  Expand
+        # each branch's state-0 outgoing transitions from the union start while
+        # retaining separate branch-start states; sharing state 0 would let a
+        # looping branch resurrect a sibling that had already died.
+        return _nfa_union(
+            _lift_to_nfa(operand.left),
+            _lift_to_nfa(operand.right),
+            operand.source_loc,
+        )
 
     if isinstance(operand, SeqGotoRep):
         # a[->N]: count N occurrences; ~guard self-loops between occurrences
@@ -2088,25 +2363,55 @@ def _try_lift_operand(
     clock: ClockSpec,
     label: str | None,
     original_text: str,
-) -> tuple[int, tuple[tuple[int, str, int], ...], frozenset[int], tuple[str, ...]] | None:
+) -> (
+    tuple[
+        int,
+        tuple[tuple[int, str, int], ...],
+        frozenset[int],
+        tuple[tuple[str, str], ...],
+    ]
+    | None
+):
     """Try to obtain NFA data from an operand.
 
     - Primitive shapes (BoolExpr, SeqConcat, SeqRepetition, SeqOr): lifted
       directly via ``_lift_to_nfa``.
-    - Nested composed shapes (SeqIntersect, SeqWithin, SeqThroughout):
+    - Nested composed shapes (SeqAnd, SeqIntersect, SeqWithin, SeqThroughout):
       recursively lifted via their own product constructions (no
       compose() dispatch — avoids the bool-bool legacy path).
     """
-    # (BoolExpr, SeqConcat, SeqRepetition, SeqOr, SeqGotoRep, SeqNonconsecRep)
-    _primitives = (BoolExpr, SeqConcat, SeqRepetition, SeqOr, SeqGotoRep, SeqNonconsecRep)
+    # SeqOr is handled recursively below because either branch may itself be a
+    # composed NFA shape that the primitive-only _lift_to_nfa cannot dispatch.
+    _primitives = (BoolExpr, SeqConcat, SeqRepetition, SeqGotoRep, SeqNonconsecRep)
     if isinstance(operand, _primitives):
         return _lift_to_nfa(operand)
+    if isinstance(operand, SeqOr):
+        left = _try_lift_operand(operand.left, clock, label, original_text)
+        right = _try_lift_operand(operand.right, clock, label, original_text)
+        if not left or not right:
+            return None
+        return _nfa_union(left, right, operand.source_loc)
     if isinstance(operand, SeqIntersect):
         left = _try_lift_operand(operand.left, clock, label, original_text)
         right = _try_lift_operand(operand.right, clock, label, original_text)
         if not left or not right:
             return None
         states, trans, accept = _nfa_product_intersect(
+            left[0],
+            left[1],
+            left[2],
+            right[0],
+            right[1],
+            right[2],
+        )
+        sigs = tuple(sorted(set(left[3]) | set(right[3])))
+        return states, trans, accept, sigs
+    if isinstance(operand, SeqAnd):
+        left = _try_lift_operand(operand.left, clock, label, original_text)
+        right = _try_lift_operand(operand.right, clock, label, original_text)
+        if not left or not right:
+            return None
+        states, trans, accept = _nfa_product_and(
             left[0],
             left[1],
             left[2],
@@ -2166,13 +2471,74 @@ def _nfa_product_intersect(
     def sid(i: int, j: int) -> int:
         return i * n_right + j
 
+    total_states = n_left * n_right
+    # Do not materialize a transition cross-product that the public K<=32
+    # contract will reject anyway.  Returning the oversized state count lets
+    # the common emitter produce the normal actionable UnsupportedConstruct.
+    if total_states > 32:
+        return total_states, (), frozenset()
+
     trans: list[tuple[int, str, int]] = []
     for li, gl, lt in t_left:
         for rj, gr, rt in t_right:
             g = f"({gl}) & ({gr})"
             trans.append((sid(li, rj), g, sid(lt, rt)))
     accept = frozenset(sid(i, j) for i in acc_left for j in acc_right)
-    return n_left * n_right, tuple(trans), accept
+    return total_states, tuple(trans), accept
+
+
+def _nfa_product_and(
+    n_left: int,
+    t_left: tuple[tuple[int, str, int], ...],
+    acc_left: frozenset[int],
+    n_right: int,
+    t_right: tuple[tuple[int, str, int], ...],
+    acc_right: frozenset[int],
+) -> tuple[int, tuple[tuple[int, str, int], ...], frozenset[int]]:
+    """NFA product for sequence ``and`` (shared start, later endpoint).
+
+    ``both(i,j)`` tracks two running branches.  ``left_done(j)`` and
+    ``right_done(i)`` remember an earlier completion while the other branch
+    continues.  Accept states are retained even when they have outgoing edges,
+    so an enclosing ``intersect`` can choose a later legal endpoint.
+    """
+
+    both_count = n_left * n_right
+    left_done_offset = both_count
+    right_done_offset = left_done_offset + n_right
+    total_states = both_count + n_right + n_left
+    if total_states > 32:
+        return total_states, (), frozenset()
+
+    def both(i: int, j: int) -> int:
+        return i * n_right + j
+
+    def left_done(j: int) -> int:
+        return left_done_offset + j
+
+    def right_done(i: int) -> int:
+        return right_done_offset + i
+
+    trans: list[tuple[int, str, int]] = []
+    for li, gl, lt in t_left:
+        for rj, gr, rt in t_right:
+            guard = f"({gl}) & ({gr})"
+            trans.append((both(li, rj), guard, both(lt, rt)))
+            if lt in acc_left:
+                trans.append((both(li, rj), guard, left_done(rt)))
+            if rt in acc_right:
+                trans.append((both(li, rj), guard, right_done(lt)))
+    for rj, guard, rt in t_right:
+        trans.append((left_done(rj), guard, left_done(rt)))
+    for li, guard, lt in t_left:
+        trans.append((right_done(li), guard, right_done(lt)))
+
+    accept = frozenset(
+        {both(i, j) for i in acc_left for j in acc_right}
+        | {left_done(j) for j in acc_right}
+        | {right_done(i) for i in acc_left}
+    )
+    return total_states, tuple(trans), accept
 
 
 def _serialise_transitions(
@@ -2188,6 +2554,32 @@ def _serialise_transitions(
     """
     parts = [f"{s},{g},{t}" for s, g, t in transitions]
     return ";".join(parts)
+
+
+def _prune_nfa_dead_transitions(
+    transitions: tuple[tuple[int, str, int], ...],
+    accept: frozenset[int],
+) -> tuple[tuple[int, str, int], ...]:
+    """Drop arcs whose target cannot reach any accept state.
+
+    A one-hot state is a live matching thread only while an accepting
+    continuation remains.  Keeping a terminal non-accept state delays a
+    property failure by one cycle, notably for unsuccessful ``within`` and
+    unequal-length ``intersect`` paths.
+    """
+    coreachable = set(accept)
+    changed = True
+    while changed:
+        changed = False
+        for source, _guard, target in transitions:
+            if target in coreachable and source not in coreachable:
+                coreachable.add(source)
+                changed = True
+    return tuple(
+        (source, guard, target)
+        for source, guard, target in transitions
+        if source in coreachable and target in coreachable
+    )
 
 
 def _serialise_accept(accept: frozenset[int]) -> str:
@@ -2274,7 +2666,7 @@ def _emit_nfa_checker(
     states: int,
     transitions: tuple[tuple[int, str, int], ...],
     accept: frozenset[int],
-    signals: tuple[str, ...],
+    signals: tuple[tuple[str, str], ...],
     nfa_kind: str,
     clock: ClockSpec,
     label: str | None,
@@ -2305,7 +2697,8 @@ def _emit_nfa_checker(
             construct_name=f"{op_name} with K·T > 32",
             source_loc=source_loc,
         )
-    observed = tuple((s, s) for s in signals)
+    transitions = _prune_nfa_dead_transitions(transitions, accept)
+    observed = signals
     module_name = module_name_from_label(label, original_text)
     params: dict[str, str] = {
         "module_name": module_name,
@@ -2400,14 +2793,7 @@ def _nfa_reachable_states(
     states: int,
     transitions: tuple[tuple[int, str, int], ...],
 ) -> frozenset[int]:
-    """Compute states reachable from state 0 in the NFA transition graph.
-
-    Ignores guards (assumes all can eventually fire). Used by
-    ``_nfa_product_within`` to build the "outer still alive" mask —
-    the outer sub-NFA is considered "in its window" as long as it is
-    in any state reachable from 0 that has outgoing transitions OR is
-    in accept.
-    """
+    """Return graph-reachable NFA states, ignoring transition guards."""
     reach = {0}
     changed = True
     while changed:
@@ -2419,20 +2805,6 @@ def _nfa_reachable_states(
     return frozenset(reach)
 
 
-def _nfa_alive_states(
-    states: int,
-    transitions: tuple[tuple[int, str, int], ...],
-    accept: frozenset[int],
-) -> frozenset[int]:
-    """Compute "alive" states for a sub-NFA: any state that either has
-    outgoing transitions OR is accept. Dead states (no outgoing edges,
-    not accept) are excluded — matching the ``outer_alive`` predicate
-    used in the spike prototype's ``nfa_product`` (mode='within').
-    """
-    with_out = {from_s for from_s, _, _ in transitions}
-    return frozenset(with_out | accept)
-
-
 def _nfa_product_within(
     n_inner: int,
     t_inner: tuple[tuple[int, str, int], ...],
@@ -2441,29 +2813,65 @@ def _nfa_product_within(
     t_outer: tuple[tuple[int, str, int], ...],
     acc_outer: frozenset[int],
 ) -> tuple[int, tuple[tuple[int, str, int], ...], frozenset[int]]:
-    """Cross-product NFA for ``within`` — spike-notes §G0.4 (mode='within').
+    """NFA for IEEE ``inner within outer`` containment semantics.
 
-    Same transition composition as ``_nfa_product_intersect``; the
-    difference is in the accept set:
+    ``within`` is equivalent to allowing ``inner`` to start at any cycle of an
+    ``outer`` match, remembering a completed inner match, and accepting only at
+    a legal outer endpoint.  Three state families encode those phases:
 
-        accept = { sid(i, j) : i ∈ acc_inner, j ∈ alive(outer) }
+    - ``waiting(o)``: outer is running; no inner match has started yet.
+    - ``running(o, i)``: outer and one inner candidate are running together.
+    - ``done(o)``: an inner candidate completed; wait for outer to complete.
 
-    where alive(outer) = outer states that have outgoing edges OR are
-    themselves accept. This encodes IEEE 1800 §16.9.10: the inner
-    match cycle must fall inside the outer's active window.
+    Nondeterministic waiting and launch transitions preserve every possible
+    inner start.  Done states corresponding to an outer accept state are the
+    composite accept set, and retain outgoing transitions for longer legal
+    outer endpoints needed by enclosing sequence operators.
     """
 
-    def sid(i: int, j: int) -> int:
-        return i * n_outer + j
+    waiting_count = n_outer
+    running_offset = waiting_count
+    running_count = n_outer * n_inner
+    done_offset = running_offset + running_count
+    total_states = waiting_count + running_count + n_outer
+    if total_states > 32:
+        return total_states, (), frozenset()
 
+    def waiting(o: int) -> int:
+        return o
+
+    def running(o: int, i: int) -> int:
+        return running_offset + o * n_inner + i
+
+    def done(o: int) -> int:
+        return done_offset + o
+
+    inner_starts = tuple(edge for edge in t_inner if edge[0] == 0)
     trans: list[tuple[int, str, int]] = []
-    for li, gl, lt in t_inner:
-        for rj, gr, rt in t_outer:
-            g = f"({gl}) & ({gr})"
-            trans.append((sid(li, rj), g, sid(lt, rt)))
-    alive_outer = _nfa_alive_states(n_outer, t_outer, acc_outer)
-    accept = frozenset(sid(i, j) for i in acc_inner for j in alive_outer)
-    return n_inner * n_outer, tuple(trans), accept
+
+    for outer_from, outer_guard, outer_to in t_outer:
+        # Keep waiting so a later cycle can launch the inner sequence.
+        trans.append((waiting(outer_from), outer_guard, waiting(outer_to)))
+
+        # Also launch a fresh inner candidate on this same outer cycle.
+        for _, inner_guard, inner_to in inner_starts:
+            guard = f"({outer_guard}) & ({inner_guard})"
+            target = done(outer_to) if inner_to in acc_inner else running(outer_to, inner_to)
+            trans.append((waiting(outer_from), guard, target))
+
+    # Advance every launched inner candidate in lockstep with its chosen outer
+    # path.  Once inner accepts, its success is sticky in the done phase.
+    for outer_from, outer_guard, outer_to in t_outer:
+        for inner_from, inner_guard, inner_to in t_inner:
+            guard = f"({outer_guard}) & ({inner_guard})"
+            target = done(outer_to) if inner_to in acc_inner else running(outer_to, inner_to)
+            trans.append((running(outer_from, inner_from), guard, target))
+
+    for outer_from, outer_guard, outer_to in t_outer:
+        trans.append((done(outer_from), outer_guard, done(outer_to)))
+
+    accept = frozenset(done(o) for o in acc_outer)
+    return total_states, tuple(trans), accept
 
 
 def _compose_within_nfa(
@@ -2475,9 +2883,9 @@ def _compose_within_nfa(
 ) -> CheckerNode:
     """Compose ``within`` via NFA product (v1.5.1 slice 2).
 
-    Inner sequence must complete while outer is still alive (IEEE 1800
-    §16.9.10). Product construction: cross-product state IDs;
-    transitions AND-composed; accept = inner_accept × outer_alive.
+    The inner sequence may begin on any cycle from the outer start through its
+    end.  A match is reported at an outer endpoint only after at least one
+    inner candidate has completed entirely inside that outer path.
     """
     inner_nfa = _try_lift_operand(node.inner, clock, label, original_text)
     outer_nfa = _try_lift_operand(node.outer, clock, label, original_text)
@@ -2524,7 +2932,7 @@ def _nfa_product_throughout(
     n_body: int,
     t_body: tuple[tuple[int, str, int], ...],
     acc_body: frozenset[int],
-    cond_signals: tuple[str, ...],
+    cond_signals: tuple[tuple[str, str], ...],
 ) -> tuple[int, tuple[tuple[int, str, int], ...], frozenset[int]]:
     """Product NFA for ``throughout`` — IEEE 1800 §16.9.11.
 
