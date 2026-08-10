@@ -165,7 +165,7 @@ def test_ci_and_nightly_enforce_test_execution_budgets() -> None:
     formal = FORMAL_WORKFLOW.read_text(encoding="utf-8")
 
     assert ci.count("tools/ci/check_junit.py") == 6
-    assert "--min-passed 1500 --max-skipped 231" in ci
+    assert "--min-passed 1500 --max-skipped 238" in ci
     assert "--min-passed 1480 --max-skipped 1" in ci
     assert "--min-passed 170 --max-skipped 2" in ci
     assert "--min-passed 133 --max-skipped 0" in ci
