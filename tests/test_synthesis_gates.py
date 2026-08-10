@@ -223,10 +223,13 @@ def test_bounded_delay_implication_area_does_not_regress_to_threaded_nfa(
         (
             "techmap",
             "opt",
-            f"tee -o {_yosys_quote(stats_path)} stat -json",
+            # Ubuntu's packaged Yosys cannot create the quoted absolute path;
+            # the runner already executes this script with cwd=tmp_path.
+            f"tee -o {stats_path.name} stat -json",
             "",
         )
     )
+    assert "tee -o delay_window_area.json stat -json" in script
     result = run_yosys_script(script, work_dir=tmp_path)
     assert result.returncode == 0 and not result.timed_out, (
         f"Yosys area gate failed:\n{result.stdout}\n{result.stderr}"
