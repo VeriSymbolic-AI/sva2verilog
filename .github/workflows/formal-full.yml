@@ -27,8 +27,8 @@ jobs:
             min-passed: 63
             max-skipped: 0
           - suite: nfa-composition
-            files: tests/test_v151_nfa_bmc.py
-            min-passed: 12
+            files: tests/test_v151_nfa_bmc.py tests/test_implication_delay_window_formal.py
+            min-passed: 16
             max-skipped: 0
           - suite: nfa-overlap-implication
             files: tests/test_v151_p2_bmc.py::TestOverlapImplNfaMiter

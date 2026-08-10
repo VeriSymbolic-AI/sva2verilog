@@ -103,6 +103,19 @@ def test_full_formal_isolates_expensive_implication_miters() -> None:
     assert "tests/test_v151_p2_bmc.py::TestNonoverlapImplNfaMiter" in workflow
 
 
+def test_full_formal_nfa_composition_runs_compact_delay_proof_fail_closed() -> None:
+    workflow = FORMAL_WORKFLOW.read_text(encoding="utf-8")
+    nfa_shard = workflow.split("          - suite: nfa-composition", maxsplit=1)[1]
+    nfa_shard = nfa_shard.split("          - suite:", maxsplit=1)[0]
+
+    assert (
+        "files: tests/test_v151_nfa_bmc.py "
+        "tests/test_implication_delay_window_formal.py" in nfa_shard
+    )
+    assert "min-passed: 16" in nfa_shard
+    assert "max-skipped: 0" in nfa_shard
+
+
 def test_nightly_runs_both_differential_backends_and_all_mutation_surfaces() -> None:
     workflow = NIGHTLY_WORKFLOW.read_text(encoding="utf-8")
     for simulator in ("iverilog", "verilator"):

@@ -18,15 +18,16 @@ formal suites, strict lint/type checks, generated-RTL lint/synthesis, a targeted
 template-mutation gate, and the rotating differential sweep.
 
 This is local same-tree evidence only.  It is not a commercial-EDA equivalence
-result, a remote CI result, or permission to close the two issues before the
-fix commit is pushed and independently replayed.
+result, a remote CI result, or permission to close the two issues.  Remote
+qualification remains absent until Task 3 freezes and pushes one release SHA
+and independently replays CI, differential-nightly, and Full Formal on it.
 
 ## Findings and disposition
 
 | ID | Priority | Finding | Resolution / evidence |
 |---|---:|---|---|
-| F-01 | P0 | `##[1:3]` omitted the +1 transition and duplicated the last transition | Rewrote ranged-delay lowering; independent +1/+2/+3/+4 boundary vectors and real-source slang E2E added. |
-| F-02 | P1 | Common delay-window implication used a K-by-T generic NFA (issue #2) | Added `implication_delay_window`; Yosys 0.66 maps the issue shape to 25 cells, with a <=40 regression gate (old generic path was 100+). |
+| F-01 | P0 | [GitHub issue #1](https://github.com/VeriSymbolic-AI/sva2verilog/issues/1): `##[1:3]` omitted the +1 transition and duplicated the last transition | Rewrote ranged-delay lowering; `test_ranged_delay_enforces_every_window_boundary` checks +1/+2/+3 pass and +4 fail under Icarus and Verilator, with real-source slang E2E and an independent two-parametrization full-monitor proof. |
+| F-02 | P1 | [GitHub issue #2](https://github.com/VeriSymbolic-AI/sva2verilog/issues/2): common delay-window implication used a K-by-T generic NFA | Added `implication_delay_window`; Yosys 0.66 reports 19 generic cells for the reporter-compatible `proc; opt; stat` view and 25 generic cells for the repository regression's later post-techmap view.  These are different pass pipelines; the regression keeps its `<=40` ceiling, and neither count is target-library PPA or industrial evidence. |
 | F-03 | P0 | NFA `or` used fake unconditional fork edges that consumed a cycle | Same-cycle union start expansion plus short-branch simulation and independent BMC miter. |
 | F-04 | P0 | Multi-cycle `within` aligned starts and accepted at inner completion | Replaced by waiting/running/done containment NFA; late inner starts and outer-end completion covered by simulation and independent BMC. |
 | F-05 | P1 | Multi-cycle `and` forgot an early branch completion | Added later-endpoint product with done-state families; simulation and BMC miter added. |
@@ -54,7 +55,10 @@ fix commit is pushed and independently replayed.
   covers lower bounds 1 and 2, arbitrary overlapping starts, pass, fail,
   active, attempt evidence, disable output, and overflow.
 - Generated RTL catalog entry, strict Verilator lint, Yosys synthesis smoke,
-  and an explicit area ceiling for the issue-2 shape.
+  and an explicit area ceiling for the issue-2 shape.  Under Yosys 0.66 the
+  reporter-compatible `proc; opt; stat` view records 19 generic cells, while
+  the repository regression's later post-techmap view records 25; the distinct
+  pipelines are not interchangeable, and neither is target-library PPA.
 - Three reviewed RTL mutants for lower-bound masking, satisfied-attempt
   retirement, and max-cycle ACK/fail precedence; all are killed.
 
@@ -84,6 +88,7 @@ fix commit is pushed and independently replayed.
 3. No JasperGold or other commercial reference execution has occurred.  Local
    open-source proofs materially improve confidence but do not replace the
    planned independent commercial pilot.
-4. Remote CI/nightly results for the eventual fix commit do not exist until the
-   focused changes are committed and pushed.  Do not use the local working-tree
-   results as remote same-SHA evidence.
+4. Remote CI, differential-nightly, and Full Formal evidence for the frozen
+   release SHA remains pending until Task 3 pushes that exact commit and all
+   three workflows succeed with matching `headSha`.  Do not use the local
+   working-tree results as remote same-SHA evidence.
